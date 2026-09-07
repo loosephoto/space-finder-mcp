@@ -1,0 +1,36 @@
+[project]
+name = "space-finder-mcp"
+version = "0.1.0"
+license = "MIT"
+license-files = ["LICENSE"]
+description = "宇宙・天文データを横断検索・表示する MCP サーバー（画像・動画・音声・逆引き歴史Q&A・ロケット打ち上げ）"
+readme = "README.md"
+requires-python = ">=3.11"
+keywords = ["mcp", "model-context-protocol", "space", "astronomy", "nasa", "satellite", "space-api", "ai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "mcp<2",
+    "requests>=2.34.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/loosephoto/space-finder-mcp"
+Repository = "https://github.com/loosephoto/space-finder-mcp"
+Documentation = "https://github.com/loosephoto/space-finder-mcp#readme"
+
+[project.scripts]
+space-finder-mcp = "space_finder_mcp:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
