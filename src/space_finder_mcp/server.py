@@ -28,6 +28,14 @@ from . import donki as _donki
 from . import stac_search as _stac
 from . import iss as _iss
 from . import oscar as _oscar
+from . import cnsa as _cnsa
+from . import tiangong as _tiangong
+from . import power as _power
+from . import eso as _eso
+from . import cadc as _cadc
+from . import skyfield_pos as _sky
+from . import news as _news
+from . import mars_rover as _mars
 
 mcp = FastMCP("Space Finder MCP")
 
@@ -37,6 +45,32 @@ mcp.tool()(reverse_lookup)
 
 # ---- ロケット打ち上げ (Launch Library 2, 認証なし) ----
 mcp.tool()(_launch.upcoming_launches)
+mcp.tool()(_launch.china_launches)
+mcp.tool()(_launch.russia_launches)
+
+# ---- 天宮 中国宇宙ステーション位置 (CelesTrak TLE + SGP4, 認証不要) ----
+mcp.tool()(_tiangong.tiangong_now)
+
+
+# ---- NASA POWER 気候・太陽エネルギー (認証不要) ----
+mcp.tool()(_power.power_climate)
+
+
+# ---- 天文観測データ (ESO パラナル / CADC カナダ) ----
+mcp.tool()(_eso.eso_seeing)
+mcp.tool()(_cadc.cadc_observations)
+
+
+# ---- 天体位置・星座 (Skyfield, 認証不要・ローカル計算) ----
+mcp.tool()(_sky.constellation_now)
+
+
+# ---- 天文ニュース (Sky & Telescope RSS, ブラウザUAでWAF回避) ----
+mcp.tool()(_news.astronomy_news)
+
+
+# ---- 火星探査ローバー状況 (Mars Weather, 認証不要) ----
+mcp.tool()(_mars.mars_rover_status)
 
 # ---- NASA (APIキー要。環境変数 NASA_API_KEY があれば使う) ----
 def _nasa_apod(date: Optional[str] = None) -> str:
@@ -108,3 +142,7 @@ mcp.tool()(_iss.iss_now)
 
 # ---- WMO OSCAR 衛星カタログ (認証不要) ----
 mcp.tool()(_oscar.satellite_status)
+
+
+# ---- 中国 CNSA 系衛星データポータル (NSMC/CNSA-GEO/CRESDA, 到達性+概要) ----
+mcp.tool()(_cnsa.cnsa_status)

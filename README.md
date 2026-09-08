@@ -13,21 +13,19 @@
 - **画像・動画・音声をそのまま返せる** — 画像はチャット内にインライン表示、音声・動画は再生URLを返却
 - **tokyo-transit方式のJSON応答** — 人間向け表示（`content`）とLLM向け純粋JSON（`structuredContent`）を分離し、情報を失わずに構造化データを渡せる
 - **認証不要のツールが大半** — APIキーの管理なしですぐ動く（NASAの一部ツールのみ任意キー、ESA/Copernicus のダウンロードは任意のOAuth2クレデンシャル）
-- **他国の宇宙機関データに対応** — インド ISRO・欧州 ESA/Copernicus・日本 JAXA・カナダ CSA・ブラジル INPE・英国 EO DataHub・フランス CNES・全衛星軌道(CelesTrak)・EO Dashboard(NASA/ESA/JAXA共同) を横断検索
+- **他国の宇宙機関データに対応** — インド ISRO・欧州 ESA/Copernicus・日本 JAXA・カナダ CSA・ブラジル INPE・英国 EO DataHub・フランス CNES・中国 CNSA 系ポータル・全衛星軌道(CelesTrak)・EO Dashboard(NASA/ESA/JAXA共同) を横断検索
 - **引用元を明示** — 科学的な内容には必ずデータソースへのリンクを併記
 
-## 🆕 直近の更新内容（v0.9.0）
+## 🆕 直近の更新内容（v0.17.0）
 
-**世界の宇宙機関・地球観測データを横断検索できるよう拡充**（v0.1.0 → v0.9.0）。
+**火星探査ローバーの状況表示を追加**（v0.16.0 → v0.17.0）。
 
-- **他国の宇宙機関データ**: インド ISRO・欧州 ESA/Copernicus・日本 JAXA・カナダ CSA・ブラジル INPE・英国 EO DataHub・フランス CNES
-- **衛星軌道・位置**: CelesTrak（全衛星TLE）・Open Notify（ISS現在位置＋Googleマップ）
-- **地球観測カタログ**: EO Dashboard（NASA/ESA/JAXA共同 173データセット）・AWS Earth Search STAC（Sentinel/Landsat/NAIP）
-- **宇宙天気**: NASA DONKI（太陽フレア・CME・地磁気嵐・太陽粒子現象）
-- **衛星運用情報**: WMO OSCAR（世界の気象・地球観測衛星の運用ステータス）
-- **天体観測サポート**: Open-Meteo（観測に最適な夜間時間帯の予報）
+- **`mars_rover_status`**: キュリオシティ（MSL）火星探査ローバーの現在の状況を表示（ソル・地球日付・季節・天候・気温・気圧、着陸地点）。NASA Mars Weather API で**認証不要**。
+- NASAの **Mars Rover Photos API（写真）はアーカイブ（廃止）済み**のため、写真は取得しない設計。`iss_now`（ISS位置）の火星版として状況表示に特化。
 
-登録ツールは **27本**。認証不要のツールが大半です。
+登録ツールは **37本**。認証不要のツールが大半です。
+
+> **廃止確認API**: Mars Rover Photos API は NASA 公式サイトで「archived」と明記（2026-09確認）。代わりに認証不要の Mars Weather API（mars.nasa.gov/rss/api）で状況・天気を提供。
 
 ## 📦 インストール
 
@@ -103,12 +101,14 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 
 ## 🛠️ ツール一覧
 
-登録ツールは **27本**（他国の宇宙機関データ 12本＋天体観測用天気 1本＋EO Dashboard 2本＋宇宙天気 1本＋AWS STAC 2本＋ISS位置 1本＋WMO OSCAR 1本）。すべて動作検証済みです。
+登録ツールは **37本**（他国の宇宙機関データ 15本＋火星探査ローバー状況 1本＋天文観測(ESO/CADC) 2本＋天文ニュース 1本＋天体観測用天気 1本＋天体位置・星座 1本＋NASA POWER気候 1本＋EO Dashboard 2本＋宇宙天気 1本＋AWS STAC 2本＋ISS位置 1本＋WMO OSCAR 1本＋中国/ロシア打ち上げ・天宮 3本）。すべて動作検証済みです。
 
 | ツール | できること | データ源 | 認証 |
 |--------|-----------|---------|------|
 | `reverse_lookup` | 「史上初の宇宙望遠鏡は？」等をカテゴリ+国+時期から解決 | Wikidata SPARQL | 不要 |
 | `upcoming_launches` | 今後のロケット打ち上げ予定（日時・機体・射場・状態） | Launch Library 2 | 不要 |
+| `china_launches` | 中国のロケット打ち上げ予定（長征・Shenzhou・LandSpace等・射場・ミッション） | Launch Library 2 | 不要 |
+| `russia_launches` | ロシア（Roscosmos）のロケット打ち上げ予定（ソユーズ・Progress・Luna等・射場・ミッション） | Launch Library 2 | 不要 |
 | `apod` | 今日（指定日）の天文写真 | NASA Open API | キー(任意) |
 | `neo_today` | 今日地球に接近する小惑星 | NASA Open API | キー(任意) |
 | `search_space_images` | 惑星・衛星の画像検索＋**チャット内インライン表示** | NASA Image & Video Library | 不要 |
@@ -126,7 +126,13 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `uk_stac_collections` | 英国EO DataHubのコレクション一覧 | UK EO DataHub STAC | 不要 |
 | `uk_stac_search` | 英国EO DataHubの衛星・気候データをSTAC検索 | UK EO DataHub STAC | 不要 |
 | `cnes_status` | フランスCNESのポータル（THEIA/GEODES）到達状態・概要 | CNES THEIA/GEODES | 不要(ダウンロードは要登録) |
-| `astronomy_weather` | 天体観測に最適な夜間の時間帯を予報（雲量・視程・風速・降水から判断） | Open-Meteo | 不要 |
+| `astronomy_weather` | 天体観測に最適な夜間の時間帯を予報（雲量・視程・風速・降水・**月相・月明かり**から判断） | Open-Meteo | 不要 |
+| `constellation_now` | 指定地点・時刻で太陽・月・惑星の高度・方位・星座を計算（観測可否判断） | Skyfield + JPL de421 | 不要 |
+| `astronomy_news` | Sky & Telescope の最新天文ニュース・「今週の星空ガイド」を取得（観測/ニュース絞込可） | Sky & Telescope RSS | 不要 |
+| `mars_rover_status` | 火星探査ローバー（キュリオシティ等）の現在の状況・天気・ソルを表示 | NASA Mars Weather | 不要 |
+| `power_climate` | 任意地点の過去の気候・太陽エネルギー統計（気温・日射量・風速） | NASA POWER | 不要 |
+| `eso_seeing` | ESO パラナル天文台（チリ, VLT）のリアルタイム大気コンディション（シーイング・可降水量・気象） | ESO ASM API | 不要 |
+| `cadc_observations` | CADC（カナダ天文データセンター）の観測データ検索（HST・ジェミニ等） | CADC TAP | 不要(画像DLは一部要登録) |
 | `eodashboard_collections` | EO Dashboard（NASA×ESA×JAXA共同）の173データセットをテーマ・機関・キーワードで検索 | EO Dashboard (GitHub catalog) | 不要 |
 | `eodashboard_detail` | EO Dashboardの1データセットの詳細（衛星・センサー・説明・画像・参照リンク） | EO Dashboard (GitHub catalog) | 不要 |
 | `space_weather` | NASA宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象） | NASA DONKI | キー(任意/DEMO_KEY可) |
@@ -134,6 +140,8 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `stac_search` | Sentinel-2 / Landsat / NAIP / DEM をSTAC検索（場所・日時・雲量） | AWS Earth Search STAC | 不要 |
 | `iss_now` | ISS（国際宇宙ステーション）の現在位置を取得し Googleマップリンクで表示 | Open Notify | 不要 |
 | `satellite_status` | 世界中の気象・地球観測衛星の運用ステータス・軌道・打ち上げ日（Roscosmos等） | WMO OSCAR | 不要 |
+| `cnsa_status` | 中国CNSA系衛星データポータル（風雲/NSMC・高分/CNSA-GEO・CBERS/CRESDA）の到達状態・概要＋認証不要の代替経路 | CNSA各公式ポータル | 不要(ダウンロードは要登録) |
+| `tiangong_now` | 天宮（Tiangong）中国宇宙ステーションの現在位置（SGP4伝播＋Googleマップ表示） | CelesTrak TLE + SGP4 | 不要 |
 
 ---
 
@@ -442,7 +450,7 @@ src/space_finder_mcp/
 ├── __init__.py          # main() → mcp.run()
 ├── server.py            # FastMCP サーバー定義・27ツール登録
 ├── wikidata_lookup.py   # reverse_lookup（逆引き歴史Q&A）
-├── launch.py            # upcoming_launches（ロケット打ち上げ）
+├── launch.py            # upcoming_launches / china_launches / russia_launches（ロケット打ち上げ・中国・ロシア）
 ├── nasa.py              # apod / neo_today（NASA日次）
 ├── media.py             # search_space_images / audio / videos（メディア検索）
 ├── isro.py              # isro_data（インド ISRO）
@@ -453,12 +461,20 @@ src/space_finder_mcp/
 ├── celestrak.py         # sat_tle（CelesTrak 全衛星軌道TLE）
 ├── uk_datahub.py        # uk_stac_collections / uk_stac_search（英国 EO DataHub）
 ├── cnes.py              # cnes_status（フランス CNES THEIA/GEODES）
-├── weather_astro.py     # astronomy_weather（天体観測用天気, Open-Meteo）
+├── weather_astro.py     # astronomy_weather（天体観測用天気, Open-Meteo, 月相対応）
+├── power.py             # power_climate（NASA POWER 気候・太陽エネルギー統計）
 ├── eodashboard.py       # eodashboard_collections / detail（EO Dashboard, NASA/ESA/JAXA）
 ├── donki.py             # space_weather（NASA 宇宙天気 DONKI）
 ├── stac_search.py       # stac_collections / stac_search（AWS Earth Search STAC）
 ├── iss.py               # iss_now（ISS 現在位置, Open Notify）
-└── oscar.py             # satellite_status（WMO OSCAR 衛星カタログ）
+├── oscar.py             # satellite_status（WMO OSCAR 衛星カタログ）
+├── cnsa.py              # cnsa_status（中国 CNSA 系衛星データポータル到達状態）
+├── tiangong.py          # tiangong_now（天宮 中国宇宙ステーション位置, CelesTrak TLE + SGP4）
+├── eso.py               # eso_seeing（ESO パラナル大気・シーイング）
+├── cadc.py              # cadc_observations（CADC カナダ天文観測データ）
+├── skyfield_pos.py      # constellation_now（天体位置・星座, Skyfield）
+├── news.py               # astronomy_news（Sky & Telescope 天文ニュース）
+└── mars_rover.py         # mars_rover_status（火星探査ローバー状況, Mars Weather）
 ```
 
 ---
@@ -466,8 +482,8 @@ src/space_finder_mcp/
 ## 📄 ライセンス / 注意
 
 - **ライセンス**: MIT License（本リポジトリの `LICENSE` を参照）
-- **データソース**: NASA・NASA Image & Video Library・Launch Library 2・Wikidata(Wikimedia)・ISRO・ESA Copernicus Data Space・JAXA Earth API・CSA Open Data・INPE BDC・CelesTrak・UK EO DataHub・CNES THEIA/GEODES・Open-Meteo(CC BY 4.0)・EO Dashboard・NASA DONKI・AWS Earth Search STAC・Open Notify・WMO OSCAR は、それぞれの利用条件・ライセンスに従います。
-- 宇宙データは科学的な内容を含みます。応答時は**引用元（Wikipedia / NASA / ISRO / ESA / JAXA / CSA 等）へのリンクを必ず表示**してください。
+- **データソース**: NASA・NASA Image & Video Library・Launch Library 2・Wikidata(Wikimedia)・ISRO・ESA Copernicus Data Space・JAXA Earth API・CSA Open Data・INPE BDC・CelesTrak・UK EO DataHub・CNES THEIA/GEODES・CNSA（NSMC/CNSA-GEO/CRESDA）・CelesTrak（天宮TLE）・ESO ASM・CADC・JPL/Skyfield・Open-Meteo(CC BY 4.0)・EO Dashboard・NASA DONKI・NASA POWER・AWS Earth Search STAC・Open Notify・WMO OSCAR は、それぞれの利用条件・ライセンスに従います。
+- 宇宙データは科学的な内容を含みます。応答時は**引用元（Wikipedia / NASA / ISRO / ESA / JAXA / CSA / CNSA 等）へのリンクを必ず表示**してください。
 - 画像・動画・音声の著作権・クレジット表記は各ソースの指示に従ってください（NASA素材は NASA Media Usage Guidelines を参照）。
 
 ---
@@ -484,6 +500,14 @@ src/space_finder_mcp/
 - [x] AWS Earth Search STAC（Sentinel/Landsat/NAIP 検索）
 - [x] ISS 現在位置（Open Notify + Googleマップ表示）
 - [x] WMO OSCAR 衛星カタログ（運用ステータス）
+- [x] 中国 CNSA 系衛星データポータル（風雲/高分/CBERS 到達状態）
+- [x] 中国のロケット打ち上げ（china_launches）・天宮リアルタイム位置（tiangong_now）
+- [x] 天体観測の強化（astronomy_weather に月相・月明かり統合）・NASA POWER 気候データ（power_climate）
+- [x] 世界の天文観測データ（ESO パラナルシーイング・CADC カナダ天文データ）
+- [x] ロシア（Roscosmos）の打ち上げデータ（russia_launches）
+- [x] 天体位置・星座計算（constellation_now, Skyfield + JPL）
+- [x] 天文ニュース（astronomy_news, Sky & Telescope RSS）
+- [x] 火星探査ローバー状況（mars_rover_status, Mars Weather）
 - [ ] 地球リアルタイム画像（EPIC/DSCOVR）
 - [ ] 惑星の3D地図（NASA Trek WMTS）
 - [ ] 多言語（en/zh）応答の全面対応

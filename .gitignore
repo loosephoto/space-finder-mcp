@@ -8,3 +8,9 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Skyfield のダウンロードデータ（JPL天体暦・星表・星座）
+de421.bsp
+hip_main.dat
+modern_st_index.json
+*.bsp

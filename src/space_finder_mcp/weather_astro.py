@@ -30,6 +30,42 @@ _WMO = {
 }
 
 
+
+# 月相（Open-Meteo は 0=new 〜 0.5=full 〜 1=new の分数で返す）
+def _moon_phase_ja(phase) -> str:
+    """月相の分数(0-1)を日本語の月齢ステージに変換する。
+
+    Open-Meteo の moon_phase は new moon=0, first quarter=0.25,
+    full moon=0.5, last quarter=0.75, そして 1 に戻って new を表す。
+    """
+    if phase is None:
+        return "不明"
+    p = float(phase)
+    # 照度（0=new 〜 100=満月）を基準にステージ判定
+    illum = _moon_illumination(phase)
+    if illum < 5:
+        return "新月🌑（観測好機・月明かりなし）"
+    if illum < 45:
+        return "三日月〜半月🌒（月明かり弱・観測可）"
+    if illum < 90:
+        return "半月〜満月手前🌓（月明かりあり）"
+    return "満月🌕（月明かり強・深宇宙天体は難）"
+
+
+def _moon_illumination(phase) -> float:
+    """月相の分数(0-1)を照度%に変換（0=new, 0.5=full）。"""
+    if phase is None:
+        return 0.0
+    p = float(phase)
+    illum = abs(p - 0.5) * 2
+    return round((1 - illum) * 100, 1)
+
+
+def _moon_illumination_ja(phase) -> str:
+    """月相の分数を照度の目安（%）に変換（0=new, 0.5=full）。"""
+    return f"{_moon_illumination(phase)}%"
+
+
 def _night_obs_windows(h: dict, daily: dict, max_cloud: float = 40.0,
                        max_wind: float = 15.0, min_vis: float = 10000.0) -> list[dict]:
     """夜間(is_day=0)かつ観測条件を満たす時間帯を抽出する。
@@ -106,7 +142,7 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
     params = {
         "latitude": lat, "longitude": lon,
         "hourly": "cloud_cover,visibility,is_day,precipitation_probability,weather_code,wind_speed_10m",
-        "daily": "sunrise,sunset",
+        "daily": "sunrise,sunset,moonrise,moonset,moon_phase",
         "timezone": "auto",
         "forecast_days": days,
     }
@@ -132,6 +168,20 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
     name = place or f"({lat},{lon})"
     times = h["time"]
 
+    # 月相・日月出没（観測可否の月明かり判断に使用）
+    moon = None
+    if daily.get("moon_phase"):
+        dt_len = len(daily.get("time", [1]))
+        moon = {
+            "phase_fraction": daily["moon_phase"][0],
+            "phase_ja": _moon_phase_ja(daily["moon_phase"][0]),
+            "illumination_pct": _moon_illumination_ja(daily["moon_phase"][0]),
+            "moonrise": (daily.get("moonrise") or [None] * dt_len)[0],
+            "moonset": (daily.get("moonset") or [None] * dt_len)[0],
+            "sunrise": (daily.get("sunrise") or [None] * dt_len)[0],
+            "sunset": (daily.get("sunset") or [None] * dt_len)[0],
+        }
+
     if not windows:
         lines = [f"🔭 **{name}** 今後{days}日間: 条件を満たす夜間の観測時間帯は見つかりませんでした（雲量≤{int(max_cloud)}%、風速≤15km/h）。"]
         # 最も雲が少ない夜間を1つ提示
@@ -140,14 +190,18 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
         if night_clouds:
             best = min(night_clouds, key=lambda x: x[1])
             lines.append(f"最もマシな時間帯: {best[0]} 頃 雲量 {best[1]}%")
+        if moon:
+            lines.append(f"🌙 今夜の月: {moon['phase_ja']}（照度 {moon['illumination_pct']}） 月の出 {moon['moonrise']} / 月の入り {moon['moonset']}")
         lines.append("🤖 【AIからのインテリジェントアドバイス】今夜は観測に厳しい条件です。雲の少ない日を改めて確認するか、プラネタリウムや月面観察など曇天でも楽しめる対象を検討してください。")
         return CallToolResult(
             content=[TextContent(type="text", text="\n".join(lines))],
             structuredContent={"place": name, "lat": lat, "lon": lon, "days": days,
-                               "max_cloud": max_cloud, "windows": [], "note": "no suitable window"},
+                               "max_cloud": max_cloud, "moon": moon, "windows": [], "note": "no suitable window"},
         )
 
     lines = [f"🔭 **{name}** 今後{days}日間の天体観測チャンス:"]
+    if moon:
+        lines.append(f"🌙 今夜の月: {moon['phase_ja']}（照度 {moon['illumination_pct']}） 月の出 {moon['moonrise']} / 月の入り {moon['moonset']}")
     for i, w in enumerate(windows[:6], 1):
         start = w["start"][5:16].replace("T", " ")
         end = w["end"][5:16].replace("T", " ")
@@ -172,7 +226,7 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
     return CallToolResult(
         content=[TextContent(type="text", text="\n".join(lines))],
         structuredContent={"place": name, "lat": lat, "lon": lon, "days": days,
-                           "max_cloud": max_cloud, "windows_count": len(windows),
+                           "max_cloud": max_cloud, "moon": moon, "windows_count": len(windows),
                            "windows": [{"start": w["start"], "end": w["end"], "hours": len(w["hours"]),
                                         "min_cloud": w["min_cloud"], "max_cloud": w["max_cloud"]} for w in windows[:10]],
                            "hourly": details},
