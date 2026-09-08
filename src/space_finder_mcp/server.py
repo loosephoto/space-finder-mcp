@@ -14,6 +14,20 @@ from .wikidata_lookup import reverse_lookup
 from . import nasa as _nasa
 from . import launch as _launch
 from . import media as _media
+from . import isro as _isro
+from . import copernicus as _copernicus
+from . import jaxa as _jaxa
+from . import csa as _csa
+from . import inpe as _inpe
+from . import celestrak as _celestrak
+from . import uk_datahub as _uk
+from . import cnes as _cnes
+from . import weather_astro as _weather
+from . import eodashboard as _eodash
+from . import donki as _donki
+from . import stac_search as _stac
+from . import iss as _iss
+from . import oscar as _oscar
 
 mcp = FastMCP("Space Finder MCP")
 
@@ -42,3 +56,55 @@ mcp.tool(name="neo_today")(_nasa_neo_today)
 mcp.tool()(_media.search_space_images)
 mcp.tool()(_media.search_space_audio)
 mcp.tool()(_media.search_space_videos)
+
+
+# ---- 他国の宇宙機関 (ISRO/ESA-Copernicus/JAXA/CSA) ----
+# ISRO (インド, 認証不要)
+mcp.tool()(_isro.isro_data)
+# ESA Copernicus (欧州, 検索は認証不要。ダウンロードは OAuth2 環境変数)
+mcp.tool()(_copernicus.copernicus_collections)
+mcp.tool()(_copernicus.copernicus_search)
+# JAXA Earth (日本, 認証不要)
+mcp.tool()(_jaxa.jaxa_datasets)
+mcp.tool()(_jaxa.jaxa_dataset_search)
+# CSA (カナダ, 認証不要)
+mcp.tool()(_csa.csa_dataset_search)
+
+
+# ---- さらに調査で確認した他国の宇宙機関 ----
+# ブラジル INPE (BDC STAC, 認証不要)
+mcp.tool()(_inpe.inpe_collections)
+mcp.tool()(_inpe.inpe_search)
+# CelesTrak (全世界の衛星軌道要素TLE, 認証不要)
+mcp.tool()(_celestrak.sat_tle)
+# 英国 EO DataHub (STAC, 公開カタログは認証不要)
+mcp.tool()(_uk.uk_stac_search)
+mcp.tool()(_uk.uk_stac_collections)
+# フランス CNES (THEIA/GEODES ポータル到達確認)
+mcp.tool()(_cnes.cnes_status)
+
+
+# ---- 天体観測用天気 (Open-Meteo, 認証不要) ----
+mcp.tool()(_weather.astronomy_weather)
+
+
+# ---- EO Dashboard (NASA/ESA/JAXA 共同地球観測カタログ, 認証不要) ----
+mcp.tool()(_eodash.eodashboard_collections)
+mcp.tool()(_eodash.eodashboard_detail)
+
+
+# ---- 宇宙天気 (NASA DONKI, キーは NASA_API_KEY 任意) ----
+mcp.tool()(_donki.space_weather)
+
+
+# ---- AWS Earth Search STAC (Sentinel/Landsat/NAIP, 認証不要) ----
+mcp.tool()(_stac.stac_collections)
+mcp.tool()(_stac.stac_search)
+
+
+# ---- ISS 現在位置 (Open Notify, 認証不要) ----
+mcp.tool()(_iss.iss_now)
+
+
+# ---- WMO OSCAR 衛星カタログ (認証不要) ----
+mcp.tool()(_oscar.satellite_status)
