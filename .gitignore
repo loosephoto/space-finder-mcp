@@ -14,3 +14,6 @@ de421.bsp
 hip_main.dat
 modern_st_index.json
 *.bsp
+
+# ローカル音声資産（コード未参照）
+sputnik_beep.wav

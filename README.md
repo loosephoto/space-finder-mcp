@@ -16,16 +16,18 @@
 - **他国の宇宙機関データに対応** — インド ISRO・欧州 ESA/Copernicus・日本 JAXA・カナダ CSA・ブラジル INPE・英国 EO DataHub・フランス CNES・中国 CNSA 系ポータル・全衛星軌道(CelesTrak)・EO Dashboard(NASA/ESA/JAXA共同) を横断検索
 - **引用元を明示** — 科学的な内容には必ずデータソースへのリンクを併記
 
-## 🆕 直近の更新内容（v0.17.0）
+## 🆕 直近の更新内容（v0.20.0）
 
-**火星探査ローバーの状況表示を追加**（v0.16.0 → v0.17.0）。
+**電波天文・画像合成・火星ローバー位置マップを追加**（v0.17.0 → v0.20.0）。
 
-- **`mars_rover_status`**: キュリオシティ（MSL）火星探査ローバーの現在の状況を表示（ソル・地球日付・季節・天候・気温・気圧、着陸地点）。NASA Mars Weather API で**認証不要**。
-- NASAの **Mars Rover Photos API（写真）はアーカイブ（廃止）済み**のため、写真は取得しない設計。`iss_now`（ISS位置）の火星版として状況表示に特化。
+- **`alma_search`**: ALMA（アルマ望遠鏡）科学アーカイブの観測データを検索。NAOJ 東アジア鏡の IVOA TAP 経由で、天体名・座標・受信バンドから観測メタデータを取得。**認証不要**。
+- **`radio_sources_now`**: オープンソース教育用電波干渉計 TART の可視電波源カタログから、指定観測地で**いま観測できる電波源**（GNSS・静止衛星等）を仰角順に表示。**認証不要**。
+- **`sky_map_with_satellites`**: 東京等の空に**太陽系の惑星と人工衛星**を重ねた画像を返す。天体位置は JPL de421 + Skyfield、衛星は CelesTrak TLE + SGP4 で実測。`engine` で **matplotlib正確版**（科学用）と **Pillow簡易版**（視認性重視・学生向け）を選択可能。画像はインライン表示。**認証不要**。
+- **`mars_rover_location_map`**: 火星探査ローバー（パーサヴィアランス/キュリオシティ）の**現在地を火星地図の中心に示した画像**を返す。NASA MMGIS で現在地(緯度経度)・走行経路、NASA Trek WMTS（等角図法）で火星地図タイルを取得し、走行経路・着陸地点・現在地を合成。ローバーを常に画像中心に配置。**認証不要**。
 
-登録ツールは **37本**。認証不要のツールが大半です。
+登録ツールは **41本**。認証不要のツールが大半です。
 
-> **廃止確認API**: Mars Rover Photos API は NASA 公式サイトで「archived」と明記（2026-09確認）。代わりに認証不要の Mars Weather API（mars.nasa.gov/rss/api）で状況・天気を提供。
+> **JVO 停止中（2026-09 確認）**: 国立天文台の JVO（日本仮想天文台）は 8/10 からのセキュリティ事故に伴い全サービスを停止中。停止中のため本 MCP では未採用。ALMA データは稼働中の **ALMA Science Archive 東アジア鏡（NAOJ）** を利用しています。
 
 ## 📦 インストール
 
@@ -101,7 +103,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 
 ## 🛠️ ツール一覧
 
-登録ツールは **37本**（他国の宇宙機関データ 15本＋火星探査ローバー状況 1本＋天文観測(ESO/CADC) 2本＋天文ニュース 1本＋天体観測用天気 1本＋天体位置・星座 1本＋NASA POWER気候 1本＋EO Dashboard 2本＋宇宙天気 1本＋AWS STAC 2本＋ISS位置 1本＋WMO OSCAR 1本＋中国/ロシア打ち上げ・天宮 3本）。すべて動作検証済みです。
+登録ツールは **41本**（他国の宇宙機関データ 15本＋火星探査ローバー 2本＋天文観測(ESO/CADC/ALMA) 3本＋電波望遠鏡(TART) 1本＋天文ニュース 1本＋天体観測用天気 1本＋天体位置・星座 1本＋星図合成 1本＋NASA POWER気候 1本＋EO Dashboard 2本＋宇宙天気 1本＋AWS STAC 2本＋ISS位置 1本＋WMO OSCAR 1本＋中国/ロシア打ち上げ・天宮 3本＋メディア/逆引き 4本）。すべて動作検証済みです。
 
 | ツール | できること | データ源 | 認証 |
 |--------|-----------|---------|------|
@@ -133,6 +135,10 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `power_climate` | 任意地点の過去の気候・太陽エネルギー統計（気温・日射量・風速） | NASA POWER | 不要 |
 | `eso_seeing` | ESO パラナル天文台（チリ, VLT）のリアルタイム大気コンディション（シーイング・可降水量・気象） | ESO ASM API | 不要 |
 | `cadc_observations` | CADC（カナダ天文データセンター）の観測データ検索（HST・ジェミニ等） | CADC TAP | 不要(画像DLは一部要登録) |
+| `alma_search` | ALMA（アルマ望遠鏡）科学アーカイブの観測データ検索（観測対象・座標・周波数帯・公開/要権限） | ALMA Science Archive (NAOJ, IVOA TAP) | 不要 |
+| `radio_sources_now` | TART オープン電波望遠鏡が「いま観測できる電波源」（GNSS・静止衛星等）を仰角順に表示 | TART source catalog (NZ) | 不要 |
+| `sky_map_with_satellites` | 指定地の空に太陽系の惑星と人工衛星を重ねた画像（matplotlib正確版/Pillow簡易版を選択） | JPL de421+Skyfield / CelesTrak+SGP4 | 不要 |
+| `mars_rover_location_map` | 火星探査ローバーの現在地を火星地図中心に示した画像（走行経路・着陸点） | NASA MMGIS + Trek WMTS | 不要 |
 | `eodashboard_collections` | EO Dashboard（NASA×ESA×JAXA共同）の173データセットをテーマ・機関・キーワードで検索 | EO Dashboard (GitHub catalog) | 不要 |
 | `eodashboard_detail` | EO Dashboardの1データセットの詳細（衛星・センサー・説明・画像・参照リンク） | EO Dashboard (GitHub catalog) | 不要 |
 | `space_weather` | NASA宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象） | NASA DONKI | キー(任意/DEMO_KEY可) |
@@ -419,6 +425,58 @@ A: satellite_status()
 
 
 
+### 📡 `alma_search` — ALMA 電波観測データ検索
+
+ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカイブを、NAOJ が運用する東アジア鏡の IVOA TAP 経由で検索。`object_name`（例 `M100`, `HL Tau`）か `ra`/`dec`+`radius`、受信 `band` で絞り込み、観測メタデータ（観測対象・座標・周波数帯・プロポーザルID・公開/要権限）を返す。mm/サブmm の電波観測のため低温ガス・塵や惑星系形成領域が対象。
+
+> メタデータ検索は認証不要。`data_rights=Public` の FITS は ALMA アーカイブから取得可（`Restricted` は元プロポーザル権限者のみ）。
+
+```json
+{"observatory": "ALMA", "count": 8, "public": 8, "restricted": 0,
+ "records": [{"target_name": "M100", "band": "3", "frequency_ghz": "100–104 GHz",
+              "data_rights": "Public", "proposal_id": "2011.0.00004.SV", ...}]}
+```
+
+### 📡 `radio_sources_now` — TART 電波望遠鏡の可視電波源
+
+オープンソースで開発公開されている教育用電波干渉計 **TART**（NZ）の可視電波源カタログから、指定した観測地（`lat`/`lon`）で地平線より上にある電波源を取得。返るのは主に GNSS・放送・静止通信衛星で、`name`・仰角`el`・方位角`az`・距離・フラックス密度`jy` を持つ。電波天文・衛星追尾の学習に最適。
+
+> `lat`/`lon` 省略時は TART 本体のある NZ（ダニーデン）基準。可視性（強度）API は 2026-09 時点で応答停止のため未使用。
+
+```json
+{"observatory": "TART", "count": 15,
+ "sources": [{"name": "GSAT0232 (GALILEO 32)", "elevation_deg": 77.9,
+              "azimuth_deg": 63.1, "range_km": 23342, "flux_density_jy": 1500000}, ...]}
+```
+
+
+### 🗺️ `sky_map_with_satellites` — 星空マップ＋人工衛星（描画エンジン選択式）
+
+指定した観測地・時刻の空に、太陽系の惑星・月と人工衛星の現在位置を重ねた**画像**を返す。天体位置は JPL de421 + Skyfield、衛星位置は CelesTrak TLE + SGP4 で実測計算（全てローカル/認証不要）。
+
+`engine` で描画を選択:
+- `"simple"`（既定）: **Pillow** による実写背景の簡易合成。惑星を種類別アイコン（岩石惑星=各色、木星=縞、土星=環）、衛星を赤い発光マーカー＋軌道予測線で描く。**学生・観賞用途で視認性重視**。
+- `"accurate"`: **matplotlib** による正確な星図。方位・仰角グリッド、軌道予測線を精確表示（科学・詳細用途）。
+
+画像は content に base64 でインライン表示、座標一覧は structuredContent に JSON。
+
+```json
+{"time_utc": "...", "engine": "simple (Pillow)",
+ "planets": {"月": {"az":..,"alt":..}, ...},
+ "satellites": {"ISS (国際宇宙ステーション)": {"az":..,"alt":..,"trail":[...]}, ...}}
+```
+
+### 🔴 `mars_rover_location_map` — 火星ローバー現在地マップ
+
+火星探査ローバー（パーサヴィアランス/キュリオシティ）の**現在地を火星地図の中心に示した画像**を返す。NASA MMGIS から現在地(緯度経度)と走行経路、NASA Trek WMTS（等角図法）から火星の地図タイルを取得し、走行経路(橙線)・着陸地点(青●)・現在地(赤●)を合成。**ローバーを常に画像中心**に配置。
+
+`zoom`(5-7)・`span_deg`(画角)・`out_px`(出力サイズ) で精度と軽量さを調整できる（例: `zoom=6` で高速・軽量）。タイルは並列取得で高速化。天気・ソル情報も併記。認証不要。
+
+```json
+{"rover": "perseverance", "lat": 18.437, "lon": 77.232, "sol": 1965,
+ "dist_km": 45.11, "source": "NASA MMGIS + Trek WMTS"}
+```
+
 ## 🔐 応答方式（tokyo-transit 方式）
 
 全ツールは **`CallToolResult`** を使い、次の2層で応答します。
@@ -472,9 +530,12 @@ src/space_finder_mcp/
 ├── tiangong.py          # tiangong_now（天宮 中国宇宙ステーション位置, CelesTrak TLE + SGP4）
 ├── eso.py               # eso_seeing（ESO パラナル大気・シーイング）
 ├── cadc.py              # cadc_observations（CADC カナダ天文観測データ）
+├── alma.py              # alma_search（ALMA 電波観測データ, Science Archive TAP）
+├── tart.py              # radio_sources_now（TART オープン電波望遠鏡 可視電波源）
 ├── skyfield_pos.py      # constellation_now（天体位置・星座, Skyfield）
 ├── news.py               # astronomy_news（Sky & Telescope 天文ニュース）
-└── mars_rover.py         # mars_rover_status（火星探査ローバー状況, Mars Weather）
+├── sky_overlay.py        # sky_map_with_satellites（星図+人工衛星, matplotlib/Pillow）
+└── mars_rover.py         # mars_rover_status / mars_rover_location_map（火星ローバー）
 ```
 
 ---
@@ -482,7 +543,7 @@ src/space_finder_mcp/
 ## 📄 ライセンス / 注意
 
 - **ライセンス**: MIT License（本リポジトリの `LICENSE` を参照）
-- **データソース**: NASA・NASA Image & Video Library・Launch Library 2・Wikidata(Wikimedia)・ISRO・ESA Copernicus Data Space・JAXA Earth API・CSA Open Data・INPE BDC・CelesTrak・UK EO DataHub・CNES THEIA/GEODES・CNSA（NSMC/CNSA-GEO/CRESDA）・CelesTrak（天宮TLE）・ESO ASM・CADC・JPL/Skyfield・Open-Meteo(CC BY 4.0)・EO Dashboard・NASA DONKI・NASA POWER・AWS Earth Search STAC・Open Notify・WMO OSCAR は、それぞれの利用条件・ライセンスに従います。
+- **データソース**: NASA・NASA Image & Video Library・Launch Library 2・Wikidata(Wikimedia)・ISRO・ESA Copernicus Data Space・JAXA Earth API・CSA Open Data・INPE BDC・CelesTrak・UK EO DataHub・CNES THEIA/GEODES・CNSA（NSMC/CNSA-GEO/CRESDA）・CelesTrak（天宮TLE）・ESO ASM・ALMA Science Archive(NAOJ)・TART・CADC・JPL/Skyfield(de421)・NASA MMGIS・NASA Trek WMTS・Open-Meteo(CC BY 4.0)・EO Dashboard・NASA DONKI・NASA POWER・AWS Earth Search STAC・Open Notify・WMO OSCAR は、それぞれの利用条件・ライセンスに従います。
 - 宇宙データは科学的な内容を含みます。応答時は**引用元（Wikipedia / NASA / ISRO / ESA / JAXA / CSA / CNSA 等）へのリンクを必ず表示**してください。
 - 画像・動画・音声の著作権・クレジット表記は各ソースの指示に従ってください（NASA素材は NASA Media Usage Guidelines を参照）。
 

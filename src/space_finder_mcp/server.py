@@ -36,6 +36,9 @@ from . import cadc as _cadc
 from . import skyfield_pos as _sky
 from . import news as _news
 from . import mars_rover as _mars
+from . import sky_overlay as _skyover
+from . import alma as _alma
+from . import tart as _tart
 
 mcp = FastMCP("Space Finder MCP")
 
@@ -60,6 +63,13 @@ mcp.tool()(_power.power_climate)
 mcp.tool()(_eso.eso_seeing)
 mcp.tool()(_cadc.cadc_observations)
 
+# ---- 電波天文 (ALMA Science Archive / TART, 認証不要) ----
+mcp.tool()(_alma.alma_search)
+mcp.tool()(_tart.radio_sources_now)
+
+# ---- 星空マップ＋人工衛星オーバーレイ (matplotlib/Pillow 選択式, 認証不要) ----
+mcp.tool()(_skyover.sky_map_with_satellites)
+
 
 # ---- 天体位置・星座 (Skyfield, 認証不要・ローカル計算) ----
 mcp.tool()(_sky.constellation_now)
@@ -71,6 +81,7 @@ mcp.tool()(_news.astronomy_news)
 
 # ---- 火星探査ローバー状況 (Mars Weather, 認証不要) ----
 mcp.tool()(_mars.mars_rover_status)
+mcp.tool()(_mars.mars_rover_location_map)
 
 # ---- NASA (APIキー要。環境変数 NASA_API_KEY があれば使う) ----
 def _nasa_apod(date: Optional[str] = None) -> str:

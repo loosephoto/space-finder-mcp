@@ -1,6 +1,6 @@
 [project]
 name = "space-finder-mcp"
-version = "0.17.0"
+version = "0.20.0"
 license = "MIT"
 license-files = ["LICENSE"]
 description = "宇宙・天文データを横断検索・表示する MCP サーバー（画像・動画・音声・逆引き歴史Q&A・ロケット打ち上げ）"
@@ -24,6 +24,8 @@ dependencies = [
     "sgp4>=2.21",
     "skyfield>=1.49",
     "pandas>=2.0",
+    "matplotlib>=3.11.1",
+    "pillow>=12.3.0",
 ]
 
 [project.urls]
