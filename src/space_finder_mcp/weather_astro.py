@@ -272,6 +272,21 @@ _JA_PLACES: dict[str, str] = {
     "マウナケア": "Mauna Kea", "チリ": "Chile", "アタカマ": "Atacama",
     "リオデジャネイロ": "Rio de Janeiro", "モスクワ": "Moscow", "ケープタウン": "Cape Town",
     "ホノルル": "Honolulu", "アテネ": "Athens", "ローマ": "Rome",
+    "アンカレジ": "Anchorage", "アブダビ": "Abu Dhabi", "ドバイ": "Dubai",
+    "バンクーバー": "Vancouver", "トロント": "Toronto", "メキシコシティ": "Mexico City",
+    "ブラジリア": "Brasilia", "ブエノスアイレス": "Buenos Aires", "リマ": "Lima",
+    "カイロ": "Cairo", "ナイロビ": "Nairobi", "ヨハネスブルグ": "Johannesburg",
+    "デリー": "New Delhi", "ムンバイ": "Mumbai", "ジャカルタ": "Jakarta",
+    "マニラ": "Manila", "クアラルンプール": "Kuala Lumpur", "台北": "Taipei",
+    "香港": "Hong Kong", "ソウル": "Seoul", "平壌": "Pyongyang", "ウラジオストク": "Vladivostok",
+    "ストックホルム": "Stockholm", "オスロ": "Oslo", "ヘルシンキ": "Helsinki",
+    "コペンハーゲン": "Copenhagen", "ベルリン": "Berlin", "ウィーン": "Vienna",
+    "チューリッヒ": "Zurich", "ジュネーブ": "Geneva", "アムステルダム": "Amsterdam",
+    "ブリュッセル": "Brussels", "マドリード": "Madrid", "バルセロナ": "Barcelona",
+    "リスボン": "Lisbon", "アテネ": "Athens", "イスタンブール": "Istanbul",
+    "モスクワ": "Moscow", "サンクトペテルブルク": "Saint Petersburg",
+    "オークランド": "Auckland", "ウェリントン": "Wellington",
+    "ホノルル": "Honolulu", "アンカレッジ": "Anchorage",
 }
 
 
@@ -300,4 +315,40 @@ def _geocode(place: str) -> Optional[dict]:
                         "name": f"{it.get('name')}, {it.get('country')}"}
         except requests.RequestException:
             continue
+    # Open-Meteo で解決できなかった地名（施設・複合地名・曖昧な都市）は Nominatim へ
+    return _geocode_nominatim(place)
+
+
+def _geocode_nominatim(place: str) -> Optional[dict]:
+    """Open-Meteo で解決できなかった地名・施設名・天文台名を Nominatim(OSM) で解決する。
+
+    Open-Meteo は都市名に強いが、複合地名（"Santiago de Chile"）・同名都市の曖昧さ
+    （"Greenwich" は米国に多数）・施設/天文台名（"グリニッジ天文台"）に弱い。
+    Nominatim は建物・施設・日本語まで解決できるため、フォールバックとして使う。
+    利用条件 (1 req/s) を守るため、前回呼び出しから 1.1s 以上あけて実行する。
+    """
+    import time as _time
+    _last = getattr(_geocode_nominatim, "_last_call", 0.0)
+    wait = _last + 1.1 - _time.time()
+    if wait > 0:
+        _time.sleep(wait)
+    _geocode_nominatim._last_call = _time.time()
+    q = place.strip()
+    # Nominatim は日本語/英語どちらも処理できるが、Open-Meteo と同じ英語変換を先に試す
+    query = _JA_PLACES.get(q, q)
+    ua = {"User-Agent": "space-finder-mcp/0.22 (MCP; Open-Meteo/Nominatim geocode)"}
+    try:
+        r = requests.get("https://nominatim.openstreetmap.org/search",
+                         params={"q": query, "format": "json", "limit": 1,
+                                 "addressdetails": 1},
+                         headers=ua, timeout=20)
+        r.raise_for_status()
+        res = r.json()
+        if res:
+            it = res[0]
+            disp = it.get("display_name", it.get("name", q))
+            return {"latitude": float(it["lat"]), "longitude": float(it["lon"]),
+                    "name": disp}
+    except (requests.RequestException, KeyError, ValueError):
+        pass
     return None

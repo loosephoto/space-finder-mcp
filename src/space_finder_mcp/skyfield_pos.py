@@ -97,11 +97,20 @@ def constellation_now(latitude=None, longitude=None, place=None, time_utc=None):
         if match:
             latitude, longitude = match
         else:
-            return CallToolResult(
-                content=[TextContent(type="text", text="地名 " + place + " を既知テーブルで解決できませんでした。緯度経度を直接指定してください。")],
-                structuredContent={"error": "unknown place", "place": place,
-                                   "known": sorted(set(k for k in _KNOWN_COORDS))},
-            )
+            # 既知テーブルにない任意の地名・施設 → Open-Meteo/Nominatim でジオコーディング
+            try:
+                from .weather_astro import _geocode
+                g = _geocode(place)
+            except Exception:
+                g = None
+            if g:
+                latitude, longitude = g["latitude"], g["longitude"]
+            else:
+                return CallToolResult(
+                    content=[TextContent(type="text", text="地名 " + place + " を解決できませんでした。緯度経度を直接指定してください。")],
+                    structuredContent={"error": "unknown place", "place": place,
+                                       "known": sorted(set(k for k in _KNOWN_COORDS))},
+                )
     if latitude is None or longitude is None:
         return CallToolResult(
             content=[TextContent(type="text", text="観測地を指定してください。place（例 東京/Tokyo）または latitude/longitude。")],

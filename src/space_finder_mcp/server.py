@@ -39,6 +39,8 @@ from . import mars_rover as _mars
 from . import sky_overlay as _skyover
 from . import alma as _alma
 from . import tart as _tart
+from . import solar_eclipse as _eclipse
+from . import solar_system as _solarsys
 
 mcp = FastMCP("Space Finder MCP")
 
@@ -69,6 +71,12 @@ mcp.tool()(_tart.radio_sources_now)
 
 # ---- 星空マップ＋人工衛星オーバーレイ (matplotlib/Pillow 選択式, 認証不要) ----
 mcp.tool()(_skyover.sky_map_with_satellites)
+
+# ---- 太陽系俯瞰図（太陽中心の惑星・小惑星位置合成, 認証不要） ----
+mcp.tool()(_solarsys.solar_system_now)
+
+# ---- 日食時系列パネル（太陽を月が欠く過程, JPL DE421+Skyfield, 認証不要） ----
+mcp.tool()(_eclipse.solar_eclipse_series)
 
 
 # ---- 天体位置・星座 (Skyfield, 認証不要・ローカル計算) ----

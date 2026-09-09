@@ -95,13 +95,21 @@ def _fetch_tle(catnr):
 
 
 def _resolve_place(place, lat, lon):
-    """place 文字列(既知地名) or lat/lon 数値から (lat, lon)。"""
+    """place 文字列 or lat/lon 数値から (lat, lon)。任意の地名は Open-Meteo でジオコーディング。"""
     if lat is not None and lon is not None:
         return float(lat), float(lon)
     if place:
         key = str(place).strip().lower()
         if key in _KNOWN_COORDS:
             return _KNOWN_COORDS[key]
+        # 既知リストにない任意の地名 → オンラインで緯度経度を解決（キャッシュ込み）
+        try:
+            from .weather_astro import _geocode
+            g = _geocode(place)
+            if g:
+                return float(g["latitude"]), float(g["longitude"])
+        except Exception:
+            pass
     return None
 
 
