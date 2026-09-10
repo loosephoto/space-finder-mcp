@@ -112,7 +112,8 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
         name: 衛星名または省略名（例 "iss", "hubble", "hinode"）。既知の衛星は
             ID に解決、それ以外は TLE を直接検索。
         when: 観測時刻 ISO8601（例 "2026-09-10T03:30:00Z"）。省略で現在。
-        minutes: 現在位置の前後何分の軌道を表示するか（既定 45、最大 120）。
+        minutes: 現在位置の前後何分の軌道を表示するか（既定 45、最大 1440=24時間）。
+            準天頂衛星(みちびき)の8の字軌道を見るには 720 前後を指定。
         step: トレイルの時間刻み（分。既定 1、最小 0.5）。小さいほど滑らか。
         out_px: 出力画像の幅ピクセル（既定 1200、最大 2048）。
     """
@@ -148,7 +149,7 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
                 structuredContent={"error": str(e), "source": "celestrak.org"},
             )
 
-    minutes = max(5, min(int(minutes), 120))
+    minutes = max(5, min(int(minutes), 1440))
     step = max(0.5, min(float(step), 10.0))
     out_px = max(600, min(int(out_px), 2048))
 

@@ -16,16 +16,17 @@
 - **他国の宇宙機関データに対応** — インド ISRO・欧州 ESA/Copernicus・日本 JAXA・カナダ CSA・ブラジル INPE・英国 EO DataHub・フランス CNES・中国 CNSA 系ポータル・全衛星軌道(CelesTrak)・EO Dashboard(NASA/ESA/JAXA共同) を横断検索
 - **引用元を明示** — 科学的な内容には必ずデータソースへのリンクを併記
 
-## 🆕 直近の更新内容（v0.23.0）
+## 🆕 直近の更新内容（v0.24.0）
 
-**任意の人工衛星の地上軌道を地球地図にプロットするツール `sat_ground_track` を追加**（v0.23.0）。
+**月周回機の月面位置・軌道を月面地図に表示するツール `lunar_track` を追加**（v0.24.0）。
 
-- **`sat_ground_track`**: 指定した人工衛星（ISS・ひので・ハッブル・天宮・気象衛星等）の**現在位置（真下の点）と地上軌道**を、NASA Blue Marble の地球地図に重ねて画像化。CelesTrak の最新 TLE を Skyfield（SGP4）で伝播し、緯度経度・高度（km）・速度（km/h）を実測計算。軌道トレイルは 1 分刻み（`step` 指定可）で描画し、経度±180°境界で線を分割するため世界地図上で正確に表示。`norad_id` または衛星名で指定可能。
-  - 例:「ISSの現在位置を地球地図で」「ひのでの位置を地図で」「ハッブルの軌道」
-  - 精度: `subpoint()` は地球の自転・歳差・極運動を考慮した真の地上点を返す。現在地の緯度経度・高度・速度を `structuredContent` に JSON で返す。
-  - **認証不要**。地図は初回取得後にローカルキャッシュ。
+- **`lunar_track`**: 月周回機（LRO・ゲートウェイ等）の**月面での現在位置と軌道トレイル**を、NASA Trek の月面地図（LRO WAC モザイク）に重ねて画像化。JPL Horizons が返す月中心の状態ベクトルを **IAU 2015 月自転モデル**で月体固定座標（selenographic 緯度経度・高度）に変換して正確に計算。認証不要。
+  - 例:「LROの現在位置を月面地図で」「月周回機の位置」「ゲートウェイの月面軌道」
+  - **アルテミス計画対応**: 今後月軌道を周回する機体（ゲートウェイ等）が増えた際に、`MOON_CRAFT` テーブルへ JPL Horizons 天体IDを追加するだけで追跡可能。
+  - 過去ミッション（かぐや等）は運用終了のため丁寧に案内。
+- **`sat_ground_track` のトレイル上限を拡張**: 準天頂衛星（みちびき）の**8の字（アナレンマ）軌道**を表示できるよう、`minutes` の上限を24時間（1440分）に拡張。
 
-登録ツールは **44本**。認証不要のツールが大半です。
+登録ツールは **45本**。認証不要のツールが大半です。
 
 ## 📦 インストール
 
@@ -101,7 +102,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 
 ## 🛠️ ツール一覧
 
-登録ツールは **44本**（他国の宇宙機関データ 15本＋火星探査ローバー 2本＋天文観測(ESO/CADC/ALMA) 3本＋電波望遠鏡(TART) 1本＋天文ニュース 1本＋天体観測用天気 1本＋天体位置・星座 1本＋星図合成 1本＋太陽系俯瞰 1本＋日食時系列 1本＋NASA POWER気候 1本＋EO Dashboard 2本＋宇宙天気 1本＋AWS STAC 2本＋ISS位置 1本＋衛星地上軌道 1本＋WMO OSCAR 1本＋中国/ロシア打ち上げ・天宮 3本＋メディア/逆引き 4本）。すべて動作検証済みです。
+登録ツールは **45本**（他国の宇宙機関データ 15本＋火星探査ローバー 2本＋天文観測(ESO/CADC/ALMA) 3本＋電波望遠鏡(TART) 1本＋天文ニュース 1本＋天体観測用天気 1本＋天体位置・星座 1本＋星図合成 1本＋太陽系俯瞰 1本＋日食時系列 1本＋NASA POWER気候 1本＋EO Dashboard 2本＋宇宙天気 1本＋AWS STAC 2本＋ISS位置 1本＋衛星地上軌道 1本＋月周回機 1本＋WMO OSCAR 1本＋中国/ロシア打ち上げ・天宮 3本＋メディア/逆引き 4本）。すべて動作検証済みです。
 
 | ツール | できること | データ源 | 認証 |
 |--------|-----------|---------|------|
@@ -146,6 +147,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `stac_search` | Sentinel-2 / Landsat / NAIP / DEM をSTAC検索（場所・日時・雲量） | AWS Earth Search STAC | 不要 |
 | `iss_now` | ISS（国際宇宙ステーション）の現在位置を取得し Googleマップリンクで表示 | Open Notify | 不要 |
 | `sat_ground_track` | 任意の人工衛星（ISS・ひので・ハッブル等）の現在位置と地上軌道を地球地図にプロットした画像を返す。CelesTrak TLE + Skyfield(SGP4) で真下の点・高度・速度を計算し、NASA Blue Marble 地図に軌道トレイルを重ねる | CelesTrak + Skyfield + Blue Marble | 不要 |
+| `lunar_track` | 月周回機（LRO・ゲートウェイ等）の月面での現在位置と軌道トレイルを月面地図にプロットした画像を返す。JPL Horizons の状態ベクトルを IAU 月自転モデルで月面座標（selenographic 緯度経度・高度）に変換し、NASA Trek の月面タイル（LRO WAC）に重ねる。アルテミス計画の月軌道機追跡に対応 | JPL Horizons + NASA Trek | 不要 |
 | `satellite_status` | 世界中の気象・地球観測衛星の運用ステータス・軌道・打ち上げ日（Roscosmos等） | WMO OSCAR | 不要 |
 | `cnsa_status` | 中国CNSA系衛星データポータル（風雲/NSMC・高分/CNSA-GEO・CBERS/CRESDA）の到達状態・概要＋認証不要の代替経路 | CNSA各公式ポータル | 不要(ダウンロードは要登録) |
 | `tiangong_now` | 天宮（Tiangong）中国宇宙ステーションの現在位置（SGP4伝播＋Googleマップ表示） | CelesTrak TLE + SGP4 | 不要 |

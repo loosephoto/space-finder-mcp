@@ -43,6 +43,7 @@ from . import tart as _tart
 from . import solar_eclipse as _eclipse
 from . import solar_system as _solarsys
 from . import satellite_map as _satmap
+from . import lunar_map as _lunar
 
 mcp = FastMCP("Space Finder MCP")
 
@@ -162,6 +163,9 @@ mcp.tool()(_iss.iss_now)
 
 # ---- 任意衛星の地上軌道マップ（CelesTrak TLE + SGP4 + Blue Marble, 認証不要）----
 mcp.tool()(_satmap.sat_ground_track)
+
+# ---- 月周回機の月面軌道マップ（JPL Horizons + IAU月自転, 認証不要）----
+mcp.tool()(_lunar.lunar_track)
 
 
 # ---- WMO OSCAR 衛星カタログ (認証不要) ----
