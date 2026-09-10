@@ -42,6 +42,7 @@ from . import alma as _alma
 from . import tart as _tart
 from . import solar_eclipse as _eclipse
 from . import solar_system as _solarsys
+from . import satellite_map as _satmap
 
 mcp = FastMCP("Space Finder MCP")
 
@@ -158,6 +159,9 @@ mcp.tool()(_stac.stac_search)
 
 # ---- ISS 現在位置 (Open Notify, 認証不要) ----
 mcp.tool()(_iss.iss_now)
+
+# ---- 任意衛星の地上軌道マップ（CelesTrak TLE + SGP4 + Blue Marble, 認証不要）----
+mcp.tool()(_satmap.sat_ground_track)
 
 
 # ---- WMO OSCAR 衛星カタログ (認証不要) ----

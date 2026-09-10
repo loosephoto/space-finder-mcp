@@ -1,6 +1,6 @@
 [project]
 name = "space-finder-mcp"
-version = "0.22.1"
+version = "0.23.0"
 license = "MIT"
 license-files = ["LICENSE"]
 description = "宇宙・天文データを横断検索・表示する MCP サーバー（画像・動画・音声・逆引き歴史Q&A・ロケット打ち上げ）"
