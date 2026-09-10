@@ -9,6 +9,7 @@ import os
 from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import CallToolResult
 
 from .wikidata_lookup import reverse_lookup
 from . import nasa as _nasa
@@ -92,12 +93,12 @@ mcp.tool()(_mars.mars_rover_status)
 mcp.tool()(_mars.mars_rover_location_map)
 
 # ---- NASA (APIキー要。環境変数 NASA_API_KEY があれば使う) ----
-def _nasa_apod(date: Optional[str] = None) -> str:
+def _nasa_apod(date: Optional[str] = None) -> CallToolResult:
     """今日（または指定日）の NASA の今日の天文写真(APOD)を返す。NASA_API_KEY が必要。"""
     key = os.environ.get("NASA_API_KEY", "DEMO_KEY")
     return _nasa.apod(key, date)
 
-def _nasa_neo_today() -> str:
+def _nasa_neo_today() -> CallToolResult:
     """今日地球に接近する小惑星(NEO)を返す。NASA_API_KEY が必要。"""
     key = os.environ.get("NASA_API_KEY", "DEMO_KEY")
     return _nasa.neo_today(key)

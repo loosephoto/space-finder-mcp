@@ -10,12 +10,21 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import requests
+from functools import lru_cache
 from mcp.types import CallToolResult, TextContent
 from sgp4.api import Satrec, jday
 
 TLE_URL = "https://celestrak.org/NORAD/elements/gp.php?CATNR=48274&FORMAT=JSON"
 UA = {"User-Agent": "space-finder-mcp/0.11 (MCP; Tiangong live position)"}
 TIANGONG_NORAD = 48274
+
+
+@lru_cache(maxsize=1)
+def _fetch_tiangong_tle() -> list:
+    """天宮の最新TLEをCelesTrakから取得（セッション内キャッシュ）。TLEは数時間有効。"""
+    r = requests.get(TLE_URL, headers=UA, timeout=30)
+    r.raise_for_status()
+    return r.json()
 
 
 def _compute_position(tle_line1: str, tle_line2: str) -> dict:
@@ -53,9 +62,7 @@ def tiangong_now() -> CallToolResult:
         CallToolResult: 表示用サマリ + JSON。
     """
     try:
-        r = requests.get(TLE_URL, headers=UA, timeout=30)
-        r.raise_for_status()
-        rows = r.json()
+        rows = _fetch_tiangong_tle()
     except requests.RequestException as e:
         return CallToolResult(
             content=[TextContent(type="text", text=f"CelesTrak への接続に失敗しました: {e}")],

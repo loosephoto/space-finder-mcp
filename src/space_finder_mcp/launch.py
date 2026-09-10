@@ -8,25 +8,54 @@ from mcp.types import CallToolResult, TextContent
 
 LL2 = "https://ll.thespacedevs.com/2.3.0"
 
-def upcoming_launches(limit: int = 5) -> str:
+def upcoming_launches(limit: int = 5) -> CallToolResult:
     """今後予定されているロケット打ち上げの一覧を返す。
 
+    認証不要。content に表示用サマリ、structuredContent に JSON を返す。
+
     Args:
-        limit: 返す件数（既定 5）。
+        limit: 返す件数（既定 5、最大 15）。
     """
-    r = requests.get(f"{LL2}/launches/upcoming/", params={"limit": limit}, timeout=25)
-    r.raise_for_status()
-    d = r.json()
-    if not d.get("results"):
-        return "予定されている打ち上げが見つかりませんでした。"
+    limit = max(1, min(int(limit), 15))
+    params = {"limit": min(limit, 30), "ordering": "window_start"}
+    try:
+        r = requests.get(f"{LL2}/launches/upcoming/", params=params, timeout=25)
+        r.raise_for_status()
+        d = r.json()
+    except requests.RequestException as e:
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Launch Library 2 への接続に失敗しました: {e}")],
+            structuredContent={"error": str(e), "source": "ll.thespacedevs.com"},
+        )
+    rows = d.get("results", [])
+    if not rows:
+        return CallToolResult(
+            content=[TextContent(type="text", text="予定されている打ち上げが見つかりませんでした。")],
+            structuredContent={"total": 0, "results": []},
+        )
+    rows = rows[:limit]
+    records = []
     lines = ["今後のロケット打ち上げ:"]
-    for l in d["results"]:
+    for i, l in enumerate(rows, 1):
         name = l.get("name", "?")
         window = (l.get("window_start") or "")[:16].replace("T", " ")
-        status = l.get("status", {}).get("name", "?")
-        pad = l.get("pad", {}).get("location", {}).get("name", "?") if l.get("pad") else "?"
-        lines.append(f"- {name}  {window} UTC  [{status}]  {pad}")
-    return "\n".join(lines)
+        status = (l.get("status") or {}).get("name", "?")
+        pad = l.get("pad", {}) or {}
+        site = (pad.get("location", {}) or {}).get("name", "?")
+        launcher = (pad.get("launcher") or {}).get("name") or (l.get("rocket") or {}).get("configuration", {}).get("name", "?")
+        mission = (l.get("mission") or {}).get("description", "")
+        rec = {"name": name, "window_start_utc": window, "status": status,
+               "launch_site": site, "rocket": launcher}
+        records.append(rec)
+        lines.append(f"{i}. **{name}**  {window} UTC  [{status}]")
+        lines.append(f"   ロケット: {launcher} ／ 射場: {site}")
+        if mission:
+            lines.append(f"   ミッション: {mission[:90]}")
+    lines.append("出典: Launch Library 2 (ll.thespacedevs.com)")
+    return CallToolResult(
+        content=[TextContent(type="text", text="\n".join(lines))],
+        structuredContent={"shown": len(records), "results": records},
+    )
 
 
 def china_launches(limit: int = 8, status: Optional[str] = None) -> CallToolResult:

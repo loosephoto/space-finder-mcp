@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Optional
 
 import requests
+from mcp.types import CallToolResult, TextContent
 
 # Wikidata SPARQL エンドポイント
 SPARQL_ENDPOINT = "https://query.wikidata.org/sparql"
@@ -51,7 +52,7 @@ def reverse_lookup(
     limit: int = 5,
     order: str = "asc",
     language: str = "ja",
-) -> str:
+) -> CallToolResult:
     """逆引き歴史Q&A — カテゴリ+国 で絞り込んだ最初/記録の宇宙オブジェクトを Wikidata から探す。
 
     例: 「米国で最初に打ち上げた宇宙望遠鏡は?」→ category="宇宙望遠鏡", country="United States"
@@ -69,8 +70,10 @@ def reverse_lookup(
     cat_qid, pat = CATEGORY_ENTITIES.get(_q(category).lower(), (category, "instance"))
     # Q-id 形式でなければ entity 名として受け取ったとみなして返す
     if not cat_qid.startswith("Q"):
-        return (f"カテゴリ '{category}' の Wikidata Q-id が未登録です。"
-                f"登録済みカテゴリ: {', '.join(sorted(k for k in CATEGORY_ENTITIES))}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"カテゴリ '{category}' の Wikidata Q-id が未登録です。登録済みカテゴリ: {', '.join(sorted(k for k in CATEGORY_ENTITIES))}")],
+            structuredContent={"error": "unknown category", "category": category},
+        )
 
     # 人系(occupation)と機器系(instance)で 国プロパティ・日付プロパティが異なる
     country_prop = "P27" if pat == "occupation" else "P17"
@@ -81,7 +84,10 @@ def reverse_lookup(
     if cq is None and country:
         cq = _resolve_country(country)
         if cq is None:
-            return f"国 '{country}' を Wikidata で特定できませんでした。英語名や country_qid を指定してください。"
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"国 '{country}' を Wikidata で特定できませんでした。英語名や country_qid を指定してください。")],
+                structuredContent={"error": "unknown country", "country": country},
+            )
 
     if pat == "occupation":
         # 職業カテゴリ(例: 宇宙飛行士)は P106 で検索（人はサブクラス再帰を使わない）
@@ -110,25 +116,38 @@ LIMIT {int(limit)}
         resp.raise_for_status()
         rows = resp.json().get("results", {}).get("bindings", [])
     except requests.RequestException as e:
-        return f"Wikidata 問い合わせに失敗しました: {e}"
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Wikidata 問い合わせに失敗しました: {e}")],
+            structuredContent={"error": str(e), "source": "query.wikidata.org"},
+        )
 
     if not rows:
-        return f"'{category}' の該当オブジェクトが見つかりませんでした（条件が厳しすぎる可能性があります）。"
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"'{category}' の該当オブジェクトが見つかりませんでした（条件が厳しすぎる可能性があります）。")],
+            structuredContent={"category": category, "total": 0, "results": []},
+        )
 
     out = []
+    records = []
     for r in rows:
         label = r.get("itemLabel", {}).get("value", "?")
-        item = r["item"]["value"]  # http://www.wikidata.org/entity/Q...
-        qid = item.rsplit("/", 1)[-1]
+        item = (r.get("item") or {}).get("value", "")
+        qid = item.rsplit("/", 1)[-1] if item else "?"
         date = r.get("launchDate", {}).get("value", "")[:10] if launch_date else ""
         # Wikipedia 記事リンク(言語別)
-        wiki = f"https://{language}.wikipedia.org/wiki/Special:EntityPage/{qid}"
+        wiki = f"https://{language}.wikipedia.org/wiki/Special:EntityPage/{qid}" if qid != "?" else ""
         if pat == "occupation":
             date_s = f"（生年: {date}）" if date else ""
         else:
             date_s = f"（打ち上げ: {date}）" if date else ""
+        records.append({"label": label, "qid": qid, "date": date, "wikipedia": wiki, "wiki_url": wiki})
         out.append(f"- {label} {date_s} [{qid}] 参照: {wiki}")
-    return "\n".join(out)
+    lines = [f"'{category}' の該当オブジェクト（{len(records)} 件）:"] + out
+    return CallToolResult(
+        content=[TextContent(type="text", text="\n".join(lines))],
+        structuredContent={"category": category, "country": country or country_qid,
+                           "order": order, "shown": len(records), "results": records},
+    )
 
 
 def _resolve_country(name: str) -> Optional[str]:

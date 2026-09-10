@@ -106,11 +106,15 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
     def _parse_cme(data, lim):
         rows, jrows = [], []
         for r in data[:lim]:
-            speed = (r.get("cmeAnalyses") or [{}])[0].get("speed") if r.get("cmeAnalyses") else None
+            speed_raw = (r.get("cmeAnalyses") or [{}])[0].get("speed") if r.get("cmeAnalyses") else None
+            try:
+                speed = float(speed_raw) if speed_raw is not None else None
+            except (TypeError, ValueError):
+                speed = None
             row = f"- CME  開始 {r.get('startTime','')[:16].replace('T',' ')}"
             if r.get("sourceLocation"):
                 row += f"  太陽面位置 {r['sourceLocation']}"
-            if speed:
+            if speed is not None:
                 row += f"  速度 {speed:.0f} km/s"
             rows.append(row)
             jrows.append({"id": r.get("activityID"), "start": r.get("startTime"),

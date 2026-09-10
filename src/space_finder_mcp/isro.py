@@ -64,7 +64,15 @@ def isro_data(kind: str = "spacecrafts", query: Optional[str] = None,
 
     if query:
         q = query.strip().lower()
-        rows = [r for r in rows if q in (str(r.get("name", "")).lower() or str(r.get("id", "")).lower())]
+        def _match(r):
+            hay = " ".join([
+                str(r.get("name", "")).lower(),
+                str(r.get("id", "")).lower(),
+                str(r.get("Place", "")).lower(),
+                str(r.get("country", "")).lower(),
+            ])
+            return q in hay
+        rows = [r for r in rows if _match(r)]
 
     total = len(rows)
     rows = rows[:limit]

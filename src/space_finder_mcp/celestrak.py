@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Optional
 
 import requests
+from functools import lru_cache
 from mcp.types import CallToolResult, TextContent
 
 BASE = "https://celestrak.org/NORAD/elements/gp.php"
@@ -24,12 +25,20 @@ WELL_KNOWN: dict[str, int] = {
 }
 
 
-def _fetch_tle(params: dict) -> list[dict]:
-    p = dict(params)
+@lru_cache(maxsize=64)
+def _fetch_tle_cached(params_tuple: tuple) -> tuple:
+    """TLE を取得（同一セッション内で同じ問い合わせはキャッシュ）。TLE は数時間有効。"""
+    p = dict(params_tuple)
     p["FORMAT"] = "JSON"
     r = requests.get(BASE, headers=UA, params=p, timeout=30)
     r.raise_for_status()
-    return r.json()
+    return tuple(r.json())
+
+
+def _fetch_tle(params: dict) -> list[dict]:
+    # params(dict) をタプル化してキャッシュキーに。結果は tuple→list に戻す。
+    key = tuple(sorted((k, str(v)) for k, v in params.items()))
+    return list(_fetch_tle_cached(key))
 
 
 def sat_tle(name: Optional[str] = None, norad_id: Optional[int] = None,
@@ -52,13 +61,22 @@ def sat_tle(name: Optional[str] = None, norad_id: Optional[int] = None,
         params["CATNR"] = norad_id
     elif name:
         nm = name.strip().lower()
-        # 既知の衛星名をNORAD IDに解決
+        # 既知の衛星名をNORAD IDに解決（完全一致を最優先）
         for key, nid in WELL_KNOWN.items():
-            if nm == key or key in nm or nm in key:
+            if nm == key:
                 params["CATNR"] = nid
                 break
         else:
-            params["NAME"] = name.strip()
+            # 部分一致は短い名前の誤マッチを避けるため、長い入力のみ許可
+            matched = None
+            for key, nid in WELL_KNOWN.items():
+                if len(nm) >= 4 and (key in nm or nm in key):
+                    matched = nid
+                    break
+            if matched:
+                params["CATNR"] = matched
+            else:
+                params["NAME"] = name.strip()
     elif group:
         params["GROUP"] = group
     else:
