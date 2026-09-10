@@ -16,15 +16,16 @@
 - **他国の宇宙機関データに対応** — インド ISRO・欧州 ESA/Copernicus・日本 JAXA・カナダ CSA・ブラジル INPE・英国 EO DataHub・フランス CNES・中国 CNSA 系ポータル・全衛星軌道(CelesTrak)・EO Dashboard(NASA/ESA/JAXA共同) を横断検索
 - **引用元を明示** — 科学的な内容には必ずデータソースへのリンクを併記
 
-## 🆕 直近の更新内容（v0.24.0）
+## 🆕 直近の更新内容（v0.25.0）
 
-**月周回機の月面位置・軌道を月面地図に表示するツール `lunar_track` を追加**（v0.24.0）。
+**任意の天体の探査機（周回機・ローバー）の位置を、その天体の地図に表示する汎用ツール群を追加**（v0.25.0）。
 
-- **`lunar_track`**: 月周回機（LRO・ゲートウェイ等）の**月面での現在位置と軌道トレイル**を、NASA Trek の月面地図（LRO WAC モザイク）に重ねて画像化。JPL Horizons が返す月中心の状態ベクトルを **IAU 2015 月自転モデル**で月体固定座標（selenographic 緯度経度・高度）に変換して正確に計算。認証不要。
-  - 例:「LROの現在位置を月面地図で」「月周回機の位置」「ゲートウェイの月面軌道」
-  - **アルテミス計画対応**: 今後月軌道を周回する機体（ゲートウェイ等）が増えた際に、`MOON_CRAFT` テーブルへ JPL Horizons 天体IDを追加するだけで追跡可能。
-  - 過去ミッション（かぐや等）は運用終了のため丁寧に案内。
-- **`sat_ground_track` のトレイル上限を拡張**: 準天頂衛星（みちびき）の**8の字（アナレンマ）軌道**を表示できるよう、`minutes` の上限を24時間（1440分）に拡張。
+- **`planetary_orbiter_track`**（汎用・天体周回機マップ）: 月・火星・水星・タイタン・ベスタ・ケレス等、NASA Trek が等角図法グローバル画像を持つ**任意の天体**を周回する探査機の**現在位置と軌道トレイル**を画像化。JPL Horizons の状態ベクトルを **IAU 自転モデル**で天体固定座標（緯度経度・高度）に変換して正確に計算。認証不要。
+  - `span_deg=360` で**天体全面表示**（2:1ビュー）、既定 `120` で現在位置中心の局所表示。`step` を秒単位まで細分化できる**高精度トレイル**（TLIST を POST+分割バッチ送信で1400点超を高速取得）。
+  - 対応天体: moon（LRO・ゲートウェイ）、mars（MRO・Mars Odyssey）など。新規天体は `BODIES` テーブルに1行足すだけで追加可能。
+- **`planetary_rover_location_map`**（汎用・天体面ローバー位置マップ）: 探査ローバーの**現在地・走行経路・着陸地点**を、その天体の局所地図に重ねて画像化。ベースマップ・タイル合成は共通コアを再利用。対応: perseverance・curiosity。
+- **専用ルーチンの統合・整理**: `lunar_track`（lunar_map.py）と `mars_rover_location_map`（位置マップ部分）を汎用版に統合し削除。`mars_rover_status`（状況・天気）は引き続き提供。
+- 運用終了機（かぐや・MAVEN・あかつき等）は推測せず、丁寧に案内。
 
 登録ツールは **45本**。認証不要のツールが大半です。
 
@@ -102,7 +103,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 
 ## 🛠️ ツール一覧
 
-登録ツールは **45本**（他国の宇宙機関データ 15本＋火星探査ローバー 2本＋天文観測(ESO/CADC/ALMA) 3本＋電波望遠鏡(TART) 1本＋天文ニュース 1本＋天体観測用天気 1本＋天体位置・星座 1本＋星図合成 1本＋太陽系俯瞰 1本＋日食時系列 1本＋NASA POWER気候 1本＋EO Dashboard 2本＋宇宙天気 1本＋AWS STAC 2本＋ISS位置 1本＋衛星地上軌道 1本＋月周回機 1本＋WMO OSCAR 1本＋中国/ロシア打ち上げ・天宮 3本＋メディア/逆引き 4本）。すべて動作検証済みです。
+登録ツールは **45本**（他国の宇宙機関データ 15本＋火星探査ローバー状況 1本＋天文観測(ESO/CADC/ALMA) 3本＋電波望遠鏡(TART) 1本＋天文ニュース 1本＋天体観測用天気 1本＋天体位置・星座 1本＋星図合成 1本＋太陽系俯瞰 1本＋日食時系列 1本＋NASA POWER気候 1本＋EO Dashboard 2本＋宇宙天気 1本＋AWS STAC 2本＋ISS位置 1本＋衛星地上軌道 1本＋汎用天体周回機 1本＋汎用ローバー位置 1本＋WMO OSCAR 1本＋中国/ロシア打ち上げ・天宮 3本＋メディア/逆引き 4本）。すべて動作検証済みです。
 
 | ツール | できること | データ源 | 認証 |
 |--------|-----------|---------|------|
@@ -137,7 +138,6 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `alma_search` | ALMA（アルマ望遠鏡）科学アーカイブの観測データ検索（観測対象・座標・周波数帯・公開/要権限） | ALMA Science Archive (NAOJ, IVOA TAP) | 不要 |
 | `radio_sources_now` | TART オープン電波望遠鏡が「いま観測できる電波源」（GNSS・静止衛星等）を仰角順に表示 | TART source catalog (NZ) | 不要 |
 | `sky_map_with_satellites` | 指定地の空に太陽系の惑星と人工衛星を重ねた画像（matplotlib正確版/Pillow簡易版を選択） | JPL de421+Skyfield / CelesTrak+SGP4 | 不要 |
-| `mars_rover_location_map` | 火星探査ローバーの現在地を火星地図中心に示した画像（走行経路・着陸点） | NASA MMGIS + Trek WMTS | 不要 |
 | `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
 | `solar_eclipse_series` | 日食（太陽が月に欠ける過程）の時系列パネル画像（食の始まり〜最大〜終わり7枚・次回日食の自動検索・max_magnitude対応） | JPL DE421+Skyfield | 不要 |
 | `eodashboard_collections` | EO Dashboard（NASA×ESA×JAXA共同）の173データセットをテーマ・機関・キーワードで検索 | EO Dashboard (GitHub catalog) | 不要 |
@@ -147,7 +147,8 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `stac_search` | Sentinel-2 / Landsat / NAIP / DEM をSTAC検索（場所・日時・雲量） | AWS Earth Search STAC | 不要 |
 | `iss_now` | ISS（国際宇宙ステーション）の現在位置を取得し Googleマップリンクで表示 | Open Notify | 不要 |
 | `sat_ground_track` | 任意の人工衛星（ISS・ひので・ハッブル等）の現在位置と地上軌道を地球地図にプロットした画像を返す。CelesTrak TLE + Skyfield(SGP4) で真下の点・高度・速度を計算し、NASA Blue Marble 地図に軌道トレイルを重ねる | CelesTrak + Skyfield + Blue Marble | 不要 |
-| `lunar_track` | 月周回機（LRO・ゲートウェイ等）の月面での現在位置と軌道トレイルを月面地図にプロットした画像を返す。JPL Horizons の状態ベクトルを IAU 月自転モデルで月面座標（selenographic 緯度経度・高度）に変換し、NASA Trek の月面タイル（LRO WAC）に重ねる。アルテミス計画の月軌道機追跡に対応 | JPL Horizons + NASA Trek | 不要 |
+| `planetary_orbiter_track` | 任意の天体（月・火星・水星・タイタン等）を周回する探査機の現在位置と軌道トレイルを、その天体の地図にプロットした画像を返す。JPL Horizons の状態ベクトルを IAU 自転モデルで天体固定座標（緯度経度・高度）に変換し、NASA Trek の等角図法地図に重ねる。`span_deg=360`で天体全面表示にも対応 | JPL Horizons + NASA Trek | 不要 |
+| `planetary_rover_location_map` | 任意の天体面を移動する探査ローバーの現在地をその天体の地図中心に示した画像（走行経路・着陸点）。NASA MMGIS の位置データと NASA Trek の等角地図を合成。現状データは火星ローバー（Perseverance/Curiosity） | NASA MMGIS + Trek WMTS | 不要 |
 | `satellite_status` | 世界中の気象・地球観測衛星の運用ステータス・軌道・打ち上げ日（Roscosmos等） | WMO OSCAR | 不要 |
 | `cnsa_status` | 中国CNSA系衛星データポータル（風雲/NSMC・高分/CNSA-GEO・CBERS/CRESDA）の到達状態・概要＋認証不要の代替経路 | CNSA各公式ポータル | 不要(ダウンロードは要登録) |
 | `tiangong_now` | 天宮（Tiangong）中国宇宙ステーションの現在位置（SGP4伝播＋Googleマップ表示） | CelesTrak TLE + SGP4 | 不要 |
@@ -469,17 +470,6 @@ ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカ�
  "satellites": {"ISS (国際宇宙ステーション)": {"az":..,"alt":..,"trail":[...]}, ...}}
 ```
 
-### 🔴 `mars_rover_location_map` — 火星ローバー現在地マップ
-
-火星探査ローバー（パーサヴィアランス/キュリオシティ）の**現在地を火星地図の中心に示した画像**を返す。NASA MMGIS から現在地(緯度経度)と走行経路、NASA Trek WMTS（等角図法）から火星の地図タイルを取得し、走行経路(橙線)・着陸地点(青●)・現在地(赤●)を合成。**ローバーを常に画像中心**に配置。
-
-`zoom`(5-7)・`span_deg`(画角)・`out_px`(出力サイズ) で精度と軽量さを調整できる（例: `zoom=6` で高速・軽量）。タイルは並列取得で高速化。天気・ソル情報も併記。認証不要。
-
-```json
-{"rover": "perseverance", "lat": 18.437, "lon": 77.232, "sol": 1965,
- "dist_km": 45.11, "source": "NASA MMGIS + Trek WMTS"}
-```
-
 ### ☀️ `solar_system_now` — 太陽系俯瞰図（太陽中心の惑星・小惑星・探査機・彗星位置）
 
 「太陽系を上から見た図」「今の惑星の位置」「イトカワの今の位置を図で」などに応答。太陽を中心とした黄道面俯瞰図を画像化し、惑星(8惑星＋冥王星)は **JPL DE421 暦表 + Skyfield** で日心黄道座標を計算。任意の小惑星は **JPL SBDB API** の軌道要素を取得し**ケプラー2体問題**で日心位置へ伝播する（`asteroid`/`asteroid2` で複数指定可）。
@@ -511,6 +501,23 @@ ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカ�
 {"kind": "部分日食", "max_magnitude": 0.63, "date": "2028年1月26日",
  "place": "東京", "lat": 35.68, "lon": 139.69}  // 7パネル時系列画像を content に返す
 ```
+
+### 🛰 `planetary_orbiter_track` — 汎用・天体周回機マップ
+
+月・火星・水星・タイタン・ベスタ・ケレス等、NASA Trek が等角図法グローバル画像を持つ**任意の天体**を周回する探査機の**現在位置と軌道トレイル**を画像化します。JPL Horizons の状態ベクトルを **IAU 自転モデル**で天体固定座標（緯度経度・高度）に変換して正確に計算。認証不要。
+
+- **対応天体（BODIES テーブル）**: moon（LRO・ゲートウェイ）、mars（MRO・Mars Odyssey）等。新規天体は「中心天体ID・IAU回転定数・TrekタイルURL・半径」を1行追加するだけで対応可能。
+- **`span_deg=360` で天体全面表示**（2:1グローバルビュー）、既定 `120` で現在位置中心の局所表示。
+- **高精度トレイル**: `step` を秒単位（1/60分）まで細分化可能。JPL Horizons の TLIST を POST + 分割バッチで送るため、1400点超のトレイルも高速取得。
+- 運用終了機（かぐや・MAVEN・あかつき等）は推測せず丁寧に案内。
+
+### 🗺 `planetary_rover_location_map` — 汎用・天体面ローバー位置マップ
+
+任意の天体面を移動する探査ローバーの**現在地・走行経路・着陸地点**を、その天体の局所地図に重ねて画像化します。ベースマップ・タイル合成は `planetary_map` を再利用。
+
+- 走行経路(橙線)・現在地(赤●)・着陸地点(青●)を合成し、ローバーを画像中心に配置。
+- 対応ローバー（ROVERS テーブル）: perseverance（パーサヴィアランス）・curiosity（キュリオシティ）。
+- **正直な制約**: ローバー位置データは NASA MMGIS（火星専用）のみ。月面ローバー等の現役位置データは公開されておらず、データ源ができればテーブル追加で対応可能。
 
 ## 🔐 応答方式（tokyo-transit 方式）
 
@@ -572,7 +579,9 @@ src/space_finder_mcp/
 ├── sky_overlay.py        # sky_map_with_satellites（星図+人工衛星, matplotlib/Pillow）
 ├── solar_system.py        # solar_system_now（太陽系俯瞰図, JPL DE421+SBDB / matplotlib+Pillow）
 ├── solar_eclipse.py       # solar_eclipse_series（日食の時系列パネル, JPL DE421+Skyfield）
-└── mars_rover.py         # mars_rover_status / mars_rover_location_map（火星ローバー）
+├── mars_rover.py         # mars_rover_status（火星ローバー状況・天気）
+├── planetary_map.py      # planetary_orbiter_track（汎用・天体周回機マップ）
+└── planetary_rover.py    # planetary_rover_location_map（汎用・ローバー位置マップ）
 ```
 
 ---

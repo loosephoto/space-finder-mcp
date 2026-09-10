@@ -42,8 +42,9 @@ from . import alma as _alma
 from . import tart as _tart
 from . import solar_eclipse as _eclipse
 from . import solar_system as _solarsys
+from . import planetary_rover as _prover
+from . import planetary_map as _pmap
 from . import satellite_map as _satmap
-from . import lunar_map as _lunar
 
 mcp = FastMCP("Space Finder MCP")
 
@@ -92,7 +93,6 @@ mcp.tool()(_news.astronomy_news)
 
 # ---- 火星探査ローバー状況 (Mars Weather, 認証不要) ----
 mcp.tool()(_mars.mars_rover_status)
-mcp.tool()(_mars.mars_rover_location_map)
 
 # ---- NASA (APIキー要。環境変数 NASA_API_KEY があれば使う) ----
 def _nasa_apod(date: Optional[str] = None) -> CallToolResult:
@@ -164,8 +164,12 @@ mcp.tool()(_iss.iss_now)
 # ---- 任意衛星の地上軌道マップ（CelesTrak TLE + SGP4 + Blue Marble, 認証不要）----
 mcp.tool()(_satmap.sat_ground_track)
 
-# ---- 月周回機の月面軌道マップ（JPL Horizons + IAU月自転, 認証不要）----
-mcp.tool()(_lunar.lunar_track)
+
+# ---- 汎用・天体周回機マップ（JPL Horizons + IAU自転 + NASA Trek, 認証不要）----
+mcp.tool()(_pmap.planetary_orbiter_track)
+
+# ---- 汎用・天体面ローバー位置マップ（MMGIS + NASA Trek, 認証不要）----
+mcp.tool()(_prover.planetary_rover_location_map)
 
 
 # ---- WMO OSCAR 衛星カタログ (認証不要) ----
