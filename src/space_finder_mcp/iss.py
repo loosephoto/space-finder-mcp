@@ -47,7 +47,10 @@ def iss_now() -> CallToolResult:
         )
     ts = d.get("timestamp")
     import datetime
-    tstr = datetime.datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M UTC") if ts else "?"
+    # utcfromtimestamp は Python 3.12 で非推奨（naive datetime を返す）。
+    # タイムゾーンを明示した fromtimestamp を使う。
+    tstr = (datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            if ts else "?")
 
     # Google マップ リンク（衛星ビュー）
     gm_url = f"https://www.google.com/maps?q={lat},{lon}&z=3"
