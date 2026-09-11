@@ -653,7 +653,15 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
     asts = [a for a in (asteroid, asteroid2) if a and str(a).strip()]
     prbs = [a for a in (probe, probe2) if a and str(a).strip()]
     coms = [a for a in (comet, comet2) if a and str(a).strip()]
-    scene = _compute(when, asts, prbs, coms)
+    try:
+        scene = _compute(when, asts, prbs, coms)
+    except (OSError, KeyError, ValueError) as e:
+        # de421.bsp の初回ダウンロード失敗・暦の読み込み失敗は例外が外へ漏れていた
+        return CallToolResult(
+            content=[TextContent(type="text", text="天体暦(JPL DE421)の読み込みに失敗しました: "
+                                 + str(e)[:150] + "。初回はダウンロードが必要なため、ネットワーク接続をご確認ください。")],
+            structuredContent={"error": str(e)[:200], "source": "JPL de421"},
+        )
     if scene.get("error"):
         return CallToolResult(
             content=[TextContent(type="text", text=scene["error"])],
