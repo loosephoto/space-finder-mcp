@@ -77,6 +77,12 @@ UA = {"User-Agent": "space-finder-mcp/0.1 (MCP media search)"}
 
 
 def _search(q: str, media_type: str, limit: int) -> dict:
+    """NASA Image & Video Library を検索する。失敗時は例外を送出する（呼び出し側で処理）。
+
+    生の requests.RequestException / JSON 解析失敗をそのまま通すため、必ず
+    _search_or_error() か try/except で受け止めること
+    （素通しすると MCP 呼び出しごと例外終了し、structuredContent も返らない）。
+    """
     r = requests.get(
         f"{IMAGES_API}/search",
         params={"q": q, "media_type": media_type, "page_size": min(limit, 100)},
@@ -85,6 +91,21 @@ def _search(q: str, media_type: str, limit: int) -> dict:
     )
     r.raise_for_status()
     return r.json()
+
+
+def _search_or_error(q: str, media_type: str, limit: int):
+    """検索を実行し、失敗時は (エラーCallToolResult, None)、成功時は (None, dict) を返す。
+
+    他ツールと同じく「例外を漏らさず CallToolResult で返す」方針を守るためのラッパ。
+    """
+    try:
+        return None, _search(q, media_type, limit)
+    except (requests.RequestException, ValueError) as e:
+        return CallToolResult(
+            content=[TextContent(type="text",
+                                 text=f"NASA Image & Video Library の検索に失敗しました: {e}")],
+            structuredContent={"error": str(e), "source": "images-api.nasa.gov"},
+        ), None
 
 
 def _asset_hrefs(nasa_id: str) -> list[str]:
@@ -157,7 +178,9 @@ def search_space_images(query: str, limit: int = 3, show_inline: bool = True) ->
         show_inline: 画像をチャットにインライン表示するか（既定 True）。
     """
     limit = max(1, min(int(limit), 10))
-    d = _search(query, "image", limit)
+    err, d = _search_or_error(query, "image", limit)
+    if err is not None:
+        return err
     items = d.get("collection", {}).get("items", [])
     total = d.get("collection", {}).get("metadata", {}).get("total_hits", 0)
 
@@ -279,7 +302,8 @@ def search_space_audio(query: str, limit: int = 3, kind: str = "auto") -> CallTo
                 })
                 if len(records) >= limit:
                     break
-        except requests.RequestException:
+        except (requests.RequestException, ValueError):
+            # 検索失敗時は下のキュレーション済み「宇宙の音」にフォールバックする
             pass
 
     # 2) 短尺の宇宙の音（キュレーション）
@@ -369,7 +393,9 @@ def search_space_videos(query: str, limit: int = 3, show_poster: bool = True) ->
         show_poster: ポスター画像をチャットにインライン表示するか（既定 True）。
     """
     limit = max(1, min(int(limit), 10))
-    d = _search(query, "video", limit)
+    err, d = _search_or_error(query, "video", limit)
+    if err is not None:
+        return err
     items = d.get("collection", {}).get("items", [])
     total = d.get("collection", {}).get("metadata", {}).get("total_hits", 0)
 
