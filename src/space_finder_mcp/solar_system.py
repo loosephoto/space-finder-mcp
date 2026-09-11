@@ -316,11 +316,6 @@ def _font(sz, bold=False):
     return ImageFont.load_default()
 
 
-def _log_scale(dist, r0=620.0, lo=0.30, hi=60.0):
-    """距離AU -> 画素距離（対数縮尺）。内惑星〜外惑星を1枚で視認可能に。"""
-    return r0 * (math.log10(dist) - math.log10(lo)) / (math.log10(hi) - math.log10(lo))
-
-
 # ---------- 描画エンジン B: Pillow (簡易・実写合成, 既定) ----------
 def _render_simple(scene):
     """Pillow 対数縮尺俯瞰図。内惑星〜遠方探査機までを1枚に収める（視認性重視・既定）。

@@ -6,8 +6,6 @@ JAXA Earth の地球観測データ（ALOS・GSMaP・GCOM 等）を STAC catalog
 """
 from __future__ import annotations
 
-from typing import Optional
-
 import requests
 from mcp.types import CallToolResult, TextContent
 

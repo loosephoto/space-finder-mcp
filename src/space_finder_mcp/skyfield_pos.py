@@ -7,7 +7,6 @@ Web API（Astronomy API / API Ninjas）はキー登録が必要なため不使�
 from __future__ import annotations
 
 import os
-from typing import Optional
 
 from mcp.types import CallToolResult, TextContent
 

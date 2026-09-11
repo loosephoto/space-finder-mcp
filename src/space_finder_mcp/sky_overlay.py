@@ -16,7 +16,6 @@ from __future__ import annotations
 import io
 import math
 import os
-from typing import Optional
 
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent

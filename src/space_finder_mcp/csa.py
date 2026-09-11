@@ -15,7 +15,6 @@ import ssl
 from typing import Optional
 
 import requests
-from urllib3.poolmanager import PoolManager
 from requests.adapters import HTTPAdapter
 from mcp.types import CallToolResult, TextContent
 

@@ -7,7 +7,6 @@ STAC v1 エンドポイント: https://stac.dataspace.copernicus.eu/v1
 """
 from __future__ import annotations
 
-import os
 from typing import Optional
 
 import requests

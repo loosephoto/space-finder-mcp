@@ -9,8 +9,6 @@ Google マップ リンクとセットで返す。CelesTrak の sat_tle（軌道
 """
 from __future__ import annotations
 
-from typing import Optional
-
 import requests
 from mcp.types import CallToolResult, TextContent
 

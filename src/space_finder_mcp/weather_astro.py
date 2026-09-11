@@ -18,18 +18,6 @@ from mcp.types import CallToolResult, TextContent
 API = "https://api.open-meteo.com/v1/forecast"
 UA = {"User-Agent": "space-finder-mcp/0.4 (MCP; Open-Meteo astronomy)"}
 
-# WMO 天気コード -> 日本語
-_WMO = {
-    0: "快晴", 1: "ほぼ晴れ", 2: "一部曇り", 3: "曇り",
-    45: "霧", 48: "着氷性の霧", 51: "霧雨(弱)", 53: "霧雨(並)", 55: "霧雨(強)",
-    61: "雨(弱)", 63: "雨(並)", 65: "雨(強)", 66: "着氷雨(弱)", 67: "着氷雨(強)",
-    71: "雪(弱)", 73: "雪(並)", 75: "雪(強)", 77: "雪あられ",
-    80: "にわか雨(弱)", 81: "にわか雨(並)", 82: "にわか雨(強)",
-    85: "にわか雪(弱)", 86: "にわか雪(強)", 95: "雷雨",
-    96: "雷雨・ひょう(弱)", 99: "雷雨・ひょう(強)",
-}
-
-
 
 # 月相（Open-Meteo は 0=new 〜 0.5=full 〜 1=new の分数で返す）
 def _moon_phase_ja(phase) -> str:

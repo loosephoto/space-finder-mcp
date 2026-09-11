@@ -8,10 +8,8 @@
 """
 from __future__ import annotations
 
-from typing import Optional
-
 import requests
-from mcp.types import CallToolResult, ImageContent, TextContent
+from mcp.types import CallToolResult, TextContent
 
 # Mars Weather (認証不要)
 MARS_WEATHER = "https://mars.nasa.gov/rss/api/"

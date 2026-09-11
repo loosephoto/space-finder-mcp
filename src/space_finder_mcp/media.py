@@ -12,7 +12,6 @@ from typing import Optional
 import base64
 
 import requests
-from mcp.server.fastmcp import Image  # 画像をbase64で返すために再エクスポートは不要(下でImageContent直接)
 from mcp.types import CallToolResult, ImageContent, TextContent
 
 # NASA Sounds from Beyond / 各ミッションの「宇宙の音」短尺キュレーション
