@@ -23,6 +23,8 @@ from typing import Optional
 
 from mcp.types import CallToolResult, ImageContent, TextContent
 
+from .img_common import load_font
+
 _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
 os.makedirs(_DATA_DIR, exist_ok=True)
 
@@ -168,17 +170,6 @@ def _scan_day(eph, ts, site, sun, moon, y, mo, d, jst_offset):
 
 
 # ---------- 描画 ----------
-def _font(sz, bold=False):
-    from PIL import ImageFont
-    for p in ("C:/Windows/Fonts/meiryob.ttc" if bold else "C:/Windows/Fonts/meiryo.ttc",
-              "C:/Windows/Fonts/yugothb.ttc", "C:/Windows/Fonts/msgothic.ttc"):
-        try:
-            return ImageFont.truetype(p, sz)
-        except Exception:
-            continue
-    return ImageFont.load_default()
-
-
 def _draw_sun_moon(dr, img, cx, cy, R, rs, rm, sep, pa, mag, kind):
     """太陽と月を1パネルに描く。R=太陽画素半径。"""
     from PIL import Image, ImageDraw, ImageFilter
@@ -252,9 +243,9 @@ def _render_panels(ev, place_ja, R=150):
     dd.rectangle([0, 0, W, 128], fill=(0, 0, 0, 235))
     # タイトル・説明
     dd.text((26, 16), "{}の進行  {}  {}".format(ev["kind"], ev["date_str"], place_ja),
-            font=_font(27, True), fill=(255, 255, 255, 255))
+            font=load_font(27, True), fill=(255, 255, 255, 255))
     dd.text((26, 68), "最大食分 {:.3f}（{}%）・時刻は現地時間 ・ ▲ は天の北方向".format(
-        ev["max_mag"], int(ev["max_mag"] * 100)), font=_font(19), fill=(205, 215, 240, 255))
+        ev["max_mag"], int(ev["max_mag"] * 100)), font=load_font(19), fill=(205, 215, 240, 255))
     # 各パネルの下部キャプション帯（段階名 + 時刻・食分）を文字ごと最後に描く
     for i, fr in enumerate(frames):
         x0 = i * PANEL
@@ -278,8 +269,8 @@ def _render_panels(ev, place_ja, R=150):
             head_txt += "・" + stag
         by0 = cy + R + 30
         dd.rectangle([x0 + 12, by0, x0 + PANEL - 12, by0 + 78], fill=(0, 0, 0, 210))
-        dd.text((x0 + 20, by0 + 8), head_txt, font=_font(18, True), fill=(170, 195, 235))
-        dd.text((x0 + 20, by0 + 38), label, font=_font(20, True), fill=(255, 255, 255, 255))
+        dd.text((x0 + 20, by0 + 8), head_txt, font=load_font(18, True), fill=(170, 195, 235))
+        dd.text((x0 + 20, by0 + 38), label, font=load_font(20, True), fill=(255, 255, 255, 255))
     out = io.BytesIO()
     canvas.save(out, format="PNG")
     return out.getvalue()

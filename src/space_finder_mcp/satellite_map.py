@@ -22,6 +22,8 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
+from .img_common import encode_jpeg, load_font, split_at_antimeridian
+
 # ---- CelesTrak TLE ----
 TLE_BASE = "https://celestrak.org/NORAD/elements/gp.php"
 UA = {"User-Agent": "space-finder-mcp/0.23 (MCP; satellite ground track)"}
@@ -219,7 +221,7 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
 
     # ---- 地球地図を描画 ----
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image, ImageDraw
         earth = _earth_image()
         img = Image.open(io.BytesIO(earth)).convert("RGB")
         HH = out_px // 2
@@ -241,14 +243,8 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
         if len(seg) >= 2:
             d.line([proj(a, b) for a, b in seg], fill=(255, 140, 0), width=max(3, out_px // 350), joint="curve")
 
-    seg = [trail[0]] if trail else []
-    for i in range(1, len(trail)):
-        if abs(trail[i][0] - trail[i - 1][0]) > 150:
-            _draw_segment(seg)
-            seg = [trail[i]]
-        else:
-            seg.append(trail[i])
-    _draw_segment(seg)
+    for seg in split_at_antimeridian(trail):
+        _draw_segment(seg)
 
     # 現在位置マーカー
     cx, cy = proj(lon0, lat0)
@@ -256,16 +252,10 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
     d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(255, 40, 30), outline=(255, 255, 255), width=max(4, out_px // 300))
     d.ellipse([cx - r // 2, cy - r // 2, cx + r // 2, cy + r // 2], fill=(255, 255, 255))
 
-    # フォント
-    def font(sz):
-        for p in ("C:/Windows/Fonts/meiryob.ttc", "C:/Windows/Fonts/meiryo.ttc", "C:/Windows/Fonts/msgothic.ttc"):
-            try:
-                return ImageFont.truetype(p, sz)
-            except Exception:
-                continue
-        return ImageFont.load_default()
-
-    f_big = font(int(out_px / 40)); f_mid = font(int(out_px / 55)); f_sm = font(int(out_px / 62))
+    # フォント（img_common.load_font。旧実装はメイリオ Bold 優先だった）
+    f_big = load_font(int(out_px / 40), bold=True)
+    f_mid = load_font(int(out_px / 55), bold=True)
+    f_sm = load_font(int(out_px / 62), bold=True)
     # 情報パネル
     panel_w = int(out_px * 0.52)
     d.rounded_rectangle([14, 14, panel_w, int(HH * 0.22)], radius=14, fill=(0, 0, 0, 210))
@@ -297,15 +287,8 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
     d.rounded_rectangle([lx, ly, lx + lab_w, ly + lab_h], radius=8, fill=(200, 0, 0, 235))
     d.text((lx + 10, ly + 4), f"{sat_name} 現在位置", font=f_mid, fill=(255, 255, 255))
 
-    # JPEG 化
-    buf = io.BytesIO()
-    img.convert("RGB").save(buf, format="JPEG", quality=88)
-    jpeg = buf.getvalue()
-    if len(jpeg) > 3_500_000:
-        img = img.resize((int(out_px * 0.7), int(HH * 0.7)), Image.LANCZOS)
-        buf = io.BytesIO()
-        img.convert("RGB").save(buf, format="JPEG", quality=85)
-        jpeg = buf.getvalue()
+    # JPEG 化（3.5MB 超は縮小して再エンコード）
+    jpeg = encode_jpeg(img)
     imgc = ImageContent(type="image", data=base64.b64encode(jpeg).decode("ascii"),
                         mimeType="image/jpeg", altText=f"{sat_name} の地上軌道")
 

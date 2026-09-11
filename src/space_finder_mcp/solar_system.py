@@ -26,6 +26,8 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
+from .img_common import load_font
+
 _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
 os.makedirs(_DATA_DIR, exist_ok=True)
 UA = {"User-Agent": "space-finder-mcp/0.21 (MCP; solar system)"}
@@ -305,17 +307,6 @@ def _compute(when_iso=None, asteroids=None, probes=None, comets=None):
 
 
 # ---------- 描画ヘルパー ----------
-def _font(sz, bold=False):
-    from PIL import ImageFont
-    for p in ("C:/Windows/Fonts/meiryob.ttc" if bold else "C:/Windows/Fonts/meiryo.ttc",
-              "C:/Windows/Fonts/yugothb.ttc", "C:/Windows/Fonts/msgothic.ttc"):
-        try:
-            return ImageFont.truetype(p, sz)
-        except Exception:
-            continue
-    return ImageFont.load_default()
-
-
 # ---------- 描画エンジン B: Pillow (簡易・実写合成, 既定) ----------
 def _render_simple(scene):
     """Pillow 対数縮尺俯瞰図。内惑星〜遠方探査機までを1枚に収める（視認性重視・既定）。
@@ -385,7 +376,7 @@ def _render_simple(scene):
         lx = px + rad + 8 if (px + rad + 170 < W) else px - rad - 178
         lx = max(lx, 10); ly = py - 10
         dr.rectangle([lx, ly, lx + 178, ly + 30], fill=(8, 10, 22, 230))
-        dr.text((lx + 4, ly + 2), "{} {:.2f}AU".format(jname, au), font=_font(17, True),
+        dr.text((lx + 4, ly + 2), "{} {:.2f}AU".format(jname, au), font=load_font(17, True),
                 fill=(255, 255, 255, 255))
 
     for name, d in scene["asteroids"].items():
@@ -412,7 +403,7 @@ def _render_simple(scene):
         if lx + 240 > W:
             lx = px - rad - 250
         dr.rectangle([lx, ly, lx + 240, ly + 30], fill=(10, 40, 18, 235))
-        dr.text((lx + 4, ly + 2), "{} {:.2f}AU".format(d["name"], d["au"]), font=_font(17, True),
+        dr.text((lx + 4, ly + 2), "{} {:.2f}AU".format(d["name"], d["au"]), font=load_font(17, True),
                 fill=(200, 255, 215))
 
     for name, d in scene["probes"].items():
@@ -437,10 +428,10 @@ def _render_simple(scene):
             lx = px - rad - 310
         lx = max(lx, 4)
         dr.rectangle([lx, ly, lx + 300, ly + 42], fill=(40, 20, 0, 235))
-        dr.text((lx + 6, ly + 3), "{}  {:.0f}AU".format(d["name"], d["au"]), font=_font(16, True),
+        dr.text((lx + 6, ly + 3), "{}  {:.0f}AU".format(d["name"], d["au"]), font=load_font(16, True),
                 fill=(255, 255, 255, 255))
         dr.text((lx + 6, ly + 22), "黄緯 {:.0f}°（黄道面投影 {:.0f}AU）".format(d["eclLat"], d["proj_au"]),
-                font=_font(13), fill=(255, 235, 190, 255))
+                font=load_font(13), fill=(255, 235, 190, 255))
 
     # 彗星（シアン色の輝く核 + 太陽と反対方向に伸びる尾, 正射影位置に描画）
     for name, d in scene["comets"].items():
@@ -485,10 +476,10 @@ def _render_simple(scene):
             lx = px - rad - 330
         lx = max(lx, 4)
         dr.rectangle([lx, ly, lx + 320, ly + 42], fill=(0, 30, 45, 235))
-        dr.text((lx + 6, ly + 3), "☄ {}  {:.1f}AU".format(d["name"], d["au"]), font=_font(16, True),
+        dr.text((lx + 6, ly + 3), "☄ {}  {:.1f}AU".format(d["name"], d["au"]), font=load_font(16, True),
                 fill=(255, 255, 255, 255))
         dr.text((lx + 6, ly + 22), "黄緯 {:.0f}°（黄道面投影 {:.0f}AU）".format(d["eclLat"], d["proj_au"]),
-                font=_font(13), fill=(190, 235, 255, 255))
+                font=load_font(13), fill=(190, 235, 255, 255))
 
     glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     gd = ImageDraw.Draw(glow)
@@ -498,7 +489,7 @@ def _render_simple(scene):
     dr = ImageDraw.Draw(img)
     dr.ellipse([CX - 26, CY - 26, CX + 26, CY + 26], fill=(255, 220, 120),
                outline=(255, 245, 200), width=2)
-    dr.text((CX - 14, CY - 8), "太陽", font=_font(18, True), fill=(120, 80, 0))
+    dr.text((CX - 14, CY - 8), "太陽", font=load_font(18, True), fill=(120, 80, 0))
 
     dr.rectangle([0, 0, W, 104], fill=(0, 0, 0, 230))
     title = "太陽系・現在の惑星位置（太陽を中心とした俯瞰図）"
@@ -514,9 +505,9 @@ def _render_simple(scene):
         parts.append("彗星" + "・".join(ok_coms))
     if parts:
         title = "太陽系・現在の位置＋" + "／".join(parts) + "（太陽中心俯瞰図）"
-    dr.text((26, 16), title, font=_font(30, True), fill=(255, 255, 255, 255))
+    dr.text((26, 16), title, font=load_font(30, True), fill=(255, 255, 255, 255))
     dr.text((26, 70), "{}（JST +9h）・数値=太陽からの距離AU ・ 円=惑星公転軌道(対数縮尺) ・ 補助線/菱形=探査機".format(scene["time_utc"]),
-            font=_font(18), fill=(195, 205, 235, 255))
+            font=load_font(18), fill=(195, 205, 235, 255))
 
     dr.rectangle([14, H - 54, W - 14, H - 14], fill=(0, 0, 0, 225))
     has_probe = any(not v.get("error") for v in scene["probes"].values())
@@ -531,7 +522,7 @@ def _render_simple(scene):
         leg += "  ◆ 探査機（遠方・星間空間）"
     leg += "   ✦帯 小惑星帯(2.0–3.4AU目安)  ☀太陽"
     dr.text((28, H - 40), leg + " ・ 出典: JPL DE421+SBDB+Horizons / Skyfield",
-            font=_font(16), fill=(225, 232, 250, 255))
+            font=load_font(16), fill=(225, 232, 250, 255))
     out = io.BytesIO()
     img.save(out, format="PNG")
     return out.getvalue()

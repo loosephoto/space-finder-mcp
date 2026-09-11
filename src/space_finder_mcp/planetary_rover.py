@@ -22,8 +22,9 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
-# planetary_map の汎用コアを再利用
-from .planetary_map import BODIES, _fetch_tiles, _font
+# planetary_map の汎用コアと画像共通ヘルパーを再利用
+from .planetary_map import BODIES, _fetch_tiles
+from .img_common import load_font
 
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
 
@@ -188,7 +189,8 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
     cx, cy = g2px(clon, clat)
     d.ellipse([cx - 13, cy - 13, cx + 13, cy + 13], fill=(255, 40, 30),
               outline=(255, 255, 255), width=4)
-    f_big = _font(30); f_mid = _font(22); f_sm = _font(20)
+    # 旧 _font は常にメイリオ Bold 優先だったため bold=True で等価
+    f_big = load_font(30, bold=True); f_mid = load_font(22, bold=True); f_sm = load_font(20, bold=True)
     # 現在地ラベル
     d.rectangle([cx + 16, cy - 22, cx + 16 + 380, cy + 30], fill=(0, 0, 0, 220))
     d.text((cx + 22, cy - 16), f"{rover_ja} 現在地", font=f_big, fill=(255, 255, 255))

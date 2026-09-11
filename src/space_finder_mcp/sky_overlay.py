@@ -20,6 +20,8 @@ import os
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
+from .img_common import load_font
+
 _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
 os.makedirs(_DATA_DIR, exist_ok=True)
 UA = {"User-Agent": "space-finder-mcp/0.19 (MCP; sky overlay)"}
@@ -260,7 +262,7 @@ def _fetch_bg(url, max_bytes=3500000):
 
 def _render_simple(scene):
     """Pillow 簡易合成。惑星を種類別アイコンで、衛星を強調して描く（学生向け・視認性重視）。"""
-    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    from PIL import Image, ImageDraw, ImageFilter
     # 惑星の見た目は既定色（実物らしい色）。背景の実写が写るため少しだけ明るめに。
     # 背景取得
     url = _BG_CANDIDATES[0]
@@ -285,15 +287,6 @@ def _render_simple(scene):
         th = math.radians(az)
         return CX + r * math.sin(th), CY - r * math.cos(th)
 
-    def font(sz, bold=False):
-        for pth in ("C:/Windows/Fonts/meiryob.ttc" if bold else "C:/Windows/Fonts/meiryo.ttc",
-                    "C:/Windows/Fonts/yugothb.ttc", "C:/Windows/Fonts/msgothic.ttc"):
-            try:
-                return ImageFont.truetype(pth, sz)
-            except Exception:
-                continue
-        return ImageFont.load_default()
-
     # 全天円（円外を黒）
     mask = Image.new("L", (W, H), 0)
     ImageDraw.Draw(mask).ellipse([CX - R, CY - R, CX + R, CY + R], fill=255)
@@ -310,7 +303,7 @@ def _render_simple(scene):
         x, y = proj(az, 0)
         dr.line([CX, CY, x, y], fill=(80, 90, 130, 255), width=2)
         x2, y2 = CX + (x - CX) * 1.07, CY + (y - CY) * 1.07
-        dr.text((x2 - 14, y2 - 12), lab, font=font(28, True), fill=(210, 220, 245, 255))
+        dr.text((x2 - 14, y2 - 12), lab, font=load_font(28, True), fill=(210, 220, 245, 255))
 
     # 恒星（薄い点・小さめ）
     for nm, s in scene["stars"].items():
@@ -343,7 +336,7 @@ def _render_simple(scene):
         # ラベル
         lx, ly = px + r0 + 10, py - 12
         dr.rectangle([lx - 4, ly, lx + 130, ly + 30], fill=(10, 12, 25, 215))
-        dr.text((lx + 2, ly + 2), name, font=font(22, True), fill=(255, 255, 255, 255))
+        dr.text((lx + 2, ly + 2), name, font=load_font(22, True), fill=(255, 255, 255, 255))
 
     for nm, s in scene["planets"].items():
         x, y = proj(s["az"], s["alt"])
@@ -368,19 +361,19 @@ def _render_simple(scene):
                 prev = (tx, ty)
         lx, ly = x + 20, y - 18
         dr.rectangle([lx - 4, ly, lx + 250, ly + 32], fill=(80, 0, 0, 230))
-        dr.text((lx, ly + 2), nm, font=font(20, True), fill=(255, 176, 166, 255))
+        dr.text((lx, ly + 2), nm, font=load_font(20, True), fill=(255, 176, 166, 255))
 
     # ヘッダバナー
     dr.rectangle([0, 16, W, 112], fill=(0, 0, 0, 210))
-    dr.text((28, 24), "観測地の空 ・ 太陽系の惑星と人工衛星", font=font(36, True), fill=(255, 255, 255, 255))
+    dr.text((28, 24), "観測地の空 ・ 太陽系の惑星と人工衛星", font=load_font(36, True), fill=(255, 255, 255, 255))
     dr.text((28, 72), "{}（JST +9h） ・ 場所: 緯度{:.2f}° 経度{:.2f}°".format(
-        scene["time_utc"], scene["lat"], scene["lon"]), font=font(22), fill=(200, 210, 240, 255))
+        scene["time_utc"], scene["lat"], scene["lon"]), font=load_font(22), fill=(200, 210, 240, 255))
 
     # 凡例（下部）
     leg_y = H - 56
     dr.rectangle([16, leg_y, W - 16, H - 12], fill=(0, 0, 0, 215))
     # 凡例内のアイコン説明
-    dr.text((30, leg_y + 10), "● 惑星(色は実物の特徴)   ●赤 人工衛星   ●白 恒星   ― 軌道予測", font=font(20), fill=(230, 235, 250, 255))
+    dr.text((30, leg_y + 10), "● 惑星(色は実物の特徴)   ●赤 人工衛星   ●白 恒星   ― 軌道予測", font=load_font(20), fill=(230, 235, 250, 255))
     out = io.BytesIO()
     canvas.convert("RGB").save(out, format="PNG")
     return out.getvalue()

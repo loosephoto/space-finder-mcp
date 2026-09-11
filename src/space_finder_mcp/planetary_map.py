@@ -11,6 +11,8 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
+from .img_common import encode_jpeg, load_font, split_at_antimeridian
+
 UA = {"User-Agent": "space-finder-mcp/0.25 (MCP; planetary orbiter track)"}
 
 BODIES = {
@@ -285,17 +287,6 @@ def _fetch_tiles(body: dict, center_lon, center_lat, span_deg, zoom, max_workers
     return mosaic, center_px, (c_lo * 256, r_lo * 256), cols, rows
 
 
-def _font(sz: int):
-    from PIL import ImageFont
-    for p in ("C:/Windows/Fonts/meiryob.ttc", "C:/Windows/Fonts/meiryo.ttc",
-              "C:/Windows/Fonts/msgothic.ttc"):
-        try:
-            return ImageFont.truetype(p, sz)
-        except Exception:
-            continue
-    return ImageFont.load_default()
-
-
 def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
                             when: Optional[str] = None,
                             minutes: int = 90, step: int = 5,
@@ -320,7 +311,7 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
         span_deg: 表示する経度幅（度。360=天体全面, 既定 120, 最大 360）。
         out_px: 出力画像の長辺ピクセル（既定 900, 最大 1600）。
     '''
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw
 
     b = str(body).strip().lower()
     if b not in BODIES:
@@ -465,13 +456,7 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
             d.line([g2px(a, b) for a, b in seg], fill=(255, 140, 0),
                    width=max(3, img.size[0] // 300), joint="curve")
 
-    if trail:
-        seg = [trail[0]]
-        for i in range(1, len(trail)):
-            if abs(trail[i][0] - trail[i - 1][0]) > 150:
-                _drawseg(seg); seg = [trail[i]]
-            else:
-                seg.append(trail[i])
+    for seg in split_at_antimeridian(trail):
         _drawseg(seg)
 
     cx, cy = g2px(lon0, lat0)
@@ -481,7 +466,10 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
     d.ellipse([cx - r // 2, cy - r // 2, cx + r // 2, cy + r // 2], fill=(255, 255, 255))
 
     iw, ih = img.size
-    f_big = _font(max(16, iw // 34)); f_mid = _font(max(13, iw // 46)); f_sm = _font(max(11, iw // 54))
+    # 旧 _font は常にメイリオ Bold 優先だったため bold=True で等価
+    f_big = load_font(max(16, iw // 34), bold=True)
+    f_mid = load_font(max(13, iw // 46), bold=True)
+    f_sm = load_font(max(11, iw // 54), bold=True)
     ns = "北緯" if lat0 >= 0 else "南緯"; ew = "東経" if lon0 >= 0 else "西経"
     spd = f"{speed_kms:.2f} km/s" if speed_kms else "?"
     # 各行はフォントの実高さ + 余白で累積配置（高さ基準だと全面表示(縦が半分)で行が重なる）
@@ -512,14 +500,7 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
     d.rounded_rectangle([lx, ly, lx + lab_w, ly + lab_h], radius=8, fill=(200, 0, 0, 235))
     d.text((lx + 8, ly + 5), f"{ja} 現在位置", font=f_mid, fill=(255, 255, 255))
 
-    buf = io.BytesIO()
-    img.convert("RGB").save(buf, format="JPEG", quality=88)
-    jpeg = buf.getvalue()
-    if len(jpeg) > 3_500_000:
-        img = img.resize((int(iw * 0.7), int(ih * 0.7)), Image.LANCZOS)
-        buf = io.BytesIO()
-        img.convert("RGB").save(buf, format="JPEG", quality=85)
-        jpeg = buf.getvalue()
+    jpeg = encode_jpeg(img)   # 3.5MB 超は縮小して再エンコード（img_common）
     imgc = ImageContent(type="image", data=base64.b64encode(jpeg).decode("ascii"),
                         mimeType="image/jpeg", altText=f"{ja} の{body_cfg['ja']}面位置")
 
