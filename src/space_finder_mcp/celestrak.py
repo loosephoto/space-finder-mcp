@@ -41,6 +41,42 @@ def _fetch_tle(params: dict) -> list[dict]:
     return list(_fetch_tle_cached(key))
 
 
+@lru_cache(maxsize=64)
+def _fetch_tle_lines_cached(params_tuple: tuple) -> tuple:
+    """生 TLE を取得（FORMAT=TLE。JSON は TLE 2行を返さないため）。"""
+    p = dict(params_tuple)
+    p["FORMAT"] = "TLE"
+    r = requests.get(BASE, headers=UA, params=p, timeout=30)
+    r.raise_for_status()
+    return tuple(r.text.splitlines())
+
+
+def _fetch_tle_lines(params: dict) -> dict:
+    """{NORAD_CAT_ID: (line1, line2)} を返す。
+
+    CelesTrak の FORMAT=JSON は軌道要素のみで TLE_LINE1/TLE_LINE2 を返さないため、
+    生 TLE は FORMAT=TLE で別途取得して突き合わせる。取得失敗時は空 dict（呼び出し側で空文字）。
+    """
+    key = tuple(sorted((k, str(v)) for k, v in params.items()))
+    out: dict = {}
+    try:
+        lines = list(_fetch_tle_lines_cached(key))
+    except requests.RequestException:
+        return out
+    line1 = None
+    for ln in lines:
+        ln = ln.strip()
+        if ln.startswith("1 ") and len(ln) >= 60:
+            line1 = ln
+        elif ln.startswith("2 ") and line1 is not None:
+            try:
+                out[int(ln[2:7])] = (line1, ln)
+            except ValueError:
+                pass
+            line1 = None
+    return out
+
+
 def sat_tle(name: Optional[str] = None, norad_id: Optional[int] = None,
             group: Optional[str] = None, limit: int = 5) -> CallToolResult:
     """任意の人工衛星（ISS・ハッブル・気象衛星・中国宇宙ステーション等）の軌道要素(TLE)を返す。
@@ -94,8 +130,13 @@ def sat_tle(name: Optional[str] = None, norad_id: Optional[int] = None,
             structuredContent={"query": {"name": name, "norad_id": norad_id, "group": group}, "total": 0, "results": []},
         )
     rows = rows[:limit]
+    tle_lines = _fetch_tle_lines(params)
     records = []
     for r in rows:
+        try:
+            pair = tle_lines.get(int(r.get("NORAD_CAT_ID")))
+        except (TypeError, ValueError):
+            pair = None
         records.append({
             "object_name": r.get("OBJECT_NAME"),
             "norad_id": r.get("NORAD_CAT_ID"),
@@ -107,7 +148,7 @@ def sat_tle(name: Optional[str] = None, norad_id: Optional[int] = None,
             "arg_perigee_deg": r.get("ARG_OF_PERICENTER"),
             "mean_anomaly_deg": r.get("MEAN_ANOMALY"),
             "mean_motion_rev_day": r.get("MEAN_MOTION"),
-            "tle": f"{r.get('TLE_LINE1','')}\n{r.get('TLE_LINE2','')}",
+            "tle": f"{pair[0]}\n{pair[1]}" if pair else "",
         })
     lines = [f"CelesTrak 衛星軌道要素（{len(records)} 件）:"]
     for i, r in enumerate(records, 1):

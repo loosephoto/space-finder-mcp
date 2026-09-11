@@ -7,24 +7,43 @@ SGP4 で現在の緯度・経度・高度を計算する。Open Notify の iss_n
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 from functools import lru_cache
 from mcp.types import CallToolResult, TextContent
 from sgp4.api import Satrec, jday
 
-TLE_URL = "https://celestrak.org/NORAD/elements/gp.php?CATNR=48274&FORMAT=JSON"
+# CelesTrak gp.php は FORMAT=JSON だと TLE 2行 (TLE_LINE1/TLE_LINE2) を返さず軌道要素
+# フィールドのみを返すため、SGP4 に渡す生 TLE は FORMAT=TLE で取得する。
+TLE_URL = "https://celestrak.org/NORAD/elements/gp.php?CATNR=48274&FORMAT=TLE"
 UA = {"User-Agent": "space-finder-mcp/0.11 (MCP; Tiangong live position)"}
 TIANGONG_NORAD = 48274
 
 
+def _tle_epoch_iso(line1: str) -> str:
+    """TLE 1行目のエポック(YYDDD.DDDDDDDD)を ISO8601(UTC) 文字列に変換する。"""
+    try:
+        raw = line1[18:32].strip()
+        yy, doy = int(raw[:2]), float(raw[2:])
+        year = 2000 + yy if yy < 57 else 1900 + yy
+        dt = datetime(year, 1, 1, tzinfo=timezone.utc) + timedelta(days=doy - 1.0)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, IndexError):
+        return ""
+
+
 @lru_cache(maxsize=1)
-def _fetch_tiangong_tle() -> list:
-    """天宮の最新TLEをCelesTrakから取得（セッション内キャッシュ）。TLEは数時間有効。"""
+def _fetch_tiangong_tle() -> tuple:
+    """天宮の最新TLE (name, line1, line2) を取得（セッション内キャッシュ）。TLEは数時間有効。"""
     r = requests.get(TLE_URL, headers=UA, timeout=30)
     r.raise_for_status()
-    return r.json()
+    raw = r.text.strip().splitlines()
+    name = raw[0].strip() if raw else ""
+    lines = [ln.strip() for ln in raw if ln.startswith(("1 ", "2 "))]
+    if len(lines) < 2:
+        raise ValueError("CelesTrak の応答に TLE 2行が含まれていません")
+    return name, lines[0], lines[1]
 
 
 def _compute_position(tle_line1: str, tle_line2: str) -> dict:
@@ -62,21 +81,18 @@ def tiangong_now() -> CallToolResult:
         CallToolResult: 表示用サマリ + JSON。
     """
     try:
-        rows = _fetch_tiangong_tle()
+        _name, tle1, tle2 = _fetch_tiangong_tle()
     except requests.RequestException as e:
         return CallToolResult(
             content=[TextContent(type="text", text=f"CelesTrak への接続に失敗しました: {e}")],
             structuredContent={"error": str(e), "source": "celestrak.org"},
         )
-    if not rows:
+    except ValueError as e:
         return CallToolResult(
-            content=[TextContent(type="text", text="天宮の軌道要素が見つかりませんでした。")],
-            structuredContent={"total": 0},
+            content=[TextContent(type="text", text=f"天宮の軌道要素(TLE)を取得できませんでした: {e}")],
+            structuredContent={"error": str(e), "source": "celestrak.org"},
         )
-    row = rows[0]
-    tle1 = row.get("TLE_LINE1", "")
-    tle2 = row.get("TLE_LINE2", "")
-    epoch = (row.get("EPOCH") or "")[:19]
+    epoch = _tle_epoch_iso(tle1)
     pos = _compute_position(tle1, tle2)
     if "error" in pos:
         return CallToolResult(
