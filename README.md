@@ -12,22 +12,26 @@
 
 - **画像・動画・音声をそのまま返せる** — 画像はチャット内にインライン表示、音声・動画は再生URLを返却
 - **tokyo-transit方式のJSON応答** — 人間向け表示（`content`）とLLM向け純粋JSON（`structuredContent`）を分離し、情報を失わずに構造化データを渡せる
-- **認証不要のツールが大半** — APIキーの管理なしですぐ動く（NASAの一部ツールのみ任意キー、ESA/Copernicus のダウンロードは任意のOAuth2クレデンシャル）
+- **認証不要のツールが大半** — APIキーの管理なしですぐ動く（NASA の一部ツールのみ任意キー。ESA/Copernicus は検索・プレビューのみで、認証付きダウンロードは非対応）
 - **他国の宇宙機関データに対応** — インド ISRO・欧州 ESA/Copernicus・日本 JAXA・カナダ CSA・ブラジル INPE・英国 EO DataHub・フランス CNES・中国 CNSA 系ポータル・全衛星軌道(CelesTrak)・EO Dashboard(NASA/ESA/JAXA共同) を横断検索
 - **引用元を明示** — 科学的な内容には必ずデータソースへのリンクを併記
 
-## 🆕 直近の更新内容（v0.25.0）
+## 🆕 直近の更新内容（v0.25.1）
 
-**任意の天体の探査機（周回機・ローバー）の位置を、その天体の地図に表示する汎用ツール群を追加**（v0.25.0）。
+**エラー処理の体系的修正と、Claude Code / Codex からのインストール対応**（v0.25.1）。
 
-- **`planetary_orbiter_track`**（汎用・天体周回機マップ）: 月・火星・水星・タイタン・ベスタ・ケレス等、NASA Trek が等角図法グローバル画像を持つ**任意の天体**を周回する探査機の**現在位置と軌道トレイル**を画像化。JPL Horizons の状態ベクトルを **IAU 自転モデル**で天体固定座標（緯度経度・高度）に変換して正確に計算。認証不要。
-  - `span_deg=360` で**天体全面表示**（2:1ビュー）、既定 `120` で現在位置中心の局所表示。`step` を秒単位まで細分化できる**高精度トレイル**（TLIST を POST+分割バッチ送信で1400点超を高速取得）。
-  - 対応天体: moon（LRO・ゲートウェイ）、mars（MRO・Mars Odyssey）など。新規天体は `BODIES` テーブルに1行足すだけで追加可能。
-- **`planetary_rover_location_map`**（汎用・天体面ローバー位置マップ）: 探査ローバーの**現在地・走行経路・着陸地点**を、その天体の局所地図に重ねて画像化。ベースマップ・タイル合成は共通コアを再利用。対応: perseverance・curiosity。
-- **専用ルーチンの統合・整理**: `lunar_track`（lunar_map.py）と `mars_rover_location_map`（位置マップ部分）を汎用版に統合し削除。`mars_rover_status`（状況・天気）は引き続き提供。
-- 運用終了機（かぐや・MAVEN・あかつき等）は推測せず、丁寧に案内。
+- **不正な引数で例外が漏れなくなった（51箇所 / 26ファイル）** — MCPクライアントは型を保証しないため（`"limit": "5件"`、`null`、`[]` など）、ツール入口の数値引数を `int()`/`float()` へ直に渡すと `ValueError`/`TypeError` がMCP呼び出しごと例外になっていました。共通ヘルパー `input_utils.as_int` / `as_float`（既定値へフォールバック＋範囲クランプ）へ統一し、意味的に不正な値は受け取った値を添えた日本語エラーで案内します（例: `band="Band 6"` → 「band は 1〜10 の整数で指定してください」）。
+- **`uk_stac_search` のキーワード検索を修正** — 英国 EO DataHub はキーワードをリストで要求するため、`query=` を指定した検索が常に `400 Bad Request` になっていました（未指定時は成功するため気づきにくい不具合）。
+- **Claude Code / Codex / 各種MCPクライアントからのインストールに対応** — [`CLAUDE.md`](CLAUDE.md)・[`AGENTS.md`](AGENTS.md)・[`SKILL.md`](SKILL.md)・[`mcp.json`](mcp.json)・[`.env.example`](.env.example)・[`.claude/rules/`](.claude/rules/) を同梱し、`claude mcp add` / `codex mcp add` の手順を追記。
+- **リポジトリ直下の `.env` に対応**（依存追加なし）— APIキーをMCPクライアントの設定ファイルに書かずに済みます（優先順位: クライアントの env > `.env`）。`python -m space_finder_mcp` でも起動可能。
+- **回帰検証ゲート [`scripts/check-tools.py`](scripts/check-tools.py) を同梱** — 全45ツール実呼び出し／ネットワーク全断（例外漏れ検査）／デッドコード走査／**不正引数の注入（252通り）** を1コマンドで実行。
+- **記述の訂正** — Copernicus の認証付きダウンロード（OAuth2）は本サーバーでは未対応である旨に修正。
 
 登録ツールは **45本**。認証不要のツールが大半です。
+
+### 以前の更新
+
+- **v0.25.0** — 任意天体の周回機・ローバー位置マップ（`planetary_orbiter_track` / `planetary_rover_location_map`）。`span_deg=360` で天体全面表示、`step` で秒単位の高精度トレイル。旧 `lunar_track` は統合・削除。
 
 ## 📦 インストール
 

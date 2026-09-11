@@ -172,5 +172,5 @@ uv run python scripts/check-tools.py                  # 全45ツール実呼び�
 
 ## 更新履歴
 
+- v0.25.1 — 引数の防御的数値変換（`input_utils.as_int` / `as_float`、51箇所）で例外漏れを解消、`uk_stac_search` のキーワード検索修正、Claude Code / Codex インストール対応（CLAUDE.md / AGENTS.md / mcp.json / .env.example）、リポジトリ直下 `.env` 対応、検証ゲート `scripts/check-tools.py` 同梱
 - v0.25.0 — 汎用の天体周回機/ローバー位置マップを追加（`planetary_orbiter_track` / `planetary_rover_location_map`）。専用ルーチン（lunar_track 等）を統合
-- v0.25.x（未リリース）— 画像アセット/TTL/高コスト計算のキャッシュ導入、画像ヘルパ統合、CelesTrak TLE取得の一本化、ペイロード削減、Claude Code / Codex 対応
