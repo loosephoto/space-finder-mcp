@@ -636,6 +636,7 @@ hermes mcp test space-finder-mcp
 ```
 src/space_finder_mcp/
 ├── __init__.py          # main() → mcp.run()
+├── __main__.py          # python -m space_finder_mcp 用の入口
 ├── server.py            # FastMCP サーバー定義・45ツール登録
 ├── stac_common.py       # STAC系共通の入力検証ヘルパー（bbox/雲量。ツール定義なし）
 ├── input_utils.py       # 引数の防御的数値変換 as_int/as_float（不正値でも例外を漏らさない）

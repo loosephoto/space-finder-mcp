@@ -31,7 +31,7 @@ codex mcp add space-finder --env NASA_API_KEY=<your_key> -- uv --directory <ABS_
 codex mcp list
 ```
 
-`--env` は不要なら省けます（その場合 `.env` か DEMO_KEY を使用）。検証済みの代替起動コマンド: `uv run --project <ABS_PATH> space-finder-mcp` / `<ABS_PATH>/.venv/Scripts/python.exe -c "from space_finder_mcp import main; main()"`。
+`--env` は不要なら省けます（その場合 `.env` か DEMO_KEY を使用）。検証済みの代替起動コマンド: `uv run --project <ABS_PATH> space-finder-mcp` / `python -m space_finder_mcp` / `<ABS_PATH>/.venv/Scripts/python.exe -c "from space_finder_mcp import main; main()"`。
 
 ## 変更時に必ず実行する検証（ゲート）
 

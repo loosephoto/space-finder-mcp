@@ -44,6 +44,7 @@ claude mcp list   # 確認
 ```bash
 uv --directory /abs/path/to/space-finder-mcp run space-finder-mcp
 uv run --project /abs/path/to/space-finder-mcp space-finder-mcp
+python -m space_finder_mcp                                                                              # パッケージ起動
 /abs/path/to/space-finder-mcp/.venv/Scripts/python.exe -c "from space_finder_mcp import main; main()"   # Windows
 ```
 
