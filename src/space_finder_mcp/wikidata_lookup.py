@@ -19,8 +19,9 @@ HEADERS = {
 }
 
 
-def _q(s: str) -> str:
-    return s.strip()
+def _q(s) -> str:
+    """前後の空白を除去する（None でも落ちないように文字列化する）。"""
+    return str(s or "").strip()
 
 
 # カテゴリごとの instance-of Q-id と、ソートに使う日付プロパティの既定
@@ -67,7 +68,16 @@ def reverse_lookup(
         order: "asc"=古い順(最初のもの), "desc"=新しい順。
         language: ラベル表示言語（ja/en/zh など）。
     """
-    cat_qid, pat = CATEGORY_ENTITIES.get(_q(category).lower(), (category, "instance"))
+    category = _q(category)
+    if not category:
+        # 必須引数が未指定(None/空)の場合も例外を漏らさず候補を提示して止める
+        return CallToolResult(
+            content=[TextContent(type="text", text="カテゴリを指定してください。登録済みカテゴリ: "
+                                 + ", ".join(sorted(CATEGORY_ENTITIES)))],
+            structuredContent={"error": "category not specified",
+                               "known": sorted(CATEGORY_ENTITIES)},
+        )
+    cat_qid, pat = CATEGORY_ENTITIES.get(category.lower(), (category, "instance"))
     # Q-id 形式でなければ entity 名として受け取ったとみなして返す
     if not cat_qid.startswith("Q"):
         return CallToolResult(
