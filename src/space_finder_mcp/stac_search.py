@@ -12,6 +12,8 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .stac_common import parse_bbox, parse_cloud_cover
+
 STAC = "https://earth-search.aws.element84.com/v1"
 UA = {"User-Agent": "space-finder-mcp/0.7 (MCP; AWS Earth Search STAC)"}
 
@@ -109,23 +111,30 @@ def stac_search(collection: str = "sentinel-2-l2a", bbox: Optional[str] = None,
             )
         lat, lon = g["latitude"], g["longitude"]
         body["bbox"] = [lon - 0.1, lat - 0.1, lon + 0.1, lat + 0.1]
-    elif bbox:
-        try:
-            body["bbox"] = [float(x) for x in bbox.replace(",", " ").split()]
-        except ValueError:
-            return CallToolResult(
-                content=[TextContent(type="text", text="bbox は 'lon_min,lat_min,lon_max,lat_max' 形式で指定してください。")],
-                structuredContent={"error": "bad bbox"},
-            )
     else:
-        # 既定: 日本・関東
-        body["bbox"] = [139.6, 35.5, 139.9, 35.8]
+        bbox_vals, bbox_err = parse_bbox(bbox)
+        if bbox_err:
+            return CallToolResult(
+                content=[TextContent(type="text", text=bbox_err)],
+                structuredContent={"error": "bad bbox", "bbox": bbox},
+            )
+        if bbox_vals:
+            body["bbox"] = bbox_vals
+        else:
+            # 既定: 日本・関東
+            body["bbox"] = [139.6, 35.5, 139.9, 35.8]
 
     if datetime:
         body["datetime"] = datetime
-    if max_cloud_cover is not None:
+    cloud, cloud_err = parse_cloud_cover(max_cloud_cover)
+    if cloud_err:
+        return CallToolResult(
+            content=[TextContent(type="text", text=cloud_err)],
+            structuredContent={"error": "bad max_cloud_cover", "max_cloud_cover": max_cloud_cover},
+        )
+    if cloud is not None:
         # Earth Search は STAC の query パラメータでフィールドフィルタ（cql filter は非対応）
-        body["query"] = {"eo:cloud_cover": {"lt": float(max_cloud_cover)}}
+        body["query"] = {"eo:cloud_cover": {"lt": cloud}}
 
     try:
         r = requests.post(f"{STAC}/search", headers=UA, json=body, timeout=35)

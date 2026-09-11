@@ -549,6 +549,7 @@ hermes mcp test space-finder-mcp
 src/space_finder_mcp/
 ├── __init__.py          # main() → mcp.run()
 ├── server.py            # FastMCP サーバー定義・27ツール登録
+├── stac_common.py       # STAC系共通の入力検証ヘルパー（bbox/雲量。ツール定義なし）
 ├── wikidata_lookup.py   # reverse_lookup（逆引き歴史Q&A）
 ├── launch.py            # upcoming_launches / china_launches / russia_launches（ロケット打ち上げ・中国・ロシア）
 ├── nasa.py              # apod / neo_today（NASA日次）

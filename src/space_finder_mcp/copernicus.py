@@ -13,6 +13,8 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .stac_common import parse_bbox, parse_cloud_cover
+
 STAC = "https://stac.dataspace.copernicus.eu/v1"
 UA = {"User-Agent": "space-finder-mcp/0.2 (MCP; Copernicus STAC)"}
 
@@ -90,18 +92,24 @@ def copernicus_search(collection: str = "sentinel-2-l2a", bbox: Optional[str] = 
     """
     limit = max(1, min(int(limit), 10))
     body: dict = {"limit": limit, "collections": [collection]}
-    if bbox:
-        try:
-            body["bbox"] = [float(x) for x in bbox.replace(",", " ").split()]
-        except ValueError:
-            return CallToolResult(
-                content=[TextContent(type="text", text="bbox は 'lon_min,lat_min,lon_max,lat_max' 形式で指定してください。")],
-                structuredContent={"error": "bad bbox"},
-            )
+    bbox_vals, bbox_err = parse_bbox(bbox)
+    if bbox_err:
+        return CallToolResult(
+            content=[TextContent(type="text", text=bbox_err)],
+            structuredContent={"error": "bad bbox", "bbox": bbox},
+        )
+    if bbox_vals:
+        body["bbox"] = bbox_vals
     if datetime:
         body["datetime"] = datetime
-    if max_cloud_cover is not None:
-        body["filter"] = {"op": "<", "args": [{"property": "eo:cloud_cover"}, float(max_cloud_cover)]}
+    cloud, cloud_err = parse_cloud_cover(max_cloud_cover)
+    if cloud_err:
+        return CallToolResult(
+            content=[TextContent(type="text", text=cloud_err)],
+            structuredContent={"error": "bad max_cloud_cover", "max_cloud_cover": max_cloud_cover},
+        )
+    if cloud is not None:
+        body["filter"] = {"op": "<", "args": [{"property": "eo:cloud_cover"}, cloud]}
     try:
         r = requests.post(f"{STAC}/search", headers=UA, json=body, timeout=35)
         r.raise_for_status()

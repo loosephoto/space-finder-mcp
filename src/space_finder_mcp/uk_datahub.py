@@ -10,6 +10,8 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .stac_common import parse_bbox
+
 STAC = "https://eodatahub.org.uk/api/catalogue/stac"
 UA = {"User-Agent": "space-finder-mcp/0.3 (MCP; UK EO DataHub STAC)"}
 
@@ -33,14 +35,14 @@ def uk_stac_search(collection: Optional[str] = None, query: Optional[str] = None
     body: dict = {"limit": limit}
     if collection:
         body["collections"] = [collection]
-    if bbox:
-        try:
-            body["bbox"] = [float(x) for x in bbox.replace(",", " ").split()]
-        except ValueError:
-            return CallToolResult(
-                content=[TextContent(type="text", text="bbox は 'lon_min,lat_min,lon_max,lat_max' 形式で指定してください。")],
-                structuredContent={"error": "bad bbox"},
-            )
+    bbox_vals, bbox_err = parse_bbox(bbox)
+    if bbox_err:
+        return CallToolResult(
+            content=[TextContent(type="text", text=bbox_err)],
+            structuredContent={"error": "bad bbox", "bbox": bbox},
+        )
+    if bbox_vals:
+        body["bbox"] = bbox_vals
     if datetime:
         body["datetime"] = datetime
     if query:
