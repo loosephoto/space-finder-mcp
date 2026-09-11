@@ -11,6 +11,7 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
+from .cache import disk_get
 from .img_common import encode_jpeg, load_font, split_at_antimeridian
 
 UA = {"User-Agent": "space-finder-mcp/0.25 (MCP; planetary orbiter track)"}
@@ -264,12 +265,11 @@ def _fetch_tiles(body: dict, center_lon, center_lat, span_deg, zoom, max_workers
     url = body["tile"]
 
     def _one(tc):
+        # タイルは内容が変わらない資産なのでディスクキャッシュ経由（TTL_ASSET）。
+        # 2回目以降は同一タイルを再ダウンロードしない（LRO全面表示で54枚/回）。
         rr, cc = tc
-        try:
-            r = requests.get(url.format(z=zoom, row=rr, col=cc), headers=UA, timeout=20)
-            return rr, cc, (r.content if r.status_code == 200 else None)
-        except requests.RequestException:
-            return rr, cc, None
+        return rr, cc, disk_get(url.format(z=zoom, row=rr, col=cc),
+                                subdir="trek", timeout=20, headers=UA)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
         results = list(ex.map(_one, tiles))

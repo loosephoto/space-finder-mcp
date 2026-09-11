@@ -14,6 +14,8 @@ import base64
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
+from .cache import disk_get
+
 # NASA Sounds from Beyond / 各ミッションの「宇宙の音」短尺キュレーション
 # (NASA公式が配布する効果音。ストリーミング/ダウンロード用の直接URL)。
 # keywords で検索マッチさせる。source は出典ページ。
@@ -119,16 +121,11 @@ def _asset_hrefs(nasa_id: str) -> list[str]:
 
 
 def _fetch_image_bytes(url: str, max_bytes: int = 3_500_000) -> Optional[bytes]:
-    """画像URLを取得して bytes で返す。大きすぎる場合は None。"""
-    try:
-        r = requests.get(url, headers=UA, timeout=30)
-        r.raise_for_status()
-        data = r.content
-        if len(data) > max_bytes:
-            return None
-        return data
-    except requests.RequestException:
-        return None
+    """画像URLを取得して bytes で返す（ディスクキャッシュ経由）。
+
+    NASA の画像資産は内容が変わらないため再利用する。大きすぎる場合は None。
+    """
+    return disk_get(url, subdir="media", timeout=30, headers=UA, max_bytes=max_bytes)
 
 
 def _first_image_url(item: dict, nasa_id: str) -> Optional[str]:

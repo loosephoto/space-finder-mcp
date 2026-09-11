@@ -20,6 +20,7 @@ import os
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
+from .cache import disk_get
 from .celestrak import fetch_tle
 from .img_common import load_font
 
@@ -251,12 +252,8 @@ def _render_accurate(scene):
 
 # ---------- 描画エンジン B: Pillow (簡易・実写合成) ----------
 def _fetch_bg(url, max_bytes=3500000):
-    try:
-        r = requests.get(url, headers=UA, timeout=30)
-        r.raise_for_status()
-        return r.content if len(r.content) <= max_bytes else None
-    except requests.RequestException:
-        return None
+    """背景の実写画像を取得（ディスクキャッシュ経由。NASA 資産は不変）。"""
+    return disk_get(url, subdir="bg", timeout=30, headers=UA, max_bytes=max_bytes)
 
 
 def _render_simple(scene):
