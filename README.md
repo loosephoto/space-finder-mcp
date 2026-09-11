@@ -103,7 +103,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 
 ## 🛠️ ツール一覧
 
-登録ツールは **45本**（他国の宇宙機関データ 15本＋火星探査ローバー状況 1本＋天文観測(ESO/CADC/ALMA) 3本＋電波望遠鏡(TART) 1本＋天文ニュース 1本＋天体観測用天気 1本＋天体位置・星座 1本＋星図合成 1本＋太陽系俯瞰 1本＋日食時系列 1本＋NASA POWER気候 1本＋EO Dashboard 2本＋宇宙天気 1本＋AWS STAC 2本＋ISS位置 1本＋衛星地上軌道 1本＋汎用天体周回機 1本＋汎用ローバー位置 1本＋WMO OSCAR 1本＋中国/ロシア打ち上げ・天宮 3本＋メディア/逆引き 4本）。すべて動作検証済みです。
+登録ツールは **45本**（他国の宇宙機関データ 15本＋火星探査ローバー状況 1本＋天文観測(ESO/CADC/ALMA) 3本＋電波望遠鏡(TART) 1本＋天文ニュース 1本＋天体観測用天気 1本＋天体位置・星座 1本＋星図合成 1本＋太陽系俯瞰 1本＋日食時系列 1本＋NASA POWER気候 1本＋EO Dashboard 2本＋宇宙天気 1本＋AWS STAC 2本＋ISS位置 1本＋衛星地上軌道 1本＋汎用天体周回機 1本＋汎用ローバー位置 1本＋WMO OSCAR 1本＋中国/ロシア打ち上げ・天宮 3本＋メディア/逆引き 4本）。全45ツールを実呼び出しで検証済みです（外部APIの障害・レート制限時は、例外ではなく CallToolResult のエラーとして返します）。
 
 | ツール | できること | データ源 | 認証 |
 |--------|-----------|---------|------|
@@ -130,7 +130,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `cnes_status` | フランスCNESのポータル（THEIA/GEODES）到達状態・概要 | CNES THEIA/GEODES | 不要(ダウンロードは要登録) |
 | `astronomy_weather` | 天体観測に最適な夜間の時間帯を予報（雲量・視程・風速・降水・**月相・月明かり**から判断） | Open-Meteo | 不要 |
 | `constellation_now` | 指定地点・時刻で太陽・月・惑星の高度・方位・星座を計算（観測可否判断） | Skyfield + JPL de421 | 不要 |
-| `astronomy_news` | Sky & Telescope の最新天文ニュース・「今週の星空ガイド」を取得（観測/ニュース絞込可） | Sky & Telescope RSS | 不要 |
+| `astronomy_news` | 最新の天文ニュース・「今週の星空ガイド」を取得（観測/ニュース絞込可）。取得不可時は他ソースへ自動フォールバック | Sky & Telescope / Universe Today / NASA / Phys.org RSS | 不要 |
 | `mars_rover_status` | 火星探査ローバー（キュリオシティ等）の現在の状況・天気・ソルを表示 | NASA Mars Weather | 不要 |
 | `power_climate` | 任意地点の過去の気候・太陽エネルギー統計（気温・日射量・風速） | NASA POWER | 不要 |
 | `eso_seeing` | ESO パラナル天文台（チリ, VLT）のリアルタイム大気コンディション（シーイング・可降水量・気象） | ESO ASM API | 不要 |
@@ -190,7 +190,9 @@ A: 秋山豊寛（1942年生・日本人初）
 
 ### 🌌 `apod` / `neo_today` — NASA日次データ
 
-- `apod`: 今日（または指定日）の [Astronomy Picture of the Day](https://apod.nasa.gov)
+- `apod`: 今日（または指定日）の [Astronomy Picture of the Day](https://apod.nasa.gov)。
+  `date` 省略時は「今日」を明示指定して取得し、当日分が未公開（404）や API が 500 を返す場合は
+  直近の公開分（前日）へ自動フォールバックします（`fallback_to_previous_day` で判定可能）。
 - `neo_today`: 今日地球に接近する小惑星（直径・接近距離・速度）
 
 キーは**サーバー側でのみ保持**し、クライアントへ晒しません（公開デプロイ時は環境変数・シークレット管理を推奨）。
@@ -548,7 +550,7 @@ hermes mcp test space-finder-mcp
 ```
 src/space_finder_mcp/
 ├── __init__.py          # main() → mcp.run()
-├── server.py            # FastMCP サーバー定義・27ツール登録
+├── server.py            # FastMCP サーバー定義・45ツール登録
 ├── stac_common.py       # STAC系共通の入力検証ヘルパー（bbox/雲量。ツール定義なし）
 ├── wikidata_lookup.py   # reverse_lookup（逆引き歴史Q&A）
 ├── launch.py            # upcoming_launches / china_launches / russia_launches（ロケット打ち上げ・中国・ロシア）

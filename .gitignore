@@ -17,3 +17,8 @@ modern_st_index.json
 
 # ローカル音声資産（コード未参照）
 sputnik_beep.wav
+
+# 手元での描画テスト出力（リポジトリ直下に落ちる画像・音声の一時ファイル）
+/_*.jpg
+/_*.png
+/_*.wav
