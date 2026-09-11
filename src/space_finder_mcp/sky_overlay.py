@@ -22,7 +22,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import disk_get
 from .celestrak import fetch_tle
-from .img_common import load_font
+from .img_common import encode_jpeg, load_font
 
 _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
 os.makedirs(_DATA_DIR, exist_ok=True)
@@ -370,9 +370,8 @@ def _render_simple(scene):
     dr.rectangle([16, leg_y, W - 16, H - 12], fill=(0, 0, 0, 215))
     # 凡例内のアイコン説明
     dr.text((30, leg_y + 10), "● 惑星(色は実物の特徴)   ●赤 人工衛星   ●白 恒星   ― 軌道予測", font=load_font(20), fill=(230, 235, 250, 255))
-    out = io.BytesIO()
-    canvas.convert("RGB").save(out, format="PNG")
-    return out.getvalue()
+    # 実写合成なので JPEG が適切（PNG 比 約1/5。3.5MB 超は縮小して再エンコード）
+    return encode_jpeg(canvas)
 
 
 # ---------- 選択ツール ----------
@@ -411,11 +410,13 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
     import base64
     try:
         if use_acc:
-            png = _render_accurate(scene)
+            img_bytes = _render_accurate(scene)      # matplotlib 出力は PNG
+            mime = "image/png"
             eng_label = "accurate (matplotlib)"
             alt = "正確な星図で描画した惑星・人工衛星オーバーレイ"
         else:
-            png = _render_simple(scene)
+            img_bytes = _render_simple(scene)        # 実写合成は JPEG（転送量削減）
+            mime = "image/jpeg"
             eng_label = "simple (Pillow, 視認性重視)"
             alt = "実写背景に惑星と人工衛星を合成した学生向け図"
     except Exception as e:
@@ -423,8 +424,8 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
             content=[TextContent(type="text", text="画像生成に失敗しました: {}".format(str(e)[:150]))],
             structuredContent={"error": str(e)[:200]},
         )
-    img = ImageContent(type="image", data=base64.b64encode(png).decode("ascii"),
-                       mimeType="image/png", altText=alt)
+    img = ImageContent(type="image", data=base64.b64encode(img_bytes).decode("ascii"),
+                       mimeType=mime, altText=alt)
     lines = [
         "🗺️ **{} の空（惑星と人工衛星・{}）**".format(scene["time_utc"], eng_label),
         "場所: 緯度 {:.2f}° 経度 {:.2f}°".format(ll[0], ll[1]),
@@ -434,7 +435,8 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
     ]
     for nm, s in scene["satellites"].items():
         lines.append("- {}: 方位 {:.0f}° 仰角 {:.0f}°".format(nm, s["az"], s["alt"]))
-    lines.append("画像は上に表示（base64 PNG）。出典: JPL de421 + Skyfield / CelesTrak TLE + SGP4")
+    lines.append("画像は上に表示（base64 " + ("PNG" if mime == "image/png" else "JPEG") +
+                 "）。出典: JPL de421 + Skyfield / CelesTrak TLE + SGP4")
     return CallToolResult(
         content=[TextContent(type="text", text="\n".join(lines)), img],
         structuredContent={"time_utc": scene["time_utc"], "lat": ll[0], "lon": ll[1],

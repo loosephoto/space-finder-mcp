@@ -113,7 +113,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `russia_launches` | ロシア（Roscosmos）のロケット打ち上げ予定（ソユーズ・Progress・Luna等・射場・ミッション） | Launch Library 2 | 不要 |
 | `apod` | 今日（指定日）の天文写真 | NASA Open API | キー(任意) |
 | `neo_today` | 今日地球に接近する小惑星 | NASA Open API | キー(任意) |
-| `search_space_images` | 惑星・衛星の画像検索＋**チャット内インライン表示** | NASA Image & Video Library | 不要 |
+| `search_space_images` | 惑星・衛星の画像検索＋**チャット内インライン表示**（既定は先頭1枚・`inline_max` で増減） | NASA Image & Video Library | 不要 |
 | `search_space_audio` | 宇宙音声の検索（`kind`で効果音/ポッドキャスト切替） | NASA / Sounds from Beyond | 不要 |
 | `search_space_videos` | 宇宙動画の検索＋再生URL（解像度別・字幕付き） | NASA Image & Video Library | 不要 |
 | `isro_data` | インドISROの人工衛星・ロケット・顧客衛星・センター一覧/検索 | ISRO公式API (github.com/isro/api) | 不要 |
@@ -137,7 +137,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `cadc_observations` | CADC（カナダ天文データセンター）の観測データ検索（HST・ジェミニ等） | CADC TAP | 不要(画像DLは一部要登録) |
 | `alma_search` | ALMA（アルマ望遠鏡）科学アーカイブの観測データ検索（観測対象・座標・周波数帯・公開/要権限） | ALMA Science Archive (NAOJ, IVOA TAP) | 不要 |
 | `radio_sources_now` | TART オープン電波望遠鏡が「いま観測できる電波源」（GNSS・静止衛星等）を仰角順に表示 | TART source catalog (NZ) | 不要 |
-| `sky_map_with_satellites` | 指定地の空に太陽系の惑星と人工衛星を重ねた画像（matplotlib正確版/Pillow簡易版を選択） | JPL de421+Skyfield / CelesTrak+SGP4 | 不要 |
+| `sky_map_with_satellites` | 指定地の空に太陽系の惑星と人工衛星を重ねた画像（matplotlib正確版=PNG/Pillow簡易版=JPEGを選択） | JPL de421+Skyfield / CelesTrak+SGP4 | 不要 |
 | `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
 | `solar_eclipse_series` | 日食（太陽が月に欠ける過程）の時系列パネル画像（食の始まり〜最大〜終わり7枚・次回日食の自動検索・max_magnitude対応） | JPL DE421+Skyfield | 不要 |
 | `eodashboard_collections` | EO Dashboard（NASA×ESA×JAXA共同）の173データセットをテーマ・機関・キーワードで検索 | EO Dashboard (GitHub catalog) | 不要 |
@@ -203,6 +203,10 @@ NASA Image & Video Library から惑星・人工衛星の画像を検索し、**
 
 - `content`: テキストサマリ + base64の画像（`ImageContent`）
 - `structuredContent`: `{title, date, nasa_id, image_url, keywords}` のJSON
+- **転送量**: インラインに埋め込む画像は既定で**先頭1枚**（`inline_max=1`〜`5` で増やせる）。
+  高画質URLは `structuredContent.results[].image_url` に必ず入るため、必要なら再取得できます。
+  インライン画像は一段小さいバリエーション（`~large`→`~medium`）を使い、画像資産は
+  ディスクキャッシュされます（同じ画像を再ダウンロードしません）。
 
 ```text
 Q: 木星の画像を見せて → 木星の写真がチャットに表示される
@@ -464,7 +468,8 @@ ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカ�
 - `"simple"`（既定）: **Pillow** による実写背景の簡易合成。惑星を種類別アイコン（岩石惑星=各色、木星=縞、土星=環）、衛星を赤い発光マーカー＋軌道予測線で描く。**学生・観賞用途で視認性重視**。
 - `"accurate"`: **matplotlib** による正確な星図。方位・仰角グリッド、軌道予測線を精確表示（科学・詳細用途）。
 
-画像は content に base64 でインライン表示、座標一覧は structuredContent に JSON。
+画像は content に base64 でインライン表示（`simple`=**JPEG** / `accurate`=PNG）、座標一覧は structuredContent に JSON。
+`simple` は実写合成のため JPEG が適切で、PNG 比で約1/5の転送量になります（1400×1400 で 992KB → 188KB）。
 
 ```json
 {"time_utc": "...", "engine": "simple (Pillow)",
@@ -520,6 +525,33 @@ ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカ�
 - 走行経路(橙線)・現在地(赤●)・着陸地点(青●)を合成し、ローバーを画像中心に配置。
 - 対応ローバー（ROVERS テーブル）: perseverance（パーサヴィアランス）・curiosity（キュリオシティ）。
 - **正直な制約**: ローバー位置データは NASA MMGIS（火星専用）のみ。月面ローバー等の現役位置データは公開されておらず、データ源ができればテーブル追加で対応可能。
+
+## ⚡ キャッシュ（API呼び出しと処理の削減）
+
+外部APIへの呼び出し回数と再計算を抑えるため、データの性質ごとに3層でキャッシュします（`cache.py`）。
+
+| 層 | 対象 | 方式 | TTL |
+|----|------|------|-----|
+| ① 不変アセット | Trek 地図タイル / NASA 画像資産 / 星空マップ背景 | **ディスク**（`%LOCALAPPDATA%\Temp\space_finder_mcp\cache`） | 30日（実質無期限） |
+| ② 揮発データ | RSS・打ち上げ(LL2)・宇宙天気(DONKI)・STAC検索・天気・ESO | プロセス内メモリ | **10分** |
+| | 天体観測用天気・メディア検索・ALMA/CADC | プロセス内メモリ | **30分** |
+| | APOD・NEO・EO Dashboard（日次データ。`DEMO_KEY` 消費も抑制） | プロセス内メモリ | **1時間** |
+| | データセット一覧・ジオコーディング・NASA POWER・Wikidata逆引き | プロセス内メモリ | **24時間** |
+| ③ 高コスト計算 | 日食（次の日食探索＝約23秒／指定日の判定＝約7秒） | **緯度経度を丸めたキー**でメモリ | 24時間 |
+
+**実測効果**（1回目 → 2回目）
+- `planetary_orbiter_track`(LRO): **4.46s / 73リクエスト → 1.07s / 1リクエスト**（タイル72枚を再取得しない）
+- `solar_eclipse_series`(東京): **26.08s → 0.69s** ／ 指定日 6.89s → 0.67s
+- `satellite_status`: 50.28s → 0.00s ／ `astronomy_weather` 2.56s → 0.00s
+- `sky_map_with_satellites`(simple) の画像: **992KB → 188KB**（JPEG化）
+- `search_space_images`: インライン画像を3枚 → 1枚（`inline_max` で増やせる）
+
+**設計上の約束**
+- エラー応答はキャッシュしません（一時的な障害やレート制限(429)が固定化しない）
+- 取得失敗時は期限切れでもディスクの古い内容を返します（stale-if-error）
+- 現在位置系（`iss_now` / `tiangong_now` / 各位置計算）は**リアルタイム性を優先しキャッシュ対象外**です（TLEは従来どおり6時間キャッシュ）
+
+---
 
 ## 🔐 応答方式（tokyo-transit 方式）
 

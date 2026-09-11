@@ -145,6 +145,17 @@ def _first_image_url(item: dict, nasa_id: str) -> Optional[str]:
     return None
 
 
+def _inline_variant(url: str) -> str:
+    """インライン表示用に一段小さい NASA 画像バリアントへ落とす（転送量削減）。
+
+    構造化JSONの image_url は高画質のまま残し、チャットに埋め込む画像だけ軽くする。
+    """
+    for big, small in (("~orig", "~large"), ("~large", "~medium")):
+        if big in url:
+            return url.replace(big, small)
+    return url
+
+
 def _image_content(url: str, alt: str) -> Optional[ImageContent]:
     """画像URLを base64 化して ImageContent にする。失敗時 None。"""
     data = _fetch_image_bytes(url)
@@ -162,7 +173,8 @@ def _image_content(url: str, alt: str) -> Optional[ImageContent]:
 
 
 # ---------- 画像検索 ----------
-def search_space_images(query: str, limit: int = 3, show_inline: bool = True) -> CallToolResult:
+def search_space_images(query: str, limit: int = 3, show_inline: bool = True,
+                        inline_max: int = 1) -> CallToolResult:
     """惑星・人工衛星・宇宙ミッションの画像を NASA Image & Video Library から検索し表示する。
 
     LLM向けに structuredContent へJSON（title/date/nasa_id/image_url など）を返し、
@@ -174,6 +186,9 @@ def search_space_images(query: str, limit: int = 3, show_inline: bool = True) ->
         query: 検索語（mars, jupiter, hubble, apollo など英語が確実）。
         limit: 返す画像件数（既定 3、最大 10）。
         show_inline: 画像をチャットにインライン表示するか（既定 True）。
+        inline_max: チャットに埋め込む画像の枚数（既定 1、最大 5）。
+            転送量を抑えるため既定は先頭1枚のみ。全件のURLは
+            structuredContent.results[].image_url に入る。
     """
     limit = max(1, min(int(limit), 10))
     err, d = _search_or_error(query, "image", limit)
@@ -211,16 +226,19 @@ def search_space_images(query: str, limit: int = 3, show_inline: bool = True) ->
     lines.append("出典: NASA Image and Video Library (images.nasa.gov) ／ このMCPは画像をJSON+インライン表示で返します。")
     content_blocks.append(TextContent(type="text", text="\n".join(lines)))
 
-    # インライン画像（最大1枚=先頭、または show_inline 時は全件試みる）
+    # インライン画像（既定は先頭1枚のみ。他は image_url を構造化JSONで参照）
+    img_count = 0
     if show_inline:
-        img_count = 0
+        inline_max = max(1, min(int(inline_max), 5))
         for r in records:
+            if img_count >= inline_max:
+                break
             if r.get("image_url"):
-                ic = _image_content(r["image_url"], r.get("title", "NASA image"))
+                ic = _image_content(_inline_variant(r["image_url"]),
+                                    r.get("title", "NASA image"))
                 if ic:
                     content_blocks.append(ic)
                     img_count += 1
-        # 画像URL情報は構造化に残す（contentには出さない）
 
     return CallToolResult(content=content_blocks, structuredContent={
         "query": query,
@@ -439,7 +457,7 @@ def search_space_videos(query: str, limit: int = 3, show_poster: bool = True) ->
                 if ic:
                     content_blocks.append(ic)
                     pcount += 1
-            if pcount >= min(limit, 3):
+            if pcount >= 1:      # ポスターは先頭1枚のみ（転送量削減。URLは構造化JSONに残す）
                 break
 
     return CallToolResult(content=content_blocks, structuredContent={
