@@ -59,37 +59,66 @@ uv run space-finder-mcp
 **キーの取得方法（無料・即時発行）**: [api.nasa.gov](https://api.nasa.gov) にアクセスし、**メールアドレスを登録するだけで** 無料の API キーが即時発行されます。無料開発者キーのレート制限は **1時間あたり 1,000 リクエスト** です（実用に十分な容量）。登録時に入力したメール宛てに確認が来ます。
 
 ```bash
+# (a) 環境変数で渡す
 export NASA_API_KEY="your_key_here"
+
+# (b) リポジトリ直下の .env に書く（MCPクライアントの設定にキーを書きたくない場合）
+cp .env.example .env   # 編集して NASA_API_KEY=... を記入（.gitignore 済み・コミット禁止）
 ```
+優先順位は **MCPクライアントの env > リポジトリ直下の .env** です（未設定なら `DEMO_KEY`）。
 
-### （任意）ESA Copernicus OAuth2（ダウンロード用）
+### ESA Copernicus について（認証付きダウンロードは非対応）
 
-`copernicus_search` の検索・プレビュー取得は認証不要で動きます。画像**ダウンロード**のみ必要です。利用時は [Copernicus Data Space](https://dataspace.copernicus.eu) で無料登録し、OAuth2 クライアント情報を環境変数に設定します。
-
-```bash
-export CDSE_CLIENT_ID="your_client_id"
-export CDSE_CLIENT_SECRET="your_client_secret"
-```
-
-> この MCP は認証情報を**サーバー側でのみ保持**し、クライアントへ渡しません。ダウンロードURL生成時にのみ使用します。
+`copernicus_search` の**検索とプレビューURL取得は認証不要**で動作します。本サーバーは **OAuth2 による認証付きダウンロードは行いません**（`CDSE_CLIENT_ID` 等のクレデンシャルは使用しません）。実際の画像ダウンロードが必要な場合は [Copernicus Data Space](https://dataspace.copernicus.eu) で取得してください。
 
 ---
 
 ## 🔌 MCPクライアントへの登録
 
-### Claude Desktop / Cursor / Claude Code（`claude_desktop_config.json` / `mcp.json`）
+### Claude Code
+
+```bash
+cd /絶対パス/space-finder-mcp
+claude mcp add -s project space-finder -- uv --directory "$(pwd)" run space-finder-mcp
+claude mcp list   # 確認（space-finder が表示されればOK）
+```
+
+プロジェクトガイドは [`CLAUDE.md`](CLAUDE.md)、開発規約は [`.claude/rules/`](.claude/rules/) にあります（Claude Code が自動で読み込みます）。
+
+### Codex
+
+```bash
+codex mcp add space-finder --env NASA_API_KEY=<your_key> -- uv --directory <絶対パス>/space-finder-mcp run space-finder-mcp
+codex mcp list
+```
+
+`--env` は省略可（その場合は `.env` か `DEMO_KEY` を使用）。エージェント向けガイドは [`AGENTS.md`](AGENTS.md) です。
+
+### Claude Desktop / Cursor / その他（`claude_desktop_config.json` / `mcp.json`）
+
+同梱の [`mcp.json`](mcp.json) を参考に設定してください（`args` のパスは環境に合わせて書き換えます）。
 
 ```json
 {
   "mcpServers": {
     "space-finder-mcp": {
       "command": "uv",
-      "args": ["run", "--project", "/絶対パス/space-finder-mcp", "space-finder-mcp"],
-      "env": { "NASA_API_KEY": "your_key_here" }
+      "args": ["--directory", "/絶対パス/space-finder-mcp", "run", "space-finder-mcp"]
     }
   }
 }
 ```
+
+> `env` を書く場合は**空文字を入れない**でください（空だと `DEMO_KEY` にフォールバックしません）。キーは `env` か `.env` のどちらか一方に置けば十分です。
+
+### エージェント向けドキュメント
+
+| ファイル | 用途 |
+|:--|:--|
+| [`CLAUDE.md`](CLAUDE.md) | Claude Code 用プロジェクトガイド（セットアップ・規約・検証・リリース手順） |
+| [`AGENTS.md`](AGENTS.md) | Codex など `AGENTS.md` を読むエージェント向けガイド |
+| [`SKILL.md`](SKILL.md) | エージェント向けスキル定義（45ツールの仕様・使用例・キャッシュ・注意事項） |
+| [`.claude/rules/`](.claude/rules/) | 開発規約（コーディング・検証ゲート・データ出典） |
 
 ### Hermes Agent
 
@@ -118,7 +147,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `search_space_videos` | 宇宙動画の検索＋再生URL（解像度別・字幕付き） | NASA Image & Video Library | 不要 |
 | `isro_data` | インドISROの人工衛星・ロケット・顧客衛星・センター一覧/検索 | ISRO公式API (github.com/isro/api) | 不要 |
 | `copernicus_collections` | ESA Copernicus の衛星データコレクション一覧 | Copernicus Data Space (STAC) | 不要 |
-| `copernicus_search` | ESA Copernicus の衛星画像を STAC で検索（領域・日時・雲量） | Copernicus Data Space (STAC) | 検索は不要 / ダウンロードは任意OAuth2 |
+| `copernicus_search` | ESA Copernicus の衛星画像を STAC で検索（領域・日時・雲量） | Copernicus Data Space (STAC) | 不要（検索・プレビューのみ） |
 | `jaxa_datasets` | JAXA Earth の地球観測データセット一覧（ALOS/GSMaP/GCOM等） | JAXA Earth API (STAC COG) | 不要 |
 | `jaxa_dataset_search` | JAXA Earth データセットをキーワード検索 | JAXA Earth API (STAC COG) | 不要 |
 | `csa_dataset_search` | カナダCSAオープンデータ（RADARSAT等）を検索 | CSA Open Data Portal (CKAN) | 不要 |
@@ -566,13 +595,33 @@ ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカ�
 
 ## 🧪 開発・検証
 
+変更後は次の検証ゲートを通してください（`scripts/check-tools.py` は依存追加なしで同梱）。
+
 ```bash
-# 構文チェック
-uv run python -m py_compile src/space_finder_mcp/*.py
+# 1. 構文チェック
+uv run python -m compileall -q src/space_finder_mcp
 
-# MCPエンドツーエンド確認（ツール一覧＋実呼び出し）
-uv run python -c "from space_finder_mcp.server import mcp; print(sorted(t.name for t in mcp._tool_manager._tools.values()))"
+# 2. 全45ツールを実呼び出し（例外漏れ・structuredContent欠落・タイムアウトを検出。数分）
+uv run python scripts/check-tools.py
 
+# 3. ネットワーク全断を注入して「例外が外へ漏れないか」を検査
+uv run python scripts/check-tools.py --offline
+
+# 4. 未参照定義・未使用import の走査（0件を維持）
+uv run python scripts/check-tools.py --dead-code
+
+# 5. 変更したツールだけ先に確認 / CI向けJSON出力
+uv run python scripts/check-tools.py --only sat_tle,apod
+uv run python scripts/check-tools.py --json
+```
+
+終了コードは 0=正常 / 1=異常です。MCPサーバーは**ホットリロードがない**ため、`src/` を変更したらクライアントを再起動してください。
+
+### エージェントから使う場合
+
+Claude Code は [`CLAUDE.md`](CLAUDE.md) と [`.claude/rules/`](.claude/rules/)、Codex は [`AGENTS.md`](AGENTS.md)、その他のエージェントは [`SKILL.md`](SKILL.md) を参照します。
+
+```bash
 # Hermes で接続確認
 hermes mcp test space-finder-mcp
 ```
@@ -586,6 +635,7 @@ src/space_finder_mcp/
 ├── stac_common.py       # STAC系共通の入力検証ヘルパー（bbox/雲量。ツール定義なし）
 ├── img_common.py        # 画像合成の共通ヘルパー（フォント探索/JPEG化/アンチメリジアン分割。ツール定義なし）
 ├── cache.py             # キャッシュ基盤（TTLメモリ/ディスク資産キャッシュ。ツール定義なし）
+├── env_config.py        # リポジトリ直下 .env の読み込み（標準ライブラリのみ。ツール定義なし）
 ├── wikidata_lookup.py   # reverse_lookup（逆引き歴史Q&A）
 ├── launch.py            # upcoming_launches / china_launches / russia_launches（ロケット打ち上げ・中国・ロシア）
 ├── nasa.py              # apod / neo_today（NASA日次）
@@ -619,6 +669,21 @@ src/space_finder_mcp/
 ├── mars_rover.py         # mars_rover_status（火星ローバー状況・天気）
 ├── planetary_map.py      # planetary_orbiter_track（汎用・天体周回機マップ）
 └── planetary_rover.py    # planetary_rover_location_map（汎用・ローバー位置マップ）
+```
+
+リポジトリ直下（エージェント・クライアント向け）:
+
+```
+space-finder-mcp/
+├── CLAUDE.md                # Claude Code 用プロジェクトガイド
+├── AGENTS.md                # Codex など AGENTS.md を読むエージェント向け
+├── SKILL.md                 # エージェント向けスキル定義（45ツール仕様）
+├── mcp.json                 # MCPクライアント設定の例
+├── .env.example             # 環境変数の例（NASA_API_KEY は任意）
+├── .claude/rules/           # 開発規約（coding-conventions / testing-and-verification / data-and-sources）
+├── scripts/check-tools.py   # 回帰検証ゲート（全ツール実行 / --offline / --dead-code）
+├── pyproject.toml           # 依存・バージョン（uv 管理）
+└── README.md / LICENSE
 ```
 
 ---

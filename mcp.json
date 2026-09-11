@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "space-finder": {
+      "command": "uv",
+      "args": ["--directory", "C:/path/to/space-finder-mcp", "run", "space-finder-mcp"],
+      "disabled": false
+    }
+  }
+}
