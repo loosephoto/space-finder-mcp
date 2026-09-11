@@ -9,6 +9,16 @@ from mcp.types import CallToolResult, TextContent
 
 NASA = "https://api.nasa.gov"
 
+
+def _rate_limit_text(e: "requests.RequestException") -> str:
+    """429(レート制限)なら対処方法を含む案内文を返す。それ以外は空文字。"""
+    status = getattr(getattr(e, "response", None), "status_code", None)
+    if status == 429:
+        return ("NASA API のレート制限に達しました。DEMO_KEY は 30リクエスト/時/IP の共有枠で、"
+                "apod / neo_today / space_weather(DONKI) が同じ枠を取り合います。"
+                "しばらく待つか、環境変数 NASA_API_KEY に無料の開発者キーを設定してください。")
+    return ""
+
 def _get(path: str, key: str, params: Optional[dict] = None, timeout: int = 25) -> dict:
     p = dict(params or {})
     p["api_key"] = key
@@ -58,7 +68,7 @@ def apod(key: str, date: Optional[str] = None) -> CallToolResult:
             text = ("APOD はまだ公開されていません（試行日: " + ", ".join(candidates) +
                     "）。NASA 側の当日分公開は米国東部時間の夜になることがあります。")
         else:
-            text = f"NASA APOD の取得に失敗しました: {last_err}"
+            text = _rate_limit_text(last_err) or f"NASA APOD の取得に失敗しました: {last_err}"
         return CallToolResult(
             content=[TextContent(type="text", text=text)],
             structuredContent={"error": str(last_err), "status": status,
@@ -93,9 +103,11 @@ def neo_today(key: str) -> CallToolResult:
     try:
         d = _get("neo/rest/v1/feed", key, {"start_date": today, "end_date": today})
     except requests.RequestException as e:
+        status = getattr(getattr(e, "response", None), "status_code", None)
         return CallToolResult(
-            content=[TextContent(type="text", text=f"NASA NEO の取得に失敗しました: {e}")],
-            structuredContent={"error": str(e), "source": "api.nasa.gov"},
+            content=[TextContent(type="text",
+                                 text=_rate_limit_text(e) or f"NASA NEO の取得に失敗しました: {e}")],
+            structuredContent={"error": str(e), "status": status, "source": "api.nasa.gov"},
         )
     lines = [f"今日（{today}）地球に接近する小惑星:"]
     records = []

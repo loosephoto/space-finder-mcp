@@ -54,7 +54,7 @@ uv run space-finder-mcp
 
 ### （任意）NASA APIキー
 
-`apod`・`neo_today` は [api.nasa.gov](https://api.nasa.gov) の無料キーを使います。未設定でも `DEMO_KEY` で動作しますが、**レート制限 30 req/hr/IP** と低いため、実用にはキーを推奨します。
+`apod`・`neo_today` は [api.nasa.gov](https://api.nasa.gov) の無料キーを使います。未設定でも `DEMO_KEY` で動作しますが、**レート制限 30 req/hr/IP** と低く、`space_weather`(DONKI) も同じ枠を共有するため、キー未設定だと3ツールが枠を取り合います。実用にはキーを推奨します（制限時は対処方法を含むメッセージを返します）。
 
 **キーの取得方法（無料・即時発行）**: [api.nasa.gov](https://api.nasa.gov) にアクセスし、**メールアドレスを登録するだけで** 無料の API キーが即時発行されます。無料開発者キーのレート制限は **1時間あたり 1,000 リクエスト** です（実用に十分な容量）。登録時に入力したメール宛てに確認が来ます。
 
