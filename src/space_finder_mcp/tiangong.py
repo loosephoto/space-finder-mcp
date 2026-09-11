@@ -104,7 +104,8 @@ def tiangong_now() -> CallToolResult:
     lines = [
         f"🛰 **天宮（Tiangong）中国宇宙ステーション 現在位置**（{pos['computed_utc']} UTC）",
         f"📍 緯度 {lat}° / 経度 {lon}°（{area}）",
-        f"🛰 高度 約{pos['altitude_km']}km ・ 速度 約{round(pos['speed_kms']*3.6)}km/h（1周 約91分）",
+        # km/s → km/h は ×3600（×3.6 は m/s→km/h。この誤りで 1/1000 の値になっていた）
+        f"🛰 高度 約{pos['altitude_km']}km ・ 速度 約{round(pos['speed_kms']*3600):,}km/h（1周 約91分）",
         f"🗺 Googleマップ: https://www.google.com/maps?q={lat},{lon}&z=3",
         f"軌道要素エポック: {epoch} UTC（CelesTrak / NORAD 48274）",
         f"乗組員: 現在 3 名（天宮は運用中の常駐宇宙ステーション）",
