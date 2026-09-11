@@ -24,6 +24,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .celestrak import WELL_KNOWN, fetch_tle
 from .img_common import encode_jpeg, load_font, split_at_antimeridian
+from .input_utils import as_float, as_int
 
 # ---- NASA Blue Marble 用 UA（TLE 取得は celestrak.fetch_tle に共通化）----
 UA = {"User-Agent": "space-finder-mcp/0.23 (MCP; satellite ground track)"}
@@ -64,7 +65,7 @@ def _resolve_norad_candidates(name: str) -> list[tuple[str, int]]:
 
 def _fetch_tle2(norad_id: int) -> tuple[str, str, str]:
     """NORAD ID から TLE 2行を取得。戻り: (name, line1, line2)。"""
-    tle = fetch_tle(norad_id=int(norad_id))
+    tle = fetch_tle(norad_id=as_int(norad_id))
     if tle is None:
         raise ValueError(f"NORAD {norad_id} の TLE が見つかりません")
     return tle
@@ -147,17 +148,24 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
             )
         sat_name, tle1, tle2 = found
     else:
+        nid = as_int(norad_id)
+        if nid is None:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"NORAD ID は整数で指定してください"
+                                     f"（例 25544）。受け取った値: {norad_id!r}")],
+                structuredContent={"error": "invalid norad_id", "norad_id": str(norad_id)},
+            )
         try:
-            sat_name, tle1, tle2 = _fetch_tle2(int(norad_id))
+            sat_name, tle1, tle2 = _fetch_tle2(nid)
         except (requests.RequestException, ValueError) as e:
             return CallToolResult(
                 content=[TextContent(type="text", text=f"衛星の軌道要素(TLE)取得に失敗しました: {e}")],
                 structuredContent={"error": str(e), "source": "celestrak.org"},
             )
 
-    minutes = max(5, min(int(minutes), 1440))
-    step = max(0.5, min(float(step), 10.0))
-    out_px = max(600, min(int(out_px), 2048))
+    minutes = as_int(minutes, 45, 5, 1440)
+    step = as_float(step, 1, 0.5, 10.0)
+    out_px = as_int(out_px, 1200, 600, 2048)
 
     # ---- Skyfield ----
     try:

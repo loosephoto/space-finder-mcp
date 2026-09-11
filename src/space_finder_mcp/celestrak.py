@@ -11,6 +11,7 @@ from typing import Optional
 import requests
 from functools import lru_cache
 from mcp.types import CallToolResult, TextContent
+from .input_utils import as_int
 
 BASE = "https://celestrak.org/NORAD/elements/gp.php"
 UA = {"User-Agent": "space-finder-mcp/0.3 (MCP; CelesTrak TLE)"}
@@ -126,7 +127,7 @@ def sat_tle(name: Optional[str] = None, norad_id: Optional[int] = None,
         group: CelesTrak の衛星グループ（例 "stations", "weather", "amateur", "science"）。
         limit: 返す件数（既定 5、最大 20）。
     """
-    limit = max(1, min(int(limit), 20))
+    limit = as_int(limit, 5, 1, 20)
     params: dict = {}
     if norad_id:
         params["CATNR"] = norad_id

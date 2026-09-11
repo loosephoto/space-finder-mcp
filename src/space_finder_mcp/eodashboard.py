@@ -18,6 +18,7 @@ import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import TTL_HOURLY, ttl_cache, is_error_result
+from .input_utils import as_int
 
 # コレクション定義JSON（GitHub raw）
 RAW = "https://raw.githubusercontent.com/ESA-eodashboards/eodashboard-catalog/main/collections"
@@ -109,7 +110,7 @@ def eodashboard_collections(themes: Optional[str] = None, agency: Optional[str] 
         keyword: キーワード（タイトル・説明に部分一致）。
         limit: 返す件数（既定 20、最大 50）。
     """
-    limit = max(1, min(int(limit), 50))
+    limit = as_int(limit, 20, 1, 50)
     cols = _fetch_collection_list()
     if not cols:
         return CallToolResult(

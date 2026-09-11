@@ -14,6 +14,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, ttl_cache, is_error_result
+from .input_utils import as_int
 
 OSCAR = "https://space.oscar.wmo.int/api/v1"
 UA = {"User-Agent": "space-finder-mcp/0.9 (MCP; WMO OSCAR/Space)"}
@@ -39,7 +40,7 @@ def satellite_status(query: Optional[str] = None, agency: Optional[str] = None,
         agency: 機関名（例 "Roscosmos", "NOAA", "EUMETSAT", "JAXA"）。
         limit: 返す件数（既定 10、最大 20）。
     """
-    limit = max(1, min(int(limit), 20))
+    limit = as_int(limit, 10, 1, 20)
     # 注: OSCAR API の search/space_agency/status パラメータは現状動作しない
     # （常に全件を返す）。そのため全件をページングで取得し、クライアントサイドで
     # フィルタする。max_pages までスキャンして十分な件数を集める。

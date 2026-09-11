@@ -7,6 +7,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_SHORT, ttl_cache, is_error_result
+from .input_utils import as_int
 
 LL2 = "https://ll.thespacedevs.com/2.3.0"
 
@@ -19,7 +20,7 @@ def upcoming_launches(limit: int = 5) -> CallToolResult:
     Args:
         limit: 返す件数（既定 5、最大 15）。
     """
-    limit = max(1, min(int(limit), 15))
+    limit = as_int(limit, 5, 1, 15)
     params = {"limit": min(limit, 30), "ordering": "window_start"}
     try:
         r = requests.get(f"{LL2}/launches/upcoming/", params=params, timeout=25)
@@ -73,7 +74,7 @@ def china_launches(limit: int = 8, status: Optional[str] = None) -> CallToolResu
         limit: 返す件数（既定 8、最大 15）。
         status: 状態で絞り込み（例 "Go for Launch", "To Be Determined"）。省略で全状態。
     """
-    limit = max(1, min(int(limit), 15))
+    limit = as_int(limit, 8, 1, 15)
     params = {"limit": min(limit * 2, 30), "search": "China", "ordering": "window_start"}
     try:
         r = requests.get(f"{LL2}/launches/upcoming/", params=params, timeout=25)
@@ -132,7 +133,7 @@ def russia_launches(limit: int = 8, status: Optional[str] = None) -> CallToolRes
         limit: 返す件数（既定 8、最大 15）。
         status: 状態で絞り込み（例 "Go for Launch"）。省略で全状態。
     """
-    limit = max(1, min(int(limit), 15))
+    limit = as_int(limit, 8, 1, 15)
     params = {"limit": min(limit * 2, 30), "search": "Roscosmos", "ordering": "window_start"}
     try:
         r = requests.get(f"{LL2}/launches/upcoming/", params=params, timeout=25)

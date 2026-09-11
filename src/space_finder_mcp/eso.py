@@ -14,6 +14,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_SHORT, ttl_cache, is_error_result
+from .input_utils import as_float, as_int
 
 API = "https://www.eso.org/asm/api/"
 UA = {"User-Agent": "space-finder-mcp/0.13 (MCP; ESO Paranal ASM)"}
@@ -50,7 +51,7 @@ def eso_seeing(hours: int = 12, fields: str = _DEFAULT_FIELDS) -> CallToolResult
         hours: 過去何時間分を取得するか（既定 12、最大 48）。
         fields: カンマ区切りの観測フィールド。省略で主要フィールド。
     """
-    hours = max(1, min(int(hours), 48))
+    hours = as_int(hours, 12, 1, 48)
     now = datetime.now(timezone.utc)
     fr = (now - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%S") + "Z"
     to = now.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
@@ -83,7 +84,7 @@ def eso_seeing(hours: int = 12, fields: str = _DEFAULT_FIELDS) -> CallToolResult
             lines.append(f"- **{FIELDS.get(f, (f,'',''))[0]}**: データなし")
             continue
         label, unit, desc = FIELDS.get(f, (f, "", ""))
-        vals = [float(v) for _, v in rows if v is not None]
+        vals = [x for x in (as_float(v) for _, v in rows) if x is not None]
         if vals:
             avg = sum(vals) / len(vals)
             best = min(vals) if "fwhm" in f or "pwv" in f else max(vals)

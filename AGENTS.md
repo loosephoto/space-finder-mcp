@@ -39,6 +39,7 @@ codex mcp list
 uv run python -m compileall -q src/space_finder_mcp   # 構文
 uv run python scripts/check-tools.py --dead-code      # 未参照定義・未使用import（0件を維持）
 uv run python scripts/check-tools.py --offline        # ネットワーク全断で例外漏れを検査
+uv run python scripts/check-tools.py --fuzz           # 数値引数へ不正値を注入（例外漏れ0を維持）
 uv run python scripts/check-tools.py                  # 全45ツール実呼び出し（数分・終了コード1で失敗）
 ```
 
@@ -49,7 +50,7 @@ uv run python scripts/check-tools.py                  # 全45ツール実呼び�
 
 1. **全ツールは `CallToolResult` を返す**。例外をツール外へ漏らさない（外部API障害時も `structuredContent.error` を返す）。
 2. `content` = 人間向け表示（画像は `ImageContent`）、`structuredContent` = LLM向け純粋JSON。両方返すのが基本。
-3. 数値変換は防御的に（`float("?")` 等で落とさない）。`d[key]` ではなく `.get()`。
+3. 数値変換は防御的に。ツール入口の数値引数は必ず `input_utils.as_int` / `as_float` を通す（`float("?")` 等で例外を外へ漏らさない）。`d[key]` ではなく `.get()`。
 4. キャッシュは `cache.py` の `ttl_cache` / `disk_get` を使う。**エラー応答はキャッシュしない**。キャッシュ値を書き換えるなら `deepcopy`。
 5. 共通処理は `img_common.py` / `stac_common.py` / `cache.py` に集約し、重複実装しない。
 6. 現在位置系（`iss_now`・`tiangong_now`・位置計算）は**キャッシュしない**（リアルタイム性優先）。
@@ -66,6 +67,7 @@ src/space_finder_mcp/
 ├── cache.py         # キャッシュ基盤（TTLメモリ / ディスク資産）
 ├── img_common.py    # 画像共通（フォント探索 / JPEG化 / アンチメリジアン分割）
 ├── stac_common.py   # STAC系の入力検証（bbox / 雲量）
+├── input_utils.py   # 引数の防御的数値変換（as_int / as_float）
 ├── env_config.py    # リポジトリ直下 .env の読み込み（標準ライブラリのみ）
 ├── *_map.py         # 画像生成系（satellite_map / planetary_map / planetary_rover / sky_overlay）
 └── <データ源>.py     # 各APIツール（nasa / launch / media / celestrak / jaxa / ...）

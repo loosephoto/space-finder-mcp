@@ -18,6 +18,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_SHORT, ttl_cache
+from .input_utils import as_int
 
 REPO = "https://github.com/loosephoto/space-finder-mcp"
 # Cloudflare が「ブラウザを名乗る非ブラウザ」を弾くため、curl 互換UAで自ツールを明示する
@@ -104,7 +105,7 @@ def astronomy_news(limit: int = 8, section: str = "all") -> CallToolResult:
         limit: 返す件数（既定 8、最大 15）。
         section: 絞り込み（"all"=全部, "observing"=観測ガイド, "news"=ニュース）。
     """
-    limit = max(1, min(int(limit), 15))
+    limit = as_int(limit, 8, 1, 15)
     errors: list[str] = []
     chosen = None    # 指定セクションの記事があるフィード
     fallback = None  # 記事はあるが指定セクションが無いフィード

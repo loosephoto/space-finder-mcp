@@ -14,6 +14,7 @@ from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_error_result
 from .stac_common import parse_bbox, parse_cloud_cover
+from .input_utils import as_int
 
 STAC = "https://earth-search.aws.element84.com/v1"
 UA = {"User-Agent": "space-finder-mcp/0.7 (MCP; AWS Earth Search STAC)"}
@@ -100,7 +101,7 @@ def stac_search(collection: str = "sentinel-2-l2a", bbox: Optional[str] = None,
         max_cloud_cover: 雲量上限（%）（eo:cloud_cover を持つ場合）。
         limit: 返す件数（既定 5、最大 10）。
     """
-    limit = max(1, min(int(limit), 10))
+    limit = as_int(limit, 5, 1, 10)
     body: dict = {"limit": limit, "collections": [collection]}
 
     # 場所解決

@@ -19,6 +19,7 @@ from requests.adapters import HTTPAdapter
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, ttl_cache, is_error_result
+from .input_utils import as_int
 
 CKAN = "https://donnees-data.asc-csa.gc.ca/api/3/action"
 UA = {"User-Agent": "space-finder-mcp/0.2 (MCP; CSA Open Data)"}
@@ -58,7 +59,7 @@ def csa_dataset_search(query: str = "", limit: int = 10) -> CallToolResult:
         query: 検索語（例 "radarsat", "space", "earth observation"）。省略で先頭のデータセット。
         limit: 返す件数（既定 10、最大 20）。
     """
-    limit = max(1, min(int(limit), 20))
+    limit = as_int(limit, 10, 1, 20)
     params = {"rows": limit}
     if query:
         params["q"] = query

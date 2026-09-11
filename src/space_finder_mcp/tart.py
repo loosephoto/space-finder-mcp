@@ -16,6 +16,7 @@ from typing import Optional
 
 import requests
 from mcp.types import CallToolResult, TextContent
+from .input_utils import as_float, as_int
 
 CATALOG = "https://tart.elec.ac.nz/catalog/catalog"
 UA = {"User-Agent": "space-finder-mcp/0.18 (MCP; TART source catalog)"}
@@ -52,12 +53,18 @@ def radio_sources_now(lat: Optional[float] = None,
         elevation: 地平線からの最小仰角（度, 既定 10。高いほど地平線近くを除外）。
         limit: 返す件数（既定 15、最大 50）。
     """
-    lat = DEFAULT_LAT if lat is None else float(lat)
-    lon = DEFAULT_LON if lon is None else float(lon)
-    limit = max(1, min(int(limit), 50))
+    if (lat is not None and as_float(lat) is None) or (lon is not None and as_float(lon) is None):
+        return CallToolResult(
+            content=[TextContent(type="text", text="lat（-90〜90）と lon（-180〜180）は数値（度）で指定してください。")],
+            structuredContent={"error": "invalid coordinates", "lat": str(lat), "lon": str(lon)},
+        )
+    lat = as_float(lat, DEFAULT_LAT, -90.0, 90.0)
+    lon = as_float(lon, DEFAULT_LON, -180.0, 180.0)
+    limit = as_int(limit, 15, 1, 50)
     try:
         r = requests.get(CATALOG, params={"lat": lat, "lon": lon,
-                                          "alt": float(alt), "ele": float(elevation)},
+                                          "alt": as_float(alt, DEFAULT_ALT, -500.0, 9000.0),
+                                          "ele": as_float(elevation, 10.0, 0.0, 90.0)},
                          headers=UA, timeout=30)
         r.raise_for_status()
         data = r.json()

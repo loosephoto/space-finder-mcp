@@ -21,6 +21,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_FORECAST, ttl_cache, is_error_result
+from .input_utils import as_float, as_int
 
 TAP = "https://almascience.nao.ac.jp/tap/sync"
 UA = {"User-Agent": "space-finder-mcp/0.18 (MCP; ALMA Science Archive TAP)"}
@@ -89,7 +90,7 @@ def alma_search(object_name: Optional[str] = None,
         band: ALMA 受信バンドで絞り込み（1〜10。例 3=約100GHz帯, 6=約230GHz帯, 7=約345GHz帯）。
         limit: 返す件数（既定 8、最大 20）。
     """
-    limit = max(1, min(int(limit), 20))
+    limit = as_int(limit, 8, 1, 20)
     cols = ("obs_publisher_did,target_name,s_ra,s_dec,band_list,em_min,em_max,"
             "proposal_id,data_rights")
     where = "obs_collection='ALMA'"
@@ -102,12 +103,24 @@ def alma_search(object_name: Optional[str] = None,
                 content=[TextContent(type="text", text="object_name か、ra と dec の両方を指定してください。")],
                 structuredContent={"error": "object_name or (ra, dec) required"},
             )
+        ra_v, dec_v = as_float(ra, None, -360.0, 360.0), as_float(dec, None, -90.0, 90.0)
+        if ra_v is None or dec_v is None:
+            return CallToolResult(
+                content=[TextContent(type="text", text="ra（赤経）と dec（赤緯）は数値（度）で指定してください。")],
+                structuredContent={"error": "ra/dec must be numbers", "ra": str(ra), "dec": str(dec)},
+            )
+        radius_v = as_float(radius, 0.3, 0.0, 10.0)
         where += (f" AND 1=CONTAINS(POINT('ICRS',s_ra,s_dec),"
-                  f"CIRCLE('ICRS',{float(ra):.6f},{float(dec):.6f},{float(radius):.6f}))")
+                  f"CIRCLE('ICRS',{ra_v:.6f},{dec_v:.6f},{radius_v:.6f}))")
     if band is not None:
-        b = int(band)
-        if 1 <= b <= 10:
-            where += f" AND band_list LIKE '%{b}%'"
+        b = as_int(band, None)
+        if b is None or not (1 <= b <= 10):
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"band は 1〜10 の整数で指定してください"
+                                     f"（例 band=6 は約230GHz帯）。受け取った値: {band!r}")],
+                structuredContent={"error": "invalid band", "band": str(band)},
+            )
+        where += f" AND band_list LIKE '%{b}%'"
     q = f"SELECT TOP {limit} {cols} FROM ivoa.obscore WHERE {where}"
     rows, err = _do_query(q, limit)
     if err:

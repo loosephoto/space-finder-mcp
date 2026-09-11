@@ -12,6 +12,7 @@ from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_error_result
 from .stac_common import parse_bbox, parse_cloud_cover
+from .input_utils import as_int
 
 STAC = "https://data.inpe.br/bdc/stac/v1"
 UA = {"User-Agent": "space-finder-mcp/0.3 (MCP; INPE BDC STAC)"}
@@ -39,7 +40,7 @@ def inpe_collections(limit: int = 30) -> CallToolResult:
     Args:
         limit: 返す件数（既定 30、最大 100）。
     """
-    limit = max(1, min(int(limit), 100))
+    limit = as_int(limit, 30, 1, 100)
     try:
         r = requests.get(f"{STAC}/collections", headers=UA, timeout=30)
         r.raise_for_status()
@@ -83,7 +84,7 @@ def inpe_search(collection: str = "CB4-WFI-L4-SR-1", bbox: Optional[str] = None,
         max_cloud_cover: 雲量上限（%）（eo:cloud_cover を持つ場合）。
         limit: 返す件数（既定 5、最大 10）。
     """
-    limit = max(1, min(int(limit), 10))
+    limit = as_int(limit, 5, 1, 10)
     body: dict = {"limit": limit, "collections": [collection]}
     bbox_vals, bbox_err = parse_bbox(bbox)
     if bbox_err:

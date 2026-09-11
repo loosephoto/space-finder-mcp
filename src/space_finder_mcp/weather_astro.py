@@ -16,6 +16,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, TTL_FORECAST, ttl_cache, is_error_result
+from .input_utils import as_float, as_int
 
 API = "https://api.open-meteo.com/v1/forecast"
 UA = {"User-Agent": "space-finder-mcp/0.4 (MCP; Open-Meteo astronomy)"}
@@ -30,7 +31,9 @@ def _moon_phase_ja(phase) -> str:
     """
     if phase is None:
         return "不明"
-    p = float(phase)
+    p = as_float(phase, None)
+    if p is None:
+        return "不明"
     # 照度（0=new 〜 100=満月）を基準にステージ判定
     illum = _moon_illumination(phase)
     if illum < 5:
@@ -46,7 +49,7 @@ def _moon_illumination(phase) -> float:
     """月相の分数(0-1)を照度%に変換（0=new, 0.5=full）。"""
     if phase is None:
         return 0.0
-    p = float(phase)
+    p = as_float(phase, 0.0)
     illum = abs(p - 0.5) * 2
     return round((1 - illum) * 100, 1)
 
@@ -113,7 +116,8 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
         days: 予報日数（1〜7、既定 3）。
         max_cloud: 「観測可」とみなす雲量の上限%（既定 40）。
     """
-    days = max(1, min(int(days), 7))
+    days = as_int(days, 3, 1, 7)
+    max_cloud = as_float(max_cloud, 40.0, 0.0, 100.0)
     lat, lon = latitude, longitude
     if lat is None or lon is None:
         if not place:
@@ -174,7 +178,7 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
         }
 
     if not windows:
-        lines = [f"🔭 **{name}** 今後{days}日間: 条件を満たす夜間の観測時間帯は見つかりませんでした（雲量≤{int(max_cloud)}%、風速≤15km/h）。"]
+        lines = [f"🔭 **{name}** 今後{days}日間: 条件を満たす夜間の観測時間帯は見つかりませんでした（雲量≤{max_cloud:g}%、風速≤15km/h）。"]
         # 最も雲が少ない夜間を1つ提示
         night_clouds = [(times[i], h["cloud_cover"][i]) for i in range(len(times))
                         if h.get("is_day", [1]*len(times))[i] == 0]

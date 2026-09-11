@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 
 from mcp.types import CallToolResult, TextContent
+from .input_utils import as_float
 
 _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
 os.makedirs(_DATA_DIR, exist_ok=True)
@@ -115,7 +116,14 @@ def constellation_now(latitude=None, longitude=None, place=None, time_utc=None):
             content=[TextContent(type="text", text="観測地を指定してください。place（例 東京/Tokyo）または latitude/longitude。")],
             structuredContent={"error": "location required"},
         )
-    lat, lon = float(latitude), float(longitude)
+    lat = as_float(latitude, None, -90.0, 90.0)
+    lon = as_float(longitude, None, -180.0, 180.0)
+    if lat is None or lon is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="latitude（-90〜90）と longitude（-180〜180）は数値（度）で指定してください。")],
+            structuredContent={"error": "invalid coordinates", "latitude": str(latitude),
+                               "longitude": str(longitude)},
+        )
 
     from skyfield.api import position_of_radec
     try:

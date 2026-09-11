@@ -23,6 +23,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 from .cache import disk_get
 from .celestrak import fetch_tle
 from .img_common import encode_jpeg, load_font
+from .input_utils import as_float
 
 _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
 os.makedirs(_DATA_DIR, exist_ok=True)
@@ -96,9 +97,15 @@ def _fetch_tle(catnr):
 
 
 def _resolve_place(place, lat, lon):
-    """place 文字列 or lat/lon 数値から (lat, lon)。任意の地名は Open-Meteo でジオコーディング。"""
+    """place 文字列 or lat/lon 数値から (lat, lon)。任意の地名は Open-Meteo でジオコーディング。
+
+    lat/lon が数値として解釈できない場合は None を返す（呼び出し側でエラーにする）。
+    """
     if lat is not None and lon is not None:
-        return float(lat), float(lon)
+        la, lo = as_float(lat, None, -90.0, 90.0), as_float(lon, None, -180.0, 180.0)
+        if la is None or lo is None:
+            return None
+        return la, lo
     if place:
         key = str(place).strip().lower()
         if key in _KNOWN_COORDS:
@@ -400,6 +407,11 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
         engine: "simple"(既定/Pillow) / "accurate"(matplotlib)。
     """
     ll = _resolve_place(place, lat, lon)
+    if ll is None and (lat is not None or lon is not None):
+        return CallToolResult(
+            content=[TextContent(type="text", text="lat（-90〜90）と lon（-180〜180）は数値（度）で指定してください。")],
+            structuredContent={"error": "invalid coordinates", "lat": str(lat), "lon": str(lon)},
+        )
     if ll is None:
         ll = (35.68, 139.69)  # 東京
     eng = (engine or "simple").lower()

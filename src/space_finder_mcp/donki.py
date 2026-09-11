@@ -17,6 +17,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_SHORT, ttl_cache, is_error_result
+from .input_utils import as_int
 
 DONKI = "https://api.nasa.gov/DONKI"
 UA = {"User-Agent": "space-finder-mcp/0.6 (MCP; NASA DONKI space weather)"}
@@ -69,7 +70,7 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
         end_date: 終了日（YYYY-MM-DD）。省略時は既定。
         limit: 各カテゴリの返す件数（既定 10、最大 20）。
     """
-    limit = max(1, min(int(limit), 20))
+    limit = as_int(limit, 10, 1, 20)
     kind = (kind or "all").strip().lower()
     params = {}
     if start_date:

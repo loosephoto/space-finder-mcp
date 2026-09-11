@@ -13,6 +13,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import disk_get
 from .img_common import encode_jpeg, load_font, split_at_antimeridian
+from .input_utils import as_float, as_int
 
 UA = {"User-Agent": "space-finder-mcp/0.25 (MCP; planetary orbiter track)"}
 
@@ -351,14 +352,14 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
                                "known": sorted([k for k, v in ORBITERS.items() if v["body"] == b])},
         )
 
-    minutes = max(10, min(int(minutes), 1440))
-    step = max(1.0/60.0, min(float(step), 30.0))
-    span_deg = max(10.0, min(float(span_deg), 360.0))
+    minutes = as_int(minutes, 90, 10, 1440)
+    step = as_float(step, 5, 1.0 / 60.0, 30.0)
+    span_deg = as_float(span_deg, 120.0, 10.0, 360.0)
     whole = span_deg >= 360.0
+    zoom = as_int(zoom, None, 1, body_cfg["maxzoom"])
     if zoom is None:
         zoom = 1 if whole else 3
-    zoom = max(1, min(int(zoom), body_cfg["maxzoom"]))
-    out_px = max(400, min(int(out_px), 1600))
+    out_px = as_int(out_px, 900, 400, 1600)
 
     if when:
         iso = str(when).strip().replace("Z", "+00:00")

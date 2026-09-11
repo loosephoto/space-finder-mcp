@@ -11,7 +11,7 @@
 
 - **例外をツールの外へ漏らさない**。外部API呼び出しは `try/except requests.RequestException` で囲み、`structuredContent={"error": ..., "source": ...}` を返す。
 - ネットワーク失敗と「該当なし」を区別する（例: CelesTrak の 404 は「見つかりません」、接続失敗は「取得に失敗」）。
-- 数値は防御的に変換する: `float(raw)` を直接使わず `try/except (TypeError, ValueError)`。`d[key]` より `.get()`。
+- 数値は防御的に変換する。**ツール入口の数値引数（limit/minutes/step/lat/lon/band 等）は必ず `input_utils.as_int` / `as_float` を通す**（MCPクライアントは `"5件"` のような値も送る。`int()` へ直に渡すと ValueError がツール外へ漏れる）。API応答値も同様に `as_float` 等で守る。`d[key]` より `.get()`。
 - 必須引数が `None`/空の場合も例外を出さず、検証メッセージ（候補一覧付き）を返す。
 - 曖昧入力（複数候補）は**推測せず候補を提示して停止**する。
 

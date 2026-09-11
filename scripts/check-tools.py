@@ -31,29 +31,33 @@ SRC = os.path.join(ROOT, "src")
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
-# 必須引数が無いツールを実行するためのダミー値（実際の値は何でもよい）
-FILL = {
-    "query": "sentinel", "collection": "sentinel-2-l2a", "identifier": "N1_NO2",
-    "object_name": "M31", "category": "人工衛星", "place": "東京", "name": "iss",
-    "from_port": "東京", "to_port": "大島", "limit": 3, "max_results": 3,
+# ツールを「正常系」で実行するためのダミー引数。
+# 既定値が None の任意引数（place / object_name / name などは排他グループ）にも入れる。
+# PRIMARY が1つでも埋まったツールには座標系（COORDS）を入れない（本来の経路を試すため）。
+PRIMARY = {
+    "name": "iss", "object_name": "M31", "query": "sentinel", "place": "東京",
+    "location": "東京", "identifier": "N1_NO2",
+    "category": "人工衛星", "from_port": "東京", "to_port": "大島",
+    "telescope": "JCMT", "band": 6, "limit": 3, "max_results": 3,
 }
+COORDS = {"latitude": 35.68, "lat": 35.68, "longitude": 139.69, "lon": 139.69,
+          "ra": 83.82, "dec": -5.39}
 
 
 def _fill_kwargs(fn) -> dict:
+    params = [p for p in inspect.signature(fn).parameters.values()
+              if p.default is inspect.Parameter.empty or p.default is None]
     kw = {}
-    for p in inspect.signature(fn).parameters.values():
-        if p.default is not inspect.Parameter.empty:
-            continue
-        if p.name in FILL:
-            kw[p.name] = FILL[p.name]
-        elif p.name in ("latitude", "lat"):
-            kw[p.name] = 35.68
-        elif p.name in ("longitude", "lon"):
-            kw[p.name] = 139.69
-        else:
+    for p in params:
+        if p.name in PRIMARY:
+            kw[p.name] = PRIMARY[p.name]
+    if not any(p.name in PRIMARY for p in params):
+        for p in params:
+            if p.name in COORDS:
+                kw[p.name] = COORDS[p.name]
+    for p in params:
+        if p.default is inspect.Parameter.empty and p.name not in kw:
             kw[p.name] = None
-    if "latitude" in kw and "longitude" in kw:
-        pass
     return kw
 
 
@@ -111,6 +115,57 @@ def run_all(only=None, timeout=180, offline=False) -> list:
     return rows
 
 
+def fuzz_args(only=None, timeout=60, live=False) -> list:
+    """数値引数へ不正値（"abc" / None / []）を入れて例外が漏れないか検査する。
+
+    MCPクライアントは型を保証しないため、int()/float() を引数へ直に適用すると
+    ValueError がツール外へ漏れる。全ツール入口で input_utils を通していることを機械的に確認する。
+    """
+    import inspect as _inspect
+    import requests
+    from space_finder_mcp.server import mcp
+
+    if not live:
+        def boom(*a, **k):
+            raise requests.ConnectionError("check-tools: simulated network failure")
+        requests.get, requests.post = boom, boom
+
+    names = sorted(mcp._tool_manager._tools)
+    if only:
+        names = [n for n in names if n in only]
+    rows = []
+    for name in names:
+        fn = mcp._tool_manager._tools[name].fn
+        base = _fill_kwargs(fn)
+        for p in _inspect.signature(fn).parameters.values():
+            ann = str(p.annotation)
+            if not any(k in ann for k in ("int", "float")):
+                continue
+            for bad in ("abc", "5件", [], {}):
+                kw = dict(base)
+                kw[p.name] = bad
+                out = {}
+
+                def call():
+                    try:
+                        out["r"] = fn(**kw)
+                    except Exception as e:
+                        out["exc"] = "{}: {}".format(type(e).__name__, e)
+
+                th = threading.Thread(target=call, daemon=True)
+                th.start()
+                th.join(timeout)
+                if th.is_alive():
+                    rows.append({"tool": name, "arg": p.name, "value": repr(bad), "status": "TIMEOUT"})
+                    continue
+                if "exc" in out:
+                    rows.append({"tool": name, "arg": p.name, "value": repr(bad),
+                                 "status": "LEAKED_EXCEPTION", "detail": str(out["exc"])[:160]})
+                else:
+                    rows.append({"tool": name, "arg": p.name, "value": repr(bad), "status": "OK"})
+    return rows
+
+
 def scan_dead_code() -> list:
     """未参照の定義・未使用 import を返す（__future__ は除外）。"""
     files = sorted(f for f in os.listdir(SRC + os.sep + "space_finder_mcp") if f.endswith(".py"))
@@ -149,6 +204,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="space-finder-mcp 回帰検証")
     ap.add_argument("--offline", action="store_true", help="ネットワーク全断を注入して例外漏れを検査")
     ap.add_argument("--dead-code", action="store_true", help="未参照定義・未使用importの走査のみ")
+    ap.add_argument("--fuzz", action="store_true", help="数値引数へ不正値を入れて例外漏れを検査（ネットワーク断で高速）")
+    ap.add_argument("--fuzz-live", action="store_true", help="--fuzz を実APIに対して実行する")
     ap.add_argument("--only", help="カンマ区切りのツール名で絞り込み")
     ap.add_argument("--timeout", type=float, default=180.0, help="1ツールあたりの制限秒（既定180）")
     ap.add_argument("--json", action="store_true", help="JSONで出力")
@@ -166,6 +223,19 @@ def main() -> int:
         return 1 if found else 0
 
     only = set(x.strip() for x in args.only.split(",")) if args.only else None
+
+    if args.fuzz or args.fuzz_live:
+        rows = fuzz_args(only=only, timeout=min(args.timeout, 60.0), live=args.fuzz_live)
+        bad = [r for r in rows if r["status"] in ("TIMEOUT", "LEAKED_EXCEPTION")]
+        if args.json:
+            print(json.dumps({"mode": "fuzz", "rows": rows, "problems": bad}, ensure_ascii=False, indent=2))
+        else:
+            print("=== 不正引数の注入テスト（数値引数 × 4種）===")
+            for r in bad:
+                print("  EXC {tool} {arg}={value}  {detail}".format(**r))
+            print("  検査した組み合わせ:", len(rows), "／ 例外漏れ:", len(bad))
+        return 1 if bad else 0
+
     rows = run_all(only=only, timeout=args.timeout, offline=args.offline)
 
     bad = [r for r in rows if r["status"] in ("TIMEOUT", "LEAKED_EXCEPTION")
@@ -180,8 +250,10 @@ def main() -> int:
         for r in rows:
             mark = {"OK": "ok ", "ERROR_RESULT": "err", "TIMEOUT": "T/O", "LEAKED_EXCEPTION": "EXC"}[r["status"]]
             extra = "  " + str(r.get("detail"))[:60] if r.get("detail") else ""
-            print("  {mark} {tool:30s} {seconds:6.2f}s {blocks}{extra}".format(
-                mark=mark, extra=extra, **r))
+            blocks = r.get("blocks", "")
+            print("  {mark} {tool:30s} {sec:6.2f}s {blocks}{extra}".format(
+                mark=mark, tool=r["tool"], sec=r.get("seconds", 0.0),
+                blocks=blocks, extra=extra))
         print("  内訳:", dict(counter))
         if bad:
             print("  ★ 要修正:", [(r["tool"], r["status"]) for r in bad])

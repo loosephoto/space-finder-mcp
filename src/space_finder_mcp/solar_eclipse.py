@@ -26,6 +26,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import TTL_DAILY, ttl_cache
 from .img_common import load_font
+from .input_utils import as_float
 
 _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
 os.makedirs(_DATA_DIR, exist_ok=True)
@@ -38,7 +39,8 @@ def _local_tz(lat, lon):
     """緯度経度から現地タイムゾーンの UTC オフセット(時間, DST込み)を Open-Meteo で取得。
     失敗時は経度/15 の概算にフォールバック。キャッシュして再呼び出しを避ける。
     """
-    key = (round(float(lat), 1), round(float(lon), 1))
+    lat, lon = as_float(lat, 0.0, -90.0, 90.0), as_float(lon, 0.0, -180.0, 180.0)
+    key = (round(lat, 1), round(lon, 1))
     cache = _local_tz.__dict__.setdefault("_c", {})
     if key in cache:
         return cache[key]
@@ -83,9 +85,15 @@ def _load():
 
 
 def _resolve_place(place, lat, lon):
-    """place 文字列 or lat/lon 数値から (lat, lon)。任意の地名は Open-Meteo でジオコーディング。"""
+    """place 文字列 or lat/lon 数値から (lat, lon)。任意の地名は Open-Meteo でジオコーディング。
+
+    lat/lon が数値として解釈できない場合は None を返す（呼び出し側でエラーにする）。
+    """
     if lat is not None and lon is not None:
-        return float(lat), float(lon)
+        la, lo = as_float(lat, None, -90.0, 90.0), as_float(lon, None, -180.0, 180.0)
+        if la is None or lo is None:
+            return None
+        return la, lo
     if place:
         key = str(place).strip().lower()
         if key in _KNOWN_COORDS:
@@ -332,6 +340,11 @@ def solar_eclipse_series(date: Optional[str] = None, place: Optional[str] = None
         max_magnitude: True で最大食のみの単一パネルを返す（既定 False=時系列）。
     """
     ll = _resolve_place(place, lat, lon)
+    if ll is None and (lat is not None or lon is not None):
+        return CallToolResult(
+            content=[TextContent(type="text", text="lat（-90〜90）と lon（-180〜180）は数値（度）で指定してください。")],
+            structuredContent={"error": "invalid coordinates", "lat": str(lat), "lon": str(lon)},
+        )
     if ll is None:
         ll = (35.68, 139.69)
     place_ja = place if place else "東京"

@@ -15,6 +15,7 @@ import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import TTL_DAILY, TTL_FORECAST, disk_get, ttl_cache
+from .input_utils import as_int
 
 # NASA Sounds from Beyond / 各ミッションの「宇宙の音」短尺キュレーション
 # (NASA公式が配布する効果音。ストリーミング/ダウンロード用の直接URL)。
@@ -190,7 +191,8 @@ def search_space_images(query: str, limit: int = 3, show_inline: bool = True,
             転送量を抑えるため既定は先頭1枚のみ。全件のURLは
             structuredContent.results[].image_url に入る。
     """
-    limit = max(1, min(int(limit), 10))
+    limit = as_int(limit, 3, 1, 10)
+    inline_max = as_int(inline_max, 1, 1, 5)
     err, d = _search_or_error(query, "image", limit)
     if err is not None:
         return err
@@ -229,7 +231,6 @@ def search_space_images(query: str, limit: int = 3, show_inline: bool = True,
     # インライン画像（既定は先頭1枚のみ。他は image_url を構造化JSONで参照）
     img_count = 0
     if show_inline:
-        inline_max = max(1, min(int(inline_max), 5))
         for r in records:
             if img_count >= inline_max:
                 break
@@ -284,7 +285,7 @@ def search_space_audio(query: str, limit: int = 3, kind: str = "auto") -> CallTo
         kind: "auto"(両方) / "podcast"(NASA Image Library の長尺トーク・解説) /
               "sound_effect"(短い宇宙の音・効果音)。
     """
-    limit = max(1, min(int(limit), 10))
+    limit = as_int(limit, 3, 1, 10)
     q = (query or "").strip()
     kind = (kind or "auto").lower()
 
@@ -408,7 +409,7 @@ def search_space_videos(query: str, limit: int = 3, show_poster: bool = True) ->
         limit: 返す動画件数（既定 3、最大 10）。
         show_poster: ポスター画像をチャットにインライン表示するか（既定 True）。
     """
-    limit = max(1, min(int(limit), 10))
+    limit = as_int(limit, 3, 1, 10)
     err, d = _search_or_error(query, "video", limit)
     if err is not None:
         return err

@@ -25,6 +25,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 # planetary_map の汎用コアと画像共通ヘルパーを再利用
 from .planetary_map import BODIES, _fetch_tiles
 from .img_common import load_font
+from .input_utils import as_float, as_int
 
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
 
@@ -119,11 +120,11 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
         )
     rover_ja = rcfg["ja"]
 
+    zoom = as_int(zoom, None, 4, body_cfg["maxzoom"])
     if zoom is None:
         zoom = body_cfg["maxzoom"]
-    zoom = max(4, min(int(zoom), body_cfg["maxzoom"]))
-    span_deg = max(0.05, min(float(span_deg), 30.0))
-    out_px = max(300, min(int(out_px), 2000))
+    span_deg = as_float(span_deg, 0.5, 0.05, 30.0)
+    out_px = as_int(out_px, 1000, 300, 2000)
 
     # ---- 位置データ（データ源ごと）----
     ptype = rcfg["pos"]["type"]

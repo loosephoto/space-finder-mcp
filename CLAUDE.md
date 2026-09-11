@@ -37,6 +37,8 @@ claude mcp add -s project space-finder -- uv --directory "$(pwd)" run space-find
 claude mcp list   # 確認
 ```
 
+- `-s project` はリポジトリ直下に `.mcp.json` を作ります（チーム共有向け）。個人利用だけで済ませるなら `-s user`（全プロジェクトで有効）を使います。
+
 検証済みの代替コマンド（いずれも 45ツールを返して起動します）:
 
 ```bash
@@ -89,6 +91,7 @@ ISSの現在位置を地球地図で →  mcp__space-finder__sat_ground_track
 uv run python -m compileall -q src/space_finder_mcp   # 構文チェック
 uv run python scripts/check-tools.py --dead-code      # デッドコード走査（0件を維持）
 uv run python scripts/check-tools.py --offline        # ネットワーク全断で例外漏れを検査
+uv run python scripts/check-tools.py --fuzz           # 数値引数へ不正値を注入（例外漏れ0を維持）
 uv run python scripts/check-tools.py                  # 全45ツール実呼び出し（数分）
 uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールのみ
 ```
@@ -98,7 +101,7 @@ uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールの�
 ## コーディング規約（要点）
 
 - 各ツールは必ず `CallToolResult` を返す（**例外を外へ漏らさない**）。`content` に人間向け表示（画像は `ImageContent`）、`structuredContent` に LLM向け純粋JSON。
-- API値の数値変換は防御的に（`float("?")` などで落ちない）。`d[key]` より `.get()`。
+- 数値変換は防御的に。**ツール入口の数値引数は必ず `input_utils.as_int` / `as_float` を通す**（不正値 `"5件"` を `int()` へ直に渡すと例外が外へ漏れる）。API応答値も同様。`d[key]` より `.get()`。
 - キャッシュは `cache.py` の `ttl_cache` / `disk_get` を使い、**エラー応答はキャッシュしない**（`skip_if=is_error_result`）。キャッシュ値を呼び出し側で書き換えるなら `deepcopy`。
 - 共通処理は `img_common.py`（フォント/JPEG/アンチメリジアン）・`stac_common.py`（bbox/雲量検証）・`cache.py` に集約。同じ処理を各モジュールに重複実装しない。
 - 依存追加は最小限（標準ライブラリを優先）。画像は Pillow/matplotlib を関数内で遅延 import。

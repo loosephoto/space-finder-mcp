@@ -15,6 +15,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_FORECAST, ttl_cache, is_error_result
+from .input_utils import as_int
 
 TAP = "https://ws.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/argus/sync"
 UA = {"User-Agent": "space-finder-mcp/0.13 (MCP; CADC TAP)"}
@@ -69,7 +70,7 @@ def cadc_observations(object_name: Optional[str] = None,
         telescope: 望遠鏡で絞り込み（例 "HST", "Gemini-North", "TESS"）。
         limit: 返す件数（既定 8、最大 20）。
     """
-    limit = max(1, min(int(limit), 20))
+    limit = as_int(limit, 8, 1, 20)
     # 天体名 -> 座標（簡易既知テーブル）
     _KNOWN = {
         "m31": (10.68, 41.27), "andromeda": (10.68, 41.27), "andromeda galaxy": (10.68, 41.27),

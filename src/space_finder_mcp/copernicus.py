@@ -14,6 +14,7 @@ from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_error_result
 from .stac_common import parse_bbox, parse_cloud_cover
+from .input_utils import as_int
 
 STAC = "https://stac.dataspace.copernicus.eu/v1"
 UA = {"User-Agent": "space-finder-mcp/0.2 (MCP; Copernicus STAC)"}
@@ -45,7 +46,7 @@ def copernicus_collections(limit: int = 20) -> CallToolResult:
     Args:
         limit: 返す件数（既定 20、最大 100）。
     """
-    limit = max(1, min(int(limit), 100))
+    limit = as_int(limit, 20, 1, 100)
     try:
         cols = _fetch_collections()
     except requests.RequestException as e:
@@ -92,7 +93,7 @@ def copernicus_search(collection: str = "sentinel-2-l2a", bbox: Optional[str] = 
         max_cloud_cover: 雲量の上限（%）（Sentinel-2 等 eo:cloud_cover を持つ場合）。
         limit: 返す件数（既定 5、最大 10）。
     """
-    limit = max(1, min(int(limit), 10))
+    limit = as_int(limit, 5, 1, 10)
     body: dict = {"limit": limit, "collections": [collection]}
     bbox_vals, bbox_err = parse_bbox(bbox)
     if bbox_err:

@@ -12,6 +12,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, ttl_cache, is_error_result
+from .input_utils import as_int
 
 # Wikidata SPARQL エンドポイント
 SPARQL_ENDPOINT = "https://query.wikidata.org/sparql"
@@ -122,7 +123,7 @@ SELECT DISTINCT {select_vars} WHERE {{
   {''.join(where)}
   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "{language},en". }}
 }} {orderby}
-LIMIT {int(limit)}
+LIMIT {as_int(limit, 5, 1, 100)}
 """
     try:
         resp = requests.get(SPARQL_ENDPOINT, params={"query": query}, headers=HEADERS, timeout=30)

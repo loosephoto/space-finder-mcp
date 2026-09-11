@@ -83,6 +83,8 @@ claude mcp add -s project space-finder -- uv --directory "$(pwd)" run space-find
 claude mcp list   # 確認（space-finder が表示されればOK）
 ```
 
+`-s project` はリポジトリ直下に `.mcp.json` を作ります（共有向け）。個人利用なら `-s user` を指定します。
+
 プロジェクトガイドは [`CLAUDE.md`](CLAUDE.md)、開発規約は [`.claude/rules/`](.claude/rules/) にあります（Claude Code が自動で読み込みます）。
 
 ### Codex
@@ -610,7 +612,10 @@ uv run python scripts/check-tools.py --offline
 # 4. 未参照定義・未使用import の走査（0件を維持）
 uv run python scripts/check-tools.py --dead-code
 
-# 5. 変更したツールだけ先に確認 / CI向けJSON出力
+# 5. 数値引数へ不正値（"abc" など）を注入して例外漏れを検査
+uv run python scripts/check-tools.py --fuzz
+
+# 6. 変更したツールだけ先に確認 / CI向けJSON出力
 uv run python scripts/check-tools.py --only sat_tle,apod
 uv run python scripts/check-tools.py --json
 ```
@@ -633,6 +638,7 @@ src/space_finder_mcp/
 ├── __init__.py          # main() → mcp.run()
 ├── server.py            # FastMCP サーバー定義・45ツール登録
 ├── stac_common.py       # STAC系共通の入力検証ヘルパー（bbox/雲量。ツール定義なし）
+├── input_utils.py       # 引数の防御的数値変換 as_int/as_float（不正値でも例外を漏らさない）
 ├── img_common.py        # 画像合成の共通ヘルパー（フォント探索/JPEG化/アンチメリジアン分割。ツール定義なし）
 ├── cache.py             # キャッシュ基盤（TTLメモリ/ディスク資産キャッシュ。ツール定義なし）
 ├── env_config.py        # リポジトリ直下 .env の読み込み（標準ライブラリのみ。ツール定義なし）

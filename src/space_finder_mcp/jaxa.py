@@ -10,6 +10,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_error_result
+from .input_utils import as_int
 
 ROOT = "https://data.earth.jaxa.jp/stac/cog/v1/catalog.json"
 UA = {"User-Agent": "space-finder-mcp/0.2 (MCP; JAXA Earth STAC)"}
@@ -62,7 +63,7 @@ def jaxa_datasets(limit: int = 30) -> CallToolResult:
     Args:
         limit: 返すデータセット件数（既定 30、最大 100）。
     """
-    limit = max(1, min(int(limit), 100))
+    limit = as_int(limit, 30, 1, 100)
     cols = _child_collections(max_collections=limit)
     if not cols:
         return CallToolResult(
@@ -96,7 +97,7 @@ def jaxa_dataset_search(query: str, limit: int = 10) -> CallToolResult:
         query: 検索語（例 "GSMaP", "ALOS", "GCOM", "precip", "rain", "FNF", "AW3D"）。
         limit: 返す件数（既定 10、最大 100）。
     """
-    limit = max(1, min(int(limit), 100))
+    limit = as_int(limit, 10, 1, 100)
     q = (query or "").strip().lower()
     cols = _child_collections(max_collections=100)
     if not q:

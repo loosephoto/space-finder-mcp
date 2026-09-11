@@ -12,6 +12,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, ttl_cache, is_error_result
+from .input_utils import as_int
 
 BASE = "https://isro.vercel.app/api"
 UA = {"User-Agent": "space-finder-mcp/0.2 (MCP; ISRO data)"}
@@ -56,7 +57,7 @@ def isro_data(kind: str = "spacecrafts", query: Optional[str] = None,
             content=[TextContent(type="text", text=f"kind は {', '.join(_ENDPOINTS)} のいずれかを指定してください。")],
             structuredContent={"error": f"unknown kind: {kind}", "available": sorted(_ENDPOINTS)},
         )
-    limit = max(1, min(int(limit), 100))
+    limit = as_int(limit, 20, 1, 100)
     try:
         rows = _fetch(kind)
     except requests.RequestException as e:
