@@ -12,6 +12,7 @@ from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_error_result
 from .stac_common import parse_bbox
+from .input_utils import as_int
 
 STAC = "https://eodatahub.org.uk/api/catalogue/stac"
 UA = {"User-Agent": "space-finder-mcp/0.3 (MCP; UK EO DataHub STAC)"}
@@ -33,7 +34,7 @@ def uk_stac_search(collection: Optional[str] = None, query: Optional[str] = None
         datetime: 時間範囲（"YYYY-MM-DD" または "start/end"）。省略で最新。
         limit: 返す件数（既定 5、最大 10）。
     """
-    limit = max(1, min(int(limit), 10))
+    limit = as_int(limit, 5, 1, 10)
     body: dict = {"limit": limit}
     if collection:
         body["collections"] = [collection]
@@ -48,7 +49,8 @@ def uk_stac_search(collection: Optional[str] = None, query: Optional[str] = None
     if datetime:
         body["datetime"] = datetime
     if query:
-        body["q"] = query
+        # この STAC API はキーワードをリストで要求する（文字列だと 400 "Input should be a valid list"）
+        body["q"] = [query]
     try:
         r = requests.post(f"{STAC}/search", headers=UA, json=body, timeout=35)
         r.raise_for_status()
@@ -98,7 +100,7 @@ def uk_stac_collections(limit: int = 20) -> CallToolResult:
     Args:
         limit: 返す件数（既定 20、最大 100）。
     """
-    limit = max(1, min(int(limit), 100))
+    limit = as_int(limit, 20, 1, 100)
     try:
         r = requests.get(f"{STAC}/collections", headers=UA, timeout=30)
         r.raise_for_status()
