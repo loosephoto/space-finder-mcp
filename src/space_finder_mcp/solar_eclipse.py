@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import copy
 import datetime
 import io
 import math
@@ -23,6 +24,7 @@ from typing import Optional
 
 from mcp.types import CallToolResult, ImageContent, TextContent
 
+from .cache import TTL_DAILY, ttl_cache
 from .img_common import load_font
 
 _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
@@ -277,6 +279,39 @@ def _render_panels(ev, place_ja, R=150):
 
 
 # ---------- ツール ----------
+@ttl_cache(TTL_DAILY, maxsize=128)
+def _scan_day_cached(lat: float, lon: float, y: int, mo: int, d: int,
+                     jst_offset: float):
+    """指定日の日食判定（約7秒）を緯度経度丸め＋日付のキーでキャッシュする。
+
+    同じ観測地・同じ日付なら結果は変わらない。戻り値は呼び出し側で書き換えるため
+    使う側で deepcopy すること。日食が無い場合(None)も決定的なのでキャッシュする。
+    """
+    loader, eph = _load()
+    ts = loader.timescale()
+    from skyfield.api import wgs84
+    site = eph["earth"] + wgs84.latlon(lat, lon)
+    return _scan_day(eph, ts, site, eph["sun"], eph["moon"], y, mo, d, jst_offset)
+
+
+@ttl_cache(TTL_DAILY, maxsize=64)
+def _next_eclipse_search(lat: float, lon: float, start_iso: str, days: int,
+                         jst_offset: float):
+    """「この観測地でこれから起こる次の日食」探索の結果をキャッシュする。
+
+    _next_eclipse_date は site（Skyfield オブジェクト）を引数に取るため呼び出しごとに
+    新しいオブジェクトになり lru_cache が効かない。緯度経度を小数2桁に丸めた値と
+    開始日だけをキーにして、約23秒かかる探索を再利用する（TTL 1日）。
+    戻り値は呼び出し側で書き換えられるので、使う側で deepcopy すること。
+    """
+    loader, eph = _load()
+    ts = loader.timescale()
+    from skyfield.api import wgs84
+    site = eph["earth"] + wgs84.latlon(lat, lon)
+    return _next_eclipse_date(eph, ts, site, datetime.date.fromisoformat(start_iso),
+                             days=days, jst_offset=jst_offset)
+
+
 def solar_eclipse_series(date: Optional[str] = None, place: Optional[str] = None,
                          lat: Optional[float] = None, lon: Optional[float] = None,
                          max_magnitude: bool = False) -> CallToolResult:
@@ -322,9 +357,11 @@ def solar_eclipse_series(date: Optional[str] = None, place: Optional[str] = None
         date_str = "{}年{}月{}日".format(*dates[0])
         date_disp = date_str
     else:
-        # 次の日食を自動検索（新月近傍のみ調べて高速化）
-        (dy, dmo, dd), found = _next_eclipse_date(
-            eph, ts, site, datetime.datetime.now().date(), days=800, jst_offset=tz)
+        # 次の日食を自動検索（新月近傍のみ調べて高速化。約23秒かかるため
+        # 緯度経度を丸めたキーで1日キャッシュし、戻り値は後段で書き換えるので deepcopy）
+        (dy, dmo, dd), found = copy.deepcopy(_next_eclipse_search(
+            round(ll[0], 2), round(ll[1], 2),
+            datetime.datetime.now().date().isoformat(), 800, round(float(tz), 2)))
         if not found:
             return CallToolResult(content=[TextContent(type="text",
                 text="今後約2年にこの観測地で見える日食が見つかりませんでした")],
@@ -339,7 +376,9 @@ def solar_eclipse_series(date: Optional[str] = None, place: Optional[str] = None
         return _finalize(found, place_ja, date_disp, ll)
     ev = None
     for (y, mo, d) in dates:
-        ev = _scan_day(eph, ts, site, sun, moon, y, mo, d, tz)
+        # 指定日の判定も約7秒かかるため、丸めた緯度経度＋日付のキーで再利用
+        ev = copy.deepcopy(_scan_day_cached(
+            round(ll[0], 2), round(ll[1], 2), y, mo, d, round(float(tz), 2)))
         if ev:
             break
     if ev is None:
