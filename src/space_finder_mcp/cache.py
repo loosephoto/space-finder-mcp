@@ -29,7 +29,6 @@ CACHE_ROOT = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp",
                           "space_finder_mcp", "cache")
 
 # 既定 TTL（秒）。データの性質に合わせて呼び出し側で上書きする。
-TTL_TLE = 6 * 3600          # 軌道要素（既存 celestrak と同じ考え方）
 TTL_DAILY = 24 * 3600       # データセット一覧・ジオコーディングなど準静的なもの
 TTL_HOURLY = 3600           # 日次データ（APOD/NEO）・EO Dashboard
 TTL_FORECAST = 1800         # 天気予報・メディア検索
@@ -152,17 +151,3 @@ def disk_get(url: str, *, subdir: str = "asset", ttl: float = TTL_ASSET,
             return None if (max_bytes and len(data) > max_bytes) else data
     return None
 
-
-def disk_cache_stats() -> dict:
-    """ディスクキャッシュの使用量（デバッグ・運用確認用）。"""
-    total = 0
-    files = 0
-    if os.path.isdir(CACHE_ROOT):
-        for root, _dirs, names in os.walk(CACHE_ROOT):
-            for n in names:
-                try:
-                    total += os.path.getsize(os.path.join(root, n))
-                    files += 1
-                except OSError:
-                    pass
-    return {"root": CACHE_ROOT, "files": files, "bytes": total}
