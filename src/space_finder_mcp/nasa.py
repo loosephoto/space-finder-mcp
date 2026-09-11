@@ -1,6 +1,7 @@
 """NASA の公開データ（APOD・小惑星 NEO 等）。api.nasa.gov の API キーを使用。"""
 from __future__ import annotations
 
+import datetime
 from typing import Optional
 
 import requests
@@ -13,7 +14,13 @@ def _get(path: str, key: str, params: Optional[dict] = None, timeout: int = 25) 
     p["api_key"] = key
     r = requests.get(f"{NASA}/{path}", params=p, timeout=timeout)
     r.raise_for_status()
-    return r.json()
+    try:
+        return r.json()
+    except ValueError as e:
+        # エラー時に HTML を返すことがある。呼び出し側は requests.RequestException を
+        # 捕まえているので、JSON 解析失敗も同型の例外に正規化して漏らさない。
+        raise requests.RequestException(
+            f"応答が JSON ではありません (HTTP {r.status_code}): {str(e)[:80]}") from e
 
 
 def apod(key: str, date: Optional[str] = None) -> CallToolResult:
@@ -21,19 +28,41 @@ def apod(key: str, date: Optional[str] = None) -> CallToolResult:
 
     認証不要（DEMO_KEY）または無料開発者キー。content に表示用サマリ、structuredContent に JSON を返す。
 
+    date 省略時は「今日」を明示指定して取得する。NASA の APOD API は date を省略すると
+    500 を返すことがあり（実測）、また当日分は公開前だと 404 になるため、その場合は
+    直近の公開分（前日）へ自動フォールバックする。date を明示した場合はその日のみを取得する。
+
     Args:
         key: NASA Open API キー（DEMO_KEY または無料開発者キー）。
-        date: YYYY-MM-DD。省略時は今日。
+        date: YYYY-MM-DD。省略時は今日（未公開なら前日）。
     """
-    params = {}
-    if date:
-        params["date"] = date
-    try:
-        d = _get("planetary/apod", key, params)
-    except requests.RequestException as e:
+    today = datetime.date.today()
+    candidates = [str(date)] if date else [
+        today.isoformat(), (today - datetime.timedelta(days=1)).isoformat()]
+    d = None
+    used = None
+    last_err = None
+    for cand in candidates:
+        try:
+            d = _get("planetary/apod", key, {"date": cand})
+            used = cand
+            break
+        except requests.RequestException as e:
+            last_err = e
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status not in (404, 500):
+                break  # レート制限(429)等は日付を変えても無駄なので即中断
+    if d is None:
+        status = getattr(getattr(last_err, "response", None), "status_code", None)
+        if status == 404:
+            text = ("APOD はまだ公開されていません（試行日: " + ", ".join(candidates) +
+                    "）。NASA 側の当日分公開は米国東部時間の夜になることがあります。")
+        else:
+            text = f"NASA APOD の取得に失敗しました: {last_err}"
         return CallToolResult(
-            content=[TextContent(type="text", text=f"NASA APOD の取得に失敗しました: {e}")],
-            structuredContent={"error": str(e), "source": "api.nasa.gov"},
+            content=[TextContent(type="text", text=text)],
+            structuredContent={"error": str(last_err), "status": status,
+                               "tried_dates": candidates, "source": "api.nasa.gov"},
         )
     text = (f"APOD {d.get('date','')} - {d.get('title','')}\n"
             f"{d.get('explanation','')}\n"
@@ -42,6 +71,8 @@ def apod(key: str, date: Optional[str] = None) -> CallToolResult:
         content=[TextContent(type="text", text=text)],
         structuredContent={
             "date": d.get("date", ""), "title": d.get("title", ""),
+            "requested_date": str(date) if date else today.isoformat(),
+            "fallback_to_previous_day": bool(date is None and used != today.isoformat()),
             "explanation": d.get("explanation", ""),
             "media_type": d.get("media_type", "image"),
             "image_url": d.get("hdurl") or d.get("url"),
@@ -58,7 +89,6 @@ def neo_today(key: str) -> CallToolResult:
     Args:
         key: NASA Open API キー。
     """
-    import datetime
     today = datetime.date.today().isoformat()
     try:
         d = _get("neo/rest/v1/feed", key, {"start_date": today, "end_date": today})
