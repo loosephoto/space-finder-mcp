@@ -7,6 +7,7 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from . import nasa_budget
 from .cache import TTL_HOURLY, ttl_cache, is_error_result
 
 NASA = "https://api.nasa.gov"
@@ -14,6 +15,9 @@ NASA = "https://api.nasa.gov"
 
 def _rate_limit_text(e: "requests.RequestException") -> str:
     """429(レート制限)なら対処方法を含む案内文を返す。それ以外は空文字。"""
+    if isinstance(e, nasa_budget.BudgetExceeded):
+        # 自前の予算管理で「投げずに」止めた場合（429 を踏みに行かない）
+        return str(e)
     status = getattr(getattr(e, "response", None), "status_code", None)
     if status == 429:
         return ("NASA API のレート制限に達しました。DEMO_KEY は 30リクエスト/時/IP の共有枠で、"
@@ -22,10 +26,24 @@ def _rate_limit_text(e: "requests.RequestException") -> str:
     return ""
 
 def _get(path: str, key: str, params: Optional[dict] = None, timeout: int = 25) -> dict:
+    # 予算を使い切っていたら HTTP を出さずに止める（無駄な 429 を発生させない）
+    ok, wait, used = nasa_budget.check(key)
+    if not ok:
+        raise nasa_budget.BudgetExceeded(nasa_budget.blocked_message(key), wait)
     p = dict(params or {})
     p["api_key"] = key
-    r = requests.get(f"{NASA}/{path}", params=p, timeout=timeout)
-    r.raise_for_status()
+    nasa_budget.record(key)
+    try:
+        r = requests.get(f"{NASA}/{path}", params=p, timeout=timeout)
+        r.raise_for_status()
+        # 残量0の合図（X-RateLimit-Remaining: 0）があれば、次を 429 にしないよう先に待機する
+        nasa_budget.note_response_headers(key, r.headers)
+    except requests.RequestException as e:
+        resp = getattr(e, "response", None)
+        if getattr(resp, "status_code", None) == 429:
+            # 実際に 429 を受けたら Retry-After を尊重して以降は投げない
+            nasa_budget.note_429(key, (getattr(resp, "headers", None) or {}).get("Retry-After"))
+        raise
     try:
         return r.json()
     except ValueError as e:
@@ -75,7 +93,8 @@ def apod(key: str, date: Optional[str] = None) -> CallToolResult:
         return CallToolResult(
             content=[TextContent(type="text", text=text)],
             structuredContent={"error": str(last_err), "status": status,
-                               "tried_dates": candidates, "source": "api.nasa.gov"},
+                               "tried_dates": candidates, "source": "api.nasa.gov",
+                               "budget": nasa_budget.status(key)},
         )
     text = (f"APOD {d.get('date','')} - {d.get('title','')}\n"
             f"{d.get('explanation','')}\n"
@@ -111,7 +130,8 @@ def neo_today(key: str) -> CallToolResult:
         return CallToolResult(
             content=[TextContent(type="text",
                                  text=_rate_limit_text(e) or f"NASA NEO の取得に失敗しました: {e}")],
-            structuredContent={"error": str(e), "status": status, "source": "api.nasa.gov"},
+            structuredContent={"error": str(e), "status": status, "source": "api.nasa.gov",
+                               "budget": nasa_budget.status(key)},
         )
     lines = [f"今日（{today}）地球に接近する小惑星:"]
     records = []

@@ -5,7 +5,6 @@
 - NASA (APOD/NEO) は api.nasa.gov のキーが別途必要。環境変数 NASA_API_KEY
   があれば引数省略時に自動で使う。キーはサーバー側でのみ保持し、クライアントへ晒さない。
 """
-import os
 from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
@@ -13,6 +12,7 @@ from mcp.types import CallToolResult
 
 from .wikidata_lookup import reverse_lookup
 from . import nasa as _nasa
+from . import nasa_budget as _nasa_budget
 from . import launch as _launch
 from . import media as _media
 from . import isro as _isro
@@ -97,13 +97,11 @@ mcp.tool()(_mars.mars_rover_status)
 # ---- NASA (APIキー要。環境変数 NASA_API_KEY があれば使う) ----
 def _nasa_apod(date: Optional[str] = None) -> CallToolResult:
     """今日（または指定日）の NASA の今日の天文写真(APOD)を返す。NASA_API_KEY が必要。"""
-    key = os.environ.get("NASA_API_KEY", "DEMO_KEY")
-    return _nasa.apod(key, date)
+    return _nasa.apod(_nasa_budget.current_key(), date)
 
 def _nasa_neo_today() -> CallToolResult:
     """今日地球に接近する小惑星(NEO)を返す。NASA_API_KEY が必要。"""
-    key = os.environ.get("NASA_API_KEY", "DEMO_KEY")
-    return _nasa.neo_today(key)
+    return _nasa.neo_today(_nasa_budget.current_key())
 
 mcp.tool(name="apod")(_nasa_apod)
 mcp.tool(name="neo_today")(_nasa_neo_today)

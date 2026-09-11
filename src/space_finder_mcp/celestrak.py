@@ -26,14 +26,34 @@ WELL_KNOWN: dict[str, int] = {
 }
 
 
+def _get(params: dict, timeout: int = 30) -> requests.Response:
+    """CelesTrak へ GET する。403 は「一時的な遮断」として案内文付きに正規化する。
+
+    短時間に多数のリクエストを送ると CelesTrak は **IP 単位で 403 Forbidden** を返す
+    （UA を変えても解除されない。実測 2026-09: curl/Mozilla UA でも 403）。
+    生の "403 Client Error" では原因が分からないため、待てば直ることを明示する。
+    """
+    r = requests.get(BASE, headers=UA, params=params, timeout=timeout)
+    try:
+        r.raise_for_status()
+    except requests.HTTPError as e:
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status == 403:
+            raise requests.HTTPError(
+                "アクセスが一時的に拒否されました（403 Forbidden）。"
+                "短時間に多数のリクエストを送ると CelesTrak 側で IP 単位に遮断されます"
+                "（数分〜しばらく待つと解除されます）。",
+                response=getattr(e, "response", None)) from e
+        raise
+    return r
+
+
 @lru_cache(maxsize=64)
 def _fetch_tle_cached(params_tuple: tuple) -> tuple:
     """TLE を取得（同一セッション内で同じ問い合わせはキャッシュ）。TLE は数時間有効。"""
     p = dict(params_tuple)
     p["FORMAT"] = "JSON"
-    r = requests.get(BASE, headers=UA, params=p, timeout=30)
-    r.raise_for_status()
-    return tuple(r.json())
+    return tuple(_get(p).json())
 
 
 def _fetch_tle(params: dict) -> list[dict]:
@@ -47,9 +67,7 @@ def _tle_text_cached(params_tuple: tuple) -> tuple:
     """生 TLE テキスト行を取得（FORMAT=TLE。JSON は TLE 2行を返さないため）。"""
     p = dict(params_tuple)
     p["FORMAT"] = "TLE"
-    r = requests.get(BASE, headers=UA, params=p, timeout=30)
-    r.raise_for_status()
-    return tuple(r.text.splitlines())
+    return tuple(_get(p).text.splitlines())
 
 
 def fetch_tle_text(**params) -> list[str]:

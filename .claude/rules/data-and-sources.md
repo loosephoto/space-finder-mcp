@@ -10,7 +10,7 @@
 
 | ソース | 注意点 |
 |:--|:--|
-| NASA Open API (api.nasa.gov) | `DEMO_KEY` は **30req/時/IP** の共有枠（`apod`・`neo_today`・`space_weather` で共有）。APOD は `date` 省略で 500 を返す事象があるため**日付を明示**し、当日未公開(404)なら前日へフォールバックする |
+| NASA Open API (api.nasa.gov) | `DEMO_KEY` は **30req/時/IP** の共有枠（`apod`・`neo_today`・`space_weather` で共有）。`nasa_budget.check()` を投げる前に通し（枠切れなら HTTP を出さない）、429 は `note_429()` で `Retry-After` を記録する。APOD は `date` 省略で 500 を返す事象があるため**日付を明示**し、当日未公開(404)なら前日へフォールバックする |
 | CelesTrak (gp.php) | `FORMAT=JSON` は**軌道要素のみで TLE行を返さない**。SGP4 に渡す生 TLE は `FORMAT=TLE` で取得する（JSON由来だと `SGP4 error code 2` で常時失敗する）。404 は「該当なし」 |
 | JPL Horizons / SBDB / DE421 | Horizons の宇宙機は**負のID**（例: はやぶさ2 = -37）。SBDB は小惑星のみ（探査機は不可） |
 | NASA MMGIS / NASA Trek / Blue Marble | 位置データは火星ローバーのみ公開。天体地図は Trek WMTS（等角図法、`cols=2^(z+1)`, `rows=2^z`）。タイルはディスクキャッシュ対象 |

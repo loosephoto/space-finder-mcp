@@ -78,6 +78,7 @@ ISSの現在位置を地球地図で →  mcp__space-finder__sat_ground_track
 ## 利用パターン（ハマりどころ）
 
 - **描画エンジン**: `sky_map_with_satellites` / `solar_system_now` は `engine="simple"`（既定・Pillow合成・学生向け視認性重視）と `engine="accurate"`（matplotlib・正確座標）。`simple` は JPEG、`accurate` は PNG を返します。
+- **レート制限**: api.nasa.gov を使うツール（`apod`・`neo_today`・`space_weather`）は `nasa_budget` を通して**投げる前に**枠を確認し、429 は `Retry-After` を尊重します（同じ 429 を繰り返し踏みに行かない）。
 - **キャッシュ**: データの性質ごとに3層（不変アセット=ディスク / 揮発データ=TTLメモリ 10分〜24時間 / 高コスト計算=日食探索など）。**同じ質問を繰り返しても外部APIを叩き直しません**。現在位置系（`iss_now`・`tiangong_now`・各位置計算）はリアルタイム性を優先しキャッシュ対象外です。
 - **レート制限**: `DEMO_KEY` 使用時は 429 になり得ます。エラー応答は対処方法込みで返し、キャッシュもしません（再試行されます）。
 - **曖昧な衛星名**: `sentinel` のように候補が複数ある場合は推測せず、NORAD ID 付きの候補を提示して停止します。

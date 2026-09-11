@@ -147,6 +147,7 @@ uv run python scripts/check-tools.py                  # 全45ツール実呼び�
 | 〃 | APOD / NEO / EO Dashboard | メモリ | 1時間 |
 | 〃 | データセット一覧・ジオコーディング・POWER・Wikidata | メモリ | 24時間 |
 | 高コスト計算 | 日食（次の日食探索23秒／指定日7秒） | 緯度経度丸めキーでメモリ | 24時間 |
+| 高コスト計算 | 探査機・彗星の Horizons 状態ベクトル（分単位キー）/ SBDB 軌道要素 | メモリ | 24時間（キーが1分ごとに更新） |
 
 実測効果（1回目→2回目）: `planetary_orbiter_track`(LRO) 4.46s/73req → 1.07s/1req、`solar_eclipse_series` 26.08s → 0.69s、`satellite_status` 50.28s → 0.00s、`sky_map` 画像 992KB → 188KB（JPEG化）。
 
@@ -155,7 +156,7 @@ uv run python scripts/check-tools.py                  # 全45ツール実呼び�
 ## 注意事項
 
 1. **出典表示**: 結果には出典URLが含まれます。回答時は必ず引用元を表示してください（NASA / ESA / JAXA / ISRO / CSA / INPE / UK / CNSA / Wikidata など）。
-2. **レート制限**: `DEMO_KEY` は 30リクエスト/時/IP の共有枠（`apod`・`neo_today`・`space_weather` で共有）。429 時は対処方法付きのメッセージを返します。
+2. **レート制限**: `DEMO_KEY` は 30リクエスト/時/IP の共有枠（`apod`・`neo_today`・`space_weather` で共有）。サーバー側で使用数を数えており、枠を使い切ると HTTP を出さずに回復目安を返し、429 を受けた場合は `Retry-After` を尊重します（`structuredContent.budget` に上限・使用数・残りを添付）。
 3. **曖昧入力**: 衛星名などで候補が複数ある場合は推測せず、NORAD ID 付きの候補を提示して停止します。
 4. **過去ミッション**: かぐや（SELENE）・あかつき等は「現在位置を表示できない」と正直に返します。
 5. **描画エンジン**: `simple`（Pillow合成・学生向け視認性重視・JPEG・既定）と `accurate`（matplotlib・正確座標・PNG）。遠方探査機・彗星は線形縮尺では枠外のため自動的に `simple` を使用します。
@@ -172,5 +173,6 @@ uv run python scripts/check-tools.py                  # 全45ツール実呼び�
 
 ## 更新履歴
 
+- v0.25.2 — api.nasa.gov の呼び出し枠を投げる前に確認する `nasa_budget.py`（DEMO_KEY 30/時・`Retry-After` 尊重・`budget` を structuredContent に添付）、探査機/彗星の Horizons 取得を分単位キーでキャッシュ（1req→0req）、SBDB 軌道要素を24時間キャッシュ
 - v0.25.1 — 引数の防御的数値変換（`input_utils.as_int` / `as_float`、51箇所）で例外漏れを解消、`uk_stac_search` のキーワード検索修正、Claude Code / Codex インストール対応（CLAUDE.md / AGENTS.md / mcp.json / .env.example）、リポジトリ直下 `.env` 対応、検証ゲート `scripts/check-tools.py` 同梱
 - v0.25.0 — 汎用の天体周回機/ローバー位置マップを追加（`planetary_orbiter_track` / `planetary_rover_location_map`）。専用ルーチン（lunar_track 等）を統合

@@ -10,12 +10,12 @@ DONKI (Database Of Notifications, Knowledge, Information) は太陽活動に伴�
 """
 from __future__ import annotations
 
-import os
 from typing import Optional
 
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from . import nasa_budget
 from .cache import TTL_SHORT, ttl_cache, is_error_result
 from .input_utils import as_int
 
@@ -42,11 +42,22 @@ def _kp_label(kp: float) -> str:
 
 
 def _get(endpoint: str, params: dict, timeout: int = 30) -> list:
-    key = os.environ.get("NASA_API_KEY", "DEMO_KEY")
+    key = nasa_budget.current_key()
+    ok, wait, used = nasa_budget.check(key)
+    if not ok:
+        raise nasa_budget.BudgetExceeded(nasa_budget.blocked_message(key), wait)
     p = dict(params)
     p["api_key"] = key
-    r = requests.get(f"{DONKI}/{endpoint}", params=p, headers=UA, timeout=timeout)
-    r.raise_for_status()
+    nasa_budget.record(key)
+    try:
+        r = requests.get(f"{DONKI}/{endpoint}", params=p, headers=UA, timeout=timeout)
+        r.raise_for_status()
+        nasa_budget.note_response_headers(key, r.headers)
+    except requests.RequestException as e:
+        resp = getattr(e, "response", None)
+        if getattr(resp, "status_code", None) == 429:
+            nasa_budget.note_429(key, (getattr(resp, "headers", None) or {}).get("Retry-After"))
+        raise
     return r.json()
 
 
@@ -170,9 +181,17 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
                 structuredContent={"error": "bad kind", "kind": kind, "valid": sorted(valid)},
             )
         # kind は正しいが取得失敗（レート制限など）
+        ok_budget, wait, used = nasa_budget.check()
+        budget = nasa_budget.status()
+        advice = ""
+        if not ok_budget:
+            advice = (" NASA API の呼び出し枠を使い切っています（直近1時間 "
+                      f"{used}/{budget['limit_per_hour']} 回）。"
+                      f"{nasa_budget.human_wait(wait)}後に回復します。")
         return CallToolResult(
-            content=[TextContent(type="text", text="宇宙天気データを取得できませんでした（NASA API のレート制限や一時的障害の可能性）。NASA_API_KEY を設定すると制限が緩和されます。")],
-            structuredContent={"error": "fetch failed", "kind": kind, "detail": errors},
+            content=[TextContent(type="text", text="宇宙天気データを取得できませんでした（NASA API のレート制限や一時的障害の可能性）。" + advice + "NASA_API_KEY を設定すると制限が緩和されます。")],
+            structuredContent={"error": "fetch failed", "kind": kind, "detail": errors,
+                               "budget": budget},
         )
 
     lines = ["☀️ **NASA 宇宙天気（DONKI）** 出典: api.nasa.gov（NASA Space Weather）"]
