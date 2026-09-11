@@ -41,14 +41,49 @@ def _fetch_tle(params: dict) -> list[dict]:
     return list(_fetch_tle_cached(key))
 
 
-@lru_cache(maxsize=64)
-def _fetch_tle_lines_cached(params_tuple: tuple) -> tuple:
-    """生 TLE を取得（FORMAT=TLE。JSON は TLE 2行を返さないため）。"""
+@lru_cache(maxsize=128)
+def _tle_text_cached(params_tuple: tuple) -> tuple:
+    """生 TLE テキスト行を取得（FORMAT=TLE。JSON は TLE 2行を返さないため）。"""
     p = dict(params_tuple)
     p["FORMAT"] = "TLE"
     r = requests.get(BASE, headers=UA, params=p, timeout=30)
     r.raise_for_status()
     return tuple(r.text.splitlines())
+
+
+def fetch_tle_text(**params) -> list[str]:
+    """CelesTrak から生 TLE テキスト行を取得する（CATNR / NAME / GROUP など）。
+
+    セッション内キャッシュ付き（TLE は数時間有効）。requests の例外は送出する。
+    """
+    key = tuple(sorted((k, str(v)) for k, v in params.items()))
+    return list(_tle_text_cached(key))
+
+
+def fetch_tle(norad_id: Optional[int] = None,
+              name: Optional[str] = None) -> Optional[tuple]:
+    """NORAD ID または名前から (name, line1, line2) を返す。該当なしは None。
+
+    satellite_map / sky_overlay / tiangong が各自持っていた CelesTrak TLE 取得の
+    共通版。requests の例外はそのまま送出する（呼び出し側で処理する）。
+    """
+    if norad_id is not None:
+        params = {"CATNR": norad_id}
+    elif name:
+        params = {"NAME": name}
+    else:
+        return None
+    try:
+        lines = [ln.strip() for ln in fetch_tle_text(**params)]
+    except requests.HTTPError as e:
+        # 該当なしのとき CelesTrak は 404 を返す → 「見つからない」として扱う
+        if getattr(getattr(e, "response", None), "status_code", None) == 404:
+            return None
+        raise
+    pair = [ln for ln in lines if ln.startswith(("1 ", "2 "))]
+    if len(pair) < 2:
+        return None
+    return (lines[0].strip() if lines else ""), pair[0], pair[1]
 
 
 def _fetch_tle_lines(params: dict) -> dict:
@@ -60,7 +95,7 @@ def _fetch_tle_lines(params: dict) -> dict:
     key = tuple(sorted((k, str(v)) for k, v in params.items()))
     out: dict = {}
     try:
-        lines = list(_fetch_tle_lines_cached(key))
+        lines = list(_tle_text_cached(key))
     except requests.RequestException:
         return out
     line1 = None
@@ -125,6 +160,19 @@ def sat_tle(name: Optional[str] = None, norad_id: Optional[int] = None,
         params["GROUP"] = "stations"  # 既定: 有人宇宙関連
     try:
         rows = _fetch_tle(params)
+    except requests.HTTPError as e:
+        # 該当なしのとき CelesTrak は 404 を返す（接続障害と区別して案内する）
+        if getattr(getattr(e, "response", None), "status_code", None) == 404:
+            return CallToolResult(
+                content=[TextContent(type="text", text="指定した衛星の軌道要素が見つかりませんでした。NORAD ID や別名をお試しください。")],
+                structuredContent={"error": "not found",
+                                   "query": {"name": name, "norad_id": norad_id, "group": group},
+                                   "total": 0, "results": []},
+            )
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"CelesTrak への接続に失敗しました: {e}")],
+            structuredContent={"error": str(e), "source": "celestrak.org"},
+        )
     except requests.RequestException as e:
         return CallToolResult(
             content=[TextContent(type="text", text=f"CelesTrak への接続に失敗しました: {e}")],

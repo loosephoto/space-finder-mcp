@@ -22,10 +22,10 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
+from .celestrak import fetch_tle
 from .img_common import encode_jpeg, load_font, split_at_antimeridian
 
-# ---- CelesTrak TLE ----
-TLE_BASE = "https://celestrak.org/NORAD/elements/gp.php"
+# ---- NASA Blue Marble 用 UA（TLE 取得は celestrak.fetch_tle に共通化）----
 UA = {"User-Agent": "space-finder-mcp/0.23 (MCP; satellite ground track)"}
 
 # よく使う衛星の NORAD ID
@@ -73,13 +73,10 @@ def _resolve_norad_candidates(name: str) -> list[tuple[str, int]]:
 
 def _fetch_tle2(norad_id: int) -> tuple[str, str, str]:
     """NORAD ID から TLE 2行を取得。戻り: (name, line1, line2)。"""
-    r = requests.get(f"{TLE_BASE}?CATNR={norad_id}&FORMAT=TLE", headers=UA, timeout=30)
-    r.raise_for_status()
-    lines = [l for l in r.text.strip().splitlines() if l.startswith(("1 ", "2 "))]
-    if len(lines) < 2:
+    tle = fetch_tle(norad_id=int(norad_id))
+    if tle is None:
         raise ValueError(f"NORAD {norad_id} の TLE が見つかりません")
-    name = r.text.strip().splitlines()[0].strip()
-    return name, lines[0], lines[1]
+    return tle
 
 
 def _sat_subpoint(sat, t) -> tuple[float, float, float]:
@@ -144,25 +141,20 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
                                    "candidates": [{"name": k, "norad_id": v} for k, v in cands]},
             )
     if norad_id is None:
-        # 名前での直接 TLE 検索
+        # 名前で CelesTrak を直接検索（取得失敗と「該当なし」を区別する）
         try:
-            r = requests.get(f"{TLE_BASE}?NAME={name}&FORMAT=TLE", headers=UA, timeout=30)
-            r.raise_for_status()
-            lines = [l for l in r.text.strip().splitlines() if l.startswith(("1 ", "2 "))]
-            if len(lines) >= 2:
-                tle = lines
-                tle_name = r.text.strip().splitlines()[0].strip()
-            else:
-                tle = None
-        except requests.RequestException:
-            tle = None
-        if not tle:
+            found = fetch_tle(name=name)
+        except requests.RequestException as e:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"衛星の軌道要素(TLE)取得に失敗しました: {e}")],
+                structuredContent={"error": str(e), "source": "celestrak.org"},
+            )
+        if found is None:
             return CallToolResult(
                 content=[TextContent(type="text", text=f"衛星 '{name}' を特定できませんでした。NORAD ID を直接指定するか、既知の衛星名（iss, hubble, hinode 等）をお使いください。")],
                 structuredContent={"error": "unknown satellite", "name": name},
             )
-        sat_name = tle_name
-        tle1, tle2 = tle
+        sat_name, tle1, tle2 = found
     else:
         try:
             sat_name, tle1, tle2 = _fetch_tle2(int(norad_id))

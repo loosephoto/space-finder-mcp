@@ -14,10 +14,8 @@ from functools import lru_cache
 from mcp.types import CallToolResult, TextContent
 from sgp4.api import Satrec, jday
 
-# CelesTrak gp.php は FORMAT=JSON だと TLE 2行 (TLE_LINE1/TLE_LINE2) を返さず軌道要素
-# フィールドのみを返すため、SGP4 に渡す生 TLE は FORMAT=TLE で取得する。
-TLE_URL = "https://celestrak.org/NORAD/elements/gp.php?CATNR=48274&FORMAT=TLE"
-UA = {"User-Agent": "space-finder-mcp/0.11 (MCP; Tiangong live position)"}
+from .celestrak import fetch_tle
+
 TIANGONG_NORAD = 48274
 
 
@@ -35,15 +33,14 @@ def _tle_epoch_iso(line1: str) -> str:
 
 @lru_cache(maxsize=1)
 def _fetch_tiangong_tle() -> tuple:
-    """天宮の最新TLE (name, line1, line2) を取得（セッション内キャッシュ）。TLEは数時間有効。"""
-    r = requests.get(TLE_URL, headers=UA, timeout=30)
-    r.raise_for_status()
-    raw = r.text.strip().splitlines()
-    name = raw[0].strip() if raw else ""
-    lines = [ln.strip() for ln in raw if ln.startswith(("1 ", "2 "))]
-    if len(lines) < 2:
+    """天宮の最新TLE (name, line1, line2) を取得（TLEは数時間有効）。
+
+    取得は celestrak.fetch_tle に共通化（セッション内キャッシュ付き）。
+    """
+    tle = fetch_tle(norad_id=TIANGONG_NORAD)
+    if tle is None:
         raise ValueError("CelesTrak の応答に TLE 2行が含まれていません")
-    return name, lines[0], lines[1]
+    return tle
 
 
 def _compute_position(tle_line1: str, tle_line2: str) -> dict:

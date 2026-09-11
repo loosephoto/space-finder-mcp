@@ -20,6 +20,7 @@ import os
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
+from .celestrak import fetch_tle
 from .img_common import load_font
 
 _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
@@ -85,14 +86,12 @@ def _load():
 
 
 def _fetch_tle(catnr):
+    """CelesTrak から TLE 2行 (line1, line2) を取得（失敗時は None）。"""
     try:
-        r = requests.get("https://celestrak.org/NORAD/elements/gp.php?CATNR={}&FORMAT=TLE".format(catnr),
-                         headers=UA, timeout=25)
-        r.raise_for_status()
-        lines = [x.rstrip() for x in r.text.splitlines() if x.strip()]
-        return (lines[1], lines[2]) if len(lines) >= 3 else None
+        tle = fetch_tle(norad_id=catnr)
     except requests.RequestException:
         return None
+    return (tle[1], tle[2]) if tle else None
 
 
 def _resolve_place(place, lat, lon):
