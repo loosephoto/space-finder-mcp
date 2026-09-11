@@ -22,20 +22,11 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
-from .celestrak import fetch_tle
+from .celestrak import WELL_KNOWN, fetch_tle
 from .img_common import encode_jpeg, load_font, split_at_antimeridian
 
 # ---- NASA Blue Marble 用 UA（TLE 取得は celestrak.fetch_tle に共通化）----
 UA = {"User-Agent": "space-finder-mcp/0.23 (MCP; satellite ground track)"}
-
-# よく使う衛星の NORAD ID
-WELL_KNOWN: dict[str, int] = {
-    "iss": 25544, "hubble": 20580, "himawari-8": 40267, "himawari-9": 41836,
-    "landsat-8": 39084, "landsat-9": 49260, "noaa-20": 43013, "noaa-21": 54234,
-    "meteor-m2": 40069, "goes-16": 41866, "goes-17": 41868, "goes-18": 51850,
-    "tiangong": 48274, "sentinel-2a": 40697, "sentinel-2b": 42063, "sentinel-1a": 39634,
-    "kepu": 44414, "hinode": 29479, "aqua": 27424, "terra": 25994, "suomi-npp": 37849,
-}
 
 # ---- NASA Blue Marble 等角図法 地球地図（キャッシュ）----
 _EARTH_URL = ("https://eoimages.gsfc.nasa.gov/images/imagerecords/"

@@ -15,13 +15,13 @@ from mcp.types import CallToolResult, TextContent
 BASE = "https://celestrak.org/NORAD/elements/gp.php"
 UA = {"User-Agent": "space-finder-mcp/0.3 (MCP; CelesTrak TLE)"}
 
-# よく使う衛星の NORAD カタログ番号
+# よく使う衛星の NORAD カタログ番号（satellite_map と共用。定義はここ1箇所）
 WELL_KNOWN: dict[str, int] = {
     "iss": 25544, "hubble": 20580, "himawari-8": 40267, "himawari-9": 41836,
     "landsat-8": 39084, "landsat-9": 49260, "noaa-20": 43013, "noaa-21": 54234,
     "meteor-m2": 40069, "goes-16": 41866, "goes-17": 41868, "goes-18": 51850,
     "tiangong": 48274, "sentinel-2a": 40697, "sentinel-2b": 42063, "sentinel-1a": 39634,
-    "kepu": 44414,
+    "kepu": 44414, "hinode": 29479, "aqua": 27424, "terra": 25994, "suomi-npp": 37849,
 }
 
 
