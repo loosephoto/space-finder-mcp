@@ -98,19 +98,25 @@ def sat_tle(name: Optional[str] = None, norad_id: Optional[int] = None,
     elif name:
         nm = name.strip().lower()
         # 既知の衛星名をNORAD IDに解決（完全一致を最優先）
-        for key, nid in WELL_KNOWN.items():
-            if nm == key:
-                params["CATNR"] = nid
-                break
+        exact = next((nid for key, nid in WELL_KNOWN.items() if nm == key), None)
+        if exact is not None:
+            params["CATNR"] = exact
         else:
             # 部分一致は短い名前の誤マッチを避けるため、長い入力のみ許可
-            matched = None
-            for key, nid in WELL_KNOWN.items():
-                if len(nm) >= 4 and (key in nm or nm in key):
-                    matched = nid
-                    break
-            if matched:
-                params["CATNR"] = matched
+            cands = [(key, nid) for key, nid in WELL_KNOWN.items()
+                     if len(nm) >= 4 and (key in nm or nm in key)]
+            uniq = {nid for _, nid in cands}
+            if len(uniq) == 1:
+                params["CATNR"] = uniq.pop()
+            elif len(uniq) > 1:
+                # 曖昧な名前は先頭候補に黙って確定させず、候補を提示して止める
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"衛星名 '{name}' は候補が複数あります: "
+                                         + ", ".join(f"{k} (NORAD {v})" for k, v in cands)
+                                         + "。NORAD ID か、より具体的な名前を指定してください。")],
+                    structuredContent={"error": "ambiguous satellite name", "name": name,
+                                       "candidates": [{"name": k, "norad_id": v} for k, v in cands]},
+                )
             else:
                 params["NAME"] = name.strip()
     elif group:

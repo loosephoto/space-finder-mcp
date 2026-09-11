@@ -55,16 +55,18 @@ def _earth_image() -> bytes:
     return r.content
 
 
-def _resolve_norad(name: str) -> Optional[int]:
-    """衛星名・省略名を NORAD ID に解決（完全一致→部分一致の順）。"""
+def _resolve_norad_candidates(name: str) -> list[tuple[str, int]]:
+    """衛星名・省略名を (名前, NORAD ID) 候補に解決する（完全一致を最優先）。
+
+    完全一致がなければ部分一致の候補を全件返す。曖昧な入力で先頭候補に
+    黙って確定させないため、判定は呼び出し側で行う。
+    """
     nm = name.strip().lower()
-    for k, v in WELL_KNOWN.items():
-        if nm == k:
-            return v
-    for k, v in WELL_KNOWN.items():
-        if len(nm) >= 4 and (k in nm or nm in k):
-            return v
-    return None
+    exact = [(k, v) for k, v in WELL_KNOWN.items() if nm == k]
+    if exact:
+        return exact[:1]
+    return [(k, v) for k, v in WELL_KNOWN.items()
+            if len(nm) >= 4 and (k in nm or nm in k)]
 
 
 def _fetch_tle2(norad_id: int) -> tuple[str, str, str]:
@@ -118,8 +120,27 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
         out_px: 出力画像の幅ピクセル（既定 1200、最大 2048）。
     """
     # ---- 引数解決 ----
+    name = str(name).strip() if name is not None else ""
+    if norad_id is None and not name:
+        return CallToolResult(
+            content=[TextContent(type="text", text="衛星を指定してください。norad_id（例 25544=ISS, 29479=ひので）または name（例 \"iss\", \"hubble\"）のいずれかが必要です。")],
+            structuredContent={"error": "satellite not specified",
+                               "known_names": sorted(WELL_KNOWN.keys())},
+        )
     if norad_id is None and name:
-        norad_id = _resolve_norad(name)
+        cands = _resolve_norad_candidates(name)
+        uniq = {v for _, v in cands}
+        if len(uniq) == 1:
+            norad_id = uniq.pop()
+        elif len(uniq) > 1:
+            # 曖昧な名前は推測せず候補を提示して検索を止める
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"衛星名 '{name}' は候補が複数あります: "
+                                     + ", ".join(f"{k} (NORAD {v})" for k, v in cands)
+                                     + "。NORAD ID か、より具体的な名前を指定してください。")],
+                structuredContent={"error": "ambiguous satellite name", "name": name,
+                                   "candidates": [{"name": k, "norad_id": v} for k, v in cands]},
+            )
     if norad_id is None:
         # 名前での直接 TLE 検索
         try:
