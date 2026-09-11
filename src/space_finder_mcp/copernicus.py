@@ -1,8 +1,8 @@
 """ESA Copernicus Data Space Ecosystem（欧州）STAC API。
 
-検索は認証不要。ダウンロードのみ OAuth2 client_credentials が必要（環境変数
-CDSE_CLIENT_ID / CDSE_CLIENT_SECRET があれば、プレビュー画像取得にも使う）。
-キーはサーバー側でのみ保持し、クライアントへ晒さない。
+検索・プレビューURL取得は認証不要。本サーバーは認証付きダウンロード（OAuth2
+client_credentials）は行わないため、CDSE のクレデンシャルは使用しない
+（ダウンロードが必要な場合は CDSE 側で取得してください）。
 STAC v1 エンドポイント: https://stac.dataspace.copernicus.eu/v1
 """
 from __future__ import annotations

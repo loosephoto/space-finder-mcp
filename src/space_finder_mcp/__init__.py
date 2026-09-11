@@ -5,6 +5,11 @@
   Wikidata SPARQL で解決。根拠はSPARQL結果＋Wikipedia記事引用。
 """
 
+from .env_config import load_dotenv
+
+# MCPクライアントの env を優先しつつ、リポジトリ直下の .env があれば未設定キーを補う
+load_dotenv()
+
 from .server import mcp
 
 def main() -> None:

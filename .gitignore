@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# ローカル環境変数（APIキー等。絶対にコミットしない）
+.env
+
 # Skyfield のダウンロードデータ（JPL天体暦・星表・星座）
 de421.bsp
 hip_main.dat
