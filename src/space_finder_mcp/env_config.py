@@ -65,6 +65,3 @@ def load_dotenv(path: str = None, override: bool = False) -> dict:
     _LOADED = True
     return applied
 
-
-def is_loaded() -> bool:
-    return _LOADED
