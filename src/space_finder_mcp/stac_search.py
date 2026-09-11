@@ -12,6 +12,7 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_error_result
 from .stac_common import parse_bbox, parse_cloud_cover
 
 STAC = "https://earth-search.aws.element84.com/v1"
@@ -41,6 +42,7 @@ def _parse_assets(assets: dict) -> dict:
     return out
 
 
+@ttl_cache(TTL_DAILY, maxsize=32, skip_if=is_error_result)
 def stac_collections() -> CallToolResult:
     """AWS Earth Search で利用可能な衛星データコレクション一覧を返す（認証不要）。
 
@@ -79,6 +81,7 @@ def stac_collections() -> CallToolResult:
     )
 
 
+@ttl_cache(TTL_SHORT, maxsize=64, skip_if=is_error_result)
 def stac_search(collection: str = "sentinel-2-l2a", bbox: Optional[str] = None,
                 place: Optional[str] = None, datetime: Optional[str] = None,
                 max_cloud_cover: Optional[float] = None, limit: int = 5) -> CallToolResult:

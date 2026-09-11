@@ -17,6 +17,8 @@ import base64
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
+from .cache import TTL_HOURLY, ttl_cache, is_error_result
+
 # コレクション定義JSON（GitHub raw）
 RAW = "https://raw.githubusercontent.com/ESA-eodashboards/eodashboard-catalog/main/collections"
 # カタログのツリー一覧（GitHub API）
@@ -89,6 +91,7 @@ def _fetch_meta(cid: str) -> Optional[dict]:
         return None
 
 
+@ttl_cache(TTL_HOURLY, maxsize=32, skip_if=is_error_result)
 def eodashboard_collections(themes: Optional[str] = None, agency: Optional[str] = None,
                             keyword: Optional[str] = None, limit: int = 20) -> CallToolResult:
     """EO Dashboard（NASA・ESA・JAXA共同）の地球観測データセットを検索する（認証不要）。
@@ -154,6 +157,7 @@ def eodashboard_collections(themes: Optional[str] = None, agency: Optional[str] 
     )
 
 
+@ttl_cache(TTL_HOURLY, maxsize=64, skip_if=is_error_result)
 def eodashboard_detail(identifier: str, show_image: bool = True) -> CallToolResult:
     """EO Dashboard の1つのデータセットの詳細（衛星・センサー・説明・参照リンク・画像）を返す。
 

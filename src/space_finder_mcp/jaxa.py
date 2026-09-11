@@ -9,6 +9,8 @@ from __future__ import annotations
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_error_result
+
 ROOT = "https://data.earth.jaxa.jp/stac/cog/v1/catalog.json"
 UA = {"User-Agent": "space-finder-mcp/0.2 (MCP; JAXA Earth STAC)"}
 
@@ -50,6 +52,7 @@ def _child_collections(catalog_url: str = ROOT, depth: int = 0,
     return out
 
 
+@ttl_cache(TTL_DAILY, maxsize=32, skip_if=is_error_result)
 def jaxa_datasets(limit: int = 30) -> CallToolResult:
     """JAXA Earth の地球観測データセット（ALOS/GSMaP/GCOM等）一覧を返す（認証不要）。
 
@@ -82,6 +85,7 @@ def jaxa_datasets(limit: int = 30) -> CallToolResult:
     )
 
 
+@ttl_cache(TTL_SHORT, maxsize=64, skip_if=is_error_result)
 def jaxa_dataset_search(query: str, limit: int = 10) -> CallToolResult:
     """JAXA Earth のデータセットをキーワード検索する（認証不要）。
 

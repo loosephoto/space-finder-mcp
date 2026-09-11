@@ -10,6 +10,7 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_error_result
 from .stac_common import parse_bbox, parse_cloud_cover
 
 STAC = "https://data.inpe.br/bdc/stac/v1"
@@ -28,6 +29,7 @@ COMMON_COLLECTIONS = {
 }
 
 
+@ttl_cache(TTL_DAILY, maxsize=32, skip_if=is_error_result)
 def inpe_collections(limit: int = 30) -> CallToolResult:
     """ブラジルINPEの衛星データコレクション一覧を返す（認証不要）。
 
@@ -65,6 +67,7 @@ def inpe_collections(limit: int = 30) -> CallToolResult:
     )
 
 
+@ttl_cache(TTL_SHORT, maxsize=64, skip_if=is_error_result)
 def inpe_search(collection: str = "CB4-WFI-L4-SR-1", bbox: Optional[str] = None,
                 datetime: Optional[str] = None, max_cloud_cover: Optional[float] = None,
                 limit: int = 5) -> CallToolResult:

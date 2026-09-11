@@ -18,6 +18,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from mcp.types import CallToolResult, TextContent
 
+from .cache import TTL_DAILY, ttl_cache, is_error_result
+
 CKAN = "https://donnees-data.asc-csa.gc.ca/api/3/action"
 UA = {"User-Agent": "space-finder-mcp/0.2 (MCP; CSA Open Data)"}
 
@@ -45,6 +47,7 @@ def _ckan(action: str, params: Optional[dict] = None) -> dict:
     return r.json()
 
 
+@ttl_cache(TTL_DAILY, maxsize=64, skip_if=is_error_result)
 def csa_dataset_search(query: str = "", limit: int = 10) -> CallToolResult:
     """CSA（カナダ宇宙庁）オープンデータポータルでデータセットを検索する（認証不要）。
 

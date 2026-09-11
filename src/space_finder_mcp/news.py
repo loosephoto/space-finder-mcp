@@ -17,6 +17,8 @@ import xml.etree.ElementTree as ET
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .cache import TTL_SHORT, ttl_cache
+
 REPO = "https://github.com/loosephoto/space-finder-mcp"
 # Cloudflare が「ブラウザを名乗る非ブラウザ」を弾くため、curl 互換UAで自ツールを明示する
 _UA = "curl/8.5.0 (compatible; space-finder-mcp/0.25; +" + REPO + ")"
@@ -64,6 +66,7 @@ def _classify(url: str, title: str) -> str:
     return "observing" if any(h in t for h in _OBSERVING_HINTS) else "news"
 
 
+@ttl_cache(TTL_SHORT, maxsize=16)
 def _parse_feed(url: str) -> list[dict]:
     """RSS 2.0 / Atom フィードを取得して記事レコードを返す。失敗時は例外を送出する。"""
     r = requests.get(url, headers=UA, timeout=25)

@@ -13,6 +13,8 @@ from datetime import datetime, timedelta, timezone
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .cache import TTL_SHORT, ttl_cache, is_error_result
+
 API = "https://www.eso.org/asm/api/"
 UA = {"User-Agent": "space-finder-mcp/0.13 (MCP; ESO Paranal ASM)"}
 
@@ -37,6 +39,7 @@ def _parse_ts(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%m-%d %H:%M")
 
 
+@ttl_cache(TTL_SHORT, maxsize=32, skip_if=is_error_result)
 def eso_seeing(hours: int = 12, fields: str = _DEFAULT_FIELDS) -> CallToolResult:
     """ESO パラナル天文台（チリ, VLT）のリアルタイム大気・シーイング観測データを返す。
 

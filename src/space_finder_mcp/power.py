@@ -19,6 +19,8 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .cache import TTL_DAILY, ttl_cache, is_error_result
+
 API = "https://power.larc.nasa.gov/api/temporal/daily/point"
 UA = {"User-Agent": "space-finder-mcp/0.12 (MCP; NASA POWER climate)"}
 
@@ -63,6 +65,7 @@ def _stat(values) -> dict:
             "max": max(vals), "min": min(vals), "days": len(vals)}
 
 
+@ttl_cache(TTL_DAILY, maxsize=64, skip_if=is_error_result)
 def power_climate(latitude: float, longitude: float,
                   start: Optional[str] = None, end: Optional[str] = None,
                   parameters: Optional[str] = None) -> CallToolResult:

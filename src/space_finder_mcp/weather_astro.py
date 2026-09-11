@@ -15,6 +15,8 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .cache import TTL_DAILY, TTL_FORECAST, ttl_cache, is_error_result
+
 API = "https://api.open-meteo.com/v1/forecast"
 UA = {"User-Agent": "space-finder-mcp/0.4 (MCP; Open-Meteo astronomy)"}
 
@@ -92,6 +94,7 @@ def _night_obs_windows(h: dict, daily: dict, max_cloud: float = 40.0,
     return windows
 
 
+@ttl_cache(TTL_FORECAST, maxsize=64, skip_if=is_error_result)
 def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[float] = None,
                       place: Optional[str] = None, days: int = 3,
                       max_cloud: float = 40.0) -> CallToolResult:
@@ -278,6 +281,7 @@ _JA_PLACES: dict[str, str] = {
 }
 
 
+@ttl_cache(TTL_DAILY, maxsize=256, skip_if=lambda v: v is None)
 def _geocode(place: str) -> Optional[dict]:
     """Open-Meteo のジオコーディングAPIで地名を緯度経度に解決する。
 

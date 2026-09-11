@@ -20,6 +20,8 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .cache import TTL_FORECAST, ttl_cache, is_error_result
+
 TAP = "https://almascience.nao.ac.jp/tap/sync"
 UA = {"User-Agent": "space-finder-mcp/0.18 (MCP; ALMA Science Archive TAP)"}
 _C = 299792458.0  # 光速 m/s
@@ -64,6 +66,7 @@ def _do_query(query: str, limit: int) -> tuple[Optional[list], Optional[str]]:
     return [header] + rows[1:limit + 1], None
 
 
+@ttl_cache(TTL_FORECAST, maxsize=64, skip_if=is_error_result)
 def alma_search(object_name: Optional[str] = None,
                 ra: Optional[float] = None, dec: Optional[float] = None,
                 radius: float = 0.3, band: Optional[int] = None,

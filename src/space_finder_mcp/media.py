@@ -14,7 +14,7 @@ import base64
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
-from .cache import disk_get
+from .cache import TTL_DAILY, TTL_FORECAST, disk_get, ttl_cache
 
 # NASA Sounds from Beyond / 各ミッションの「宇宙の音」短尺キュレーション
 # (NASA公式が配布する効果音。ストリーミング/ダウンロード用の直接URL)。
@@ -77,6 +77,7 @@ IMAGES_API = "https://images-api.nasa.gov"
 UA = {"User-Agent": "space-finder-mcp/0.1 (MCP media search)"}
 
 
+@ttl_cache(TTL_FORECAST, maxsize=64)
 def _search(q: str, media_type: str, limit: int) -> dict:
     """NASA Image & Video Library を検索する。失敗時は例外を送出する（呼び出し側で処理）。
 
@@ -109,6 +110,7 @@ def _search_or_error(q: str, media_type: str, limit: int):
         ), None
 
 
+@ttl_cache(TTL_DAILY, maxsize=256, skip_if=lambda v: not v)
 def _asset_hrefs(nasa_id: str) -> list[str]:
     """nasa_id の実ファイルURL(群)を取得する。"""
     try:

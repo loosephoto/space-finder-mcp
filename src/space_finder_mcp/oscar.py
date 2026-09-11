@@ -13,6 +13,8 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .cache import TTL_DAILY, ttl_cache, is_error_result
+
 OSCAR = "https://space.oscar.wmo.int/api/v1"
 UA = {"User-Agent": "space-finder-mcp/0.9 (MCP; WMO OSCAR/Space)"}
 
@@ -23,6 +25,7 @@ _STATUS = {
 }
 
 
+@ttl_cache(TTL_DAILY, maxsize=64, skip_if=is_error_result)
 def satellite_status(query: Optional[str] = None, agency: Optional[str] = None,
                      limit: int = 10) -> CallToolResult:
     """世界気象機関（WMO）OSCARの衛星カタログから、気象・地球観測衛星の運用ステータスを返す。

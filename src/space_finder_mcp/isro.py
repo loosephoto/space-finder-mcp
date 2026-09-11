@@ -11,6 +11,8 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .cache import TTL_DAILY, ttl_cache, is_error_result
+
 BASE = "https://isro.vercel.app/api"
 UA = {"User-Agent": "space-finder-mcp/0.2 (MCP; ISRO data)"}
 
@@ -31,6 +33,7 @@ def _fetch(kind: str) -> list[dict]:
     return d.get(key, [])
 
 
+@ttl_cache(TTL_DAILY, maxsize=64, skip_if=is_error_result)
 def isro_data(kind: str = "spacecrafts", query: Optional[str] = None,
               limit: int = 20) -> CallToolResult:
     """ISRO（インド宇宙研究機関）の公式データを返す（認証不要）。

@@ -6,8 +6,11 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .cache import TTL_SHORT, ttl_cache, is_error_result
+
 LL2 = "https://ll.thespacedevs.com/2.3.0"
 
+@ttl_cache(TTL_SHORT, maxsize=32, skip_if=is_error_result)
 def upcoming_launches(limit: int = 5) -> CallToolResult:
     """今後予定されているロケット打ち上げの一覧を返す。
 
@@ -58,6 +61,7 @@ def upcoming_launches(limit: int = 5) -> CallToolResult:
     )
 
 
+@ttl_cache(TTL_SHORT, maxsize=32, skip_if=is_error_result)
 def china_launches(limit: int = 8, status: Optional[str] = None) -> CallToolResult:
     """中国のロケット打ち上げ予定（長征シリーズ・LandSpace等の民間企業を含む）を返す。
 
@@ -115,6 +119,7 @@ def china_launches(limit: int = 8, status: Optional[str] = None) -> CallToolResu
     )
 
 
+@ttl_cache(TTL_SHORT, maxsize=32, skip_if=is_error_result)
 def russia_launches(limit: int = 8, status: Optional[str] = None) -> CallToolResult:
     """ロシア（Roscosmos）のロケット打ち上げ予定を返す（ソユーズ・プロトン・アンガラ等）。
 

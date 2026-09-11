@@ -7,6 +7,8 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .cache import TTL_HOURLY, ttl_cache, is_error_result
+
 NASA = "https://api.nasa.gov"
 
 
@@ -33,6 +35,7 @@ def _get(path: str, key: str, params: Optional[dict] = None, timeout: int = 25) 
             f"応答が JSON ではありません (HTTP {r.status_code}): {str(e)[:80]}") from e
 
 
+@ttl_cache(TTL_HOURLY, maxsize=64, skip_if=is_error_result)
 def apod(key: str, date: Optional[str] = None) -> CallToolResult:
     """今日（または指定日）の Astronomy Picture of the Day（今日の天文写真）を返す。
 
@@ -91,6 +94,7 @@ def apod(key: str, date: Optional[str] = None) -> CallToolResult:
     )
 
 
+@ttl_cache(TTL_HOURLY, maxsize=64, skip_if=is_error_result)
 def neo_today(key: str) -> CallToolResult:
     """今日地球に接近する小惑星（Near Earth Object）の一覧を返す。
 

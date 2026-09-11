@@ -16,6 +16,8 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .cache import TTL_SHORT, ttl_cache, is_error_result
+
 DONKI = "https://api.nasa.gov/DONKI"
 UA = {"User-Agent": "space-finder-mcp/0.6 (MCP; NASA DONKI space weather)"}
 
@@ -47,6 +49,7 @@ def _get(endpoint: str, params: dict, timeout: int = 30) -> list:
     return r.json()
 
 
+@ttl_cache(TTL_SHORT, maxsize=32, skip_if=is_error_result)
 def space_weather(kind: str = "all", start_date: Optional[str] = None,
                   end_date: Optional[str] = None, limit: int = 10) -> CallToolResult:
     """NASA DONKI の宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象）を返す。

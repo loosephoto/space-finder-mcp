@@ -14,6 +14,8 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .cache import TTL_FORECAST, ttl_cache, is_error_result
+
 TAP = "https://ws.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/argus/sync"
 UA = {"User-Agent": "space-finder-mcp/0.13 (MCP; CADC TAP)"}
 
@@ -46,6 +48,7 @@ def _do_query(query: str, limit: int = 10) -> tuple[Optional[list[list]], Option
     return rows[:limit], None
 
 
+@ttl_cache(TTL_FORECAST, maxsize=64, skip_if=is_error_result)
 def cadc_observations(object_name: Optional[str] = None,
                       ra: Optional[float] = None, dec: Optional[float] = None,
                       radius: float = 0.5, telescope: Optional[str] = None,

@@ -11,6 +11,8 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .cache import TTL_DAILY, ttl_cache, is_error_result
+
 # Wikidata SPARQL エンドポイント
 SPARQL_ENDPOINT = "https://query.wikidata.org/sparql"
 HEADERS = {
@@ -45,6 +47,7 @@ CATEGORY_ENTITIES: dict[str, tuple[str, str]] = {
 }
 
 
+@ttl_cache(TTL_DAILY, maxsize=64, skip_if=is_error_result)
 def reverse_lookup(
     category: str,
     launch_date: bool = True,

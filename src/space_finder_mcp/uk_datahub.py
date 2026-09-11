@@ -10,12 +10,14 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_error_result
 from .stac_common import parse_bbox
 
 STAC = "https://eodatahub.org.uk/api/catalogue/stac"
 UA = {"User-Agent": "space-finder-mcp/0.3 (MCP; UK EO DataHub STAC)"}
 
 
+@ttl_cache(TTL_SHORT, maxsize=64, skip_if=is_error_result)
 def uk_stac_search(collection: Optional[str] = None, query: Optional[str] = None,
                    bbox: Optional[str] = None, datetime: Optional[str] = None,
                    limit: int = 5) -> CallToolResult:
@@ -88,6 +90,7 @@ def uk_stac_search(collection: Optional[str] = None, query: Optional[str] = None
     )
 
 
+@ttl_cache(TTL_DAILY, maxsize=32, skip_if=is_error_result)
 def uk_stac_collections(limit: int = 20) -> CallToolResult:
     """英国 EO DataHub の利用可能なコレクション一覧を返す（認証不要）。
 
