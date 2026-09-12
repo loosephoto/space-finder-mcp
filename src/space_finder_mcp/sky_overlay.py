@@ -22,7 +22,9 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import disk_get
 from .celestrak import fetch_tle
-from .img_common import encode_jpeg, load_font
+from .img_common import (as_image, encode_jpeg, figure_notes, figure_payload,
+                         figure_text_block, load_font, pixel_near,
+                         primary_spec, scale_spec, view_spec)
 from .input_utils import as_float
 
 _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
@@ -346,10 +348,13 @@ def _render_simple(scene):
         kind = _PLANET_VISUAL.get(nm, ((200,200,210), "rocky"))[1]
         draw_planet(nm, x, y, kind)
 
-    # 衛星（赤・強調）
+    # 衛星（赤・強調）: マーカーを全部描いてから、ラベルを重ならない位置に置く
+    # （ラベル枠を先に描くと後続衛星のマーカーを覆い隠してしまう）
+    sat_items = []
     for nm, s in scene["satellites"].items():
         x, y = proj(s["az"], s["alt"])
-        r0 = 15 if s["kind"] == "leo" else 13
+        sat_items.append((nm, s, x, y, 15 if s["kind"] == "leo" else 13))
+    for nm, s, x, y, r0 in sat_items:
         # 光背
         dr.ellipse([x - r0 - 8, y - r0 - 8, x + r0 + 8, y + r0 + 8], fill=(255, 80, 60, 60))
         dr.ellipse([x - r0, y - r0, x + r0, y + r0], fill=(255, 60, 50, 255),
@@ -362,9 +367,20 @@ def _render_simple(scene):
                 if prev is not None:
                     dr.line([prev[0], prev[1], tx, ty], fill=(255, 138, 128, 200), width=3)
                 prev = (tx, ty)
-        lx, ly = x + 20, y - 18
-        dr.rectangle([lx - 4, ly, lx + 250, ly + 32], fill=(80, 0, 0, 230))
-        dr.text((lx, ly + 2), nm, font=load_font(20, True), fill=(255, 176, 166, 255))
+    bw, bh = 254, 32
+    taken = [[x - r0 - 2, y - r0 - 2, x + r0 + 2, y + r0 + 2] for _, _, x, y, r0 in sat_items]
+    for nm, s, x, y, r0 in sat_items:
+        for ox, oy in ((r0 + 10, -16), (-(r0 + 14) - bw, -16),
+                       (r0 + 10, r0 + 8), (-(r0 + 14) - bw, r0 + 8)):
+            bx = min(max(8, x + ox), W - bw - 8)
+            by = min(max(140, y + oy), H - 90 - bh)
+            if all(bx + bw < t[0] or bx > t[2] or by + bh < t[1] or by > t[3] for t in taken):
+                break
+        else:
+            bx, by = min(max(8, x + r0 + 10), W - bw - 8), min(max(140, y - 16), H - 90 - bh)
+        taken.append([bx, by, bx + bw, by + bh])
+        dr.rectangle([bx, by, bx + bw, by + bh], fill=(80, 0, 0, 230))
+        dr.text((bx + 4, by + 2), nm, font=load_font(20, True), fill=(255, 176, 166, 255))
 
     # ヘッダバナー
     dr.rectangle([0, 16, W, 112], fill=(0, 0, 0, 210))
@@ -382,6 +398,36 @@ def _render_simple(scene):
 
 
 # ---------- 選択ツール ----------
+
+_SKY_R = 560            # 空の円（地平線）の半径(px)。_render_simple の R と一致させる
+
+def _sky_verify(img_bytes, sats):
+    """報告した人工衛星が、報告した方位・高度の位置に実際に描かれているかを検証する。
+
+    描画側と同じ投影（中心=画像中心・半径=_SKY_R・動径 ∝ 90-alt）で画素位置を
+    再計算し、マーカー色（赤）がそこにあるかを確かめる。縮尺・方位・中心のどれが
+    ずれても落ちるので、図と数値の対応を丸ごと検査できる。
+    可視衛星が0機のときは配置検査の対象がないため note を付けて ok とする。
+    """
+    img = as_image(img_bytes).convert("RGB")
+    cx = cy = img.size[0] // 2
+    out = {"ok": True, "satellites_reported": len(sats), "markers_at_expected_position": 0,
+           "missing": [], "projection": {"center_px": [cx, cy], "radius_px": _SKY_R}}
+    for nm, az, alt in sats:
+        th = math.radians(az)
+        rr = _SKY_R * (90.0 - alt) / 90.0
+        x, y = cx + rr * math.sin(th), cy - rr * math.cos(th)
+        n = pixel_near(img, (x, y), (255, 60, 50), tol=30, r=10)
+        if n >= 40:
+            out["markers_at_expected_position"] += 1
+        else:
+            out["missing"].append([nm, round(x), round(y), n])
+    if not sats:
+        out["note"] = "可視衛星なし（配置検査は対象外）"
+    out["ok"] = not out["missing"]
+    return out
+
+
 def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
                             engine="simple") -> CallToolResult:
     """東京（または指定地）の空に太陽系の惑星と人工衛星を重ねた図を返す（認証不要）。
@@ -447,6 +493,38 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
     ]
     for nm, s in scene["satellites"].items():
         lines.append("- {}: 方位 {:.0f}° 仰角 {:.0f}°".format(nm, s["az"], s["alt"]))
+    fig = figure_payload(
+        kind="sky_view",
+        title="{} の空（惑星・人工衛星）".format(scene["time_utc"]),
+        view=view_spec("local_sky", "altaz",
+                       "観測地から見た空（高度・方位）に惑星・月・人工衛星を重ねた図",
+                       why="日心/地心の配置ではなく、その地点から見た見かけの位置だから"),
+        primary=primary_spec("地球", "observer",
+                             note="観測地から見た空の図。地球や軌道の形は描いていない"),
+        scale=scale_spec("linear", to_scale=True, unit="deg",
+                         exaggerated=["惑星・人工衛星のマーカー（実寸ではない）"]),
+        markers=[{"id": k, "label": k, "az_deg": round(v.get("az", 0.0), 1),
+                  "alt_deg": round(v.get("alt", 0.0), 1)}
+                 for k, v in list(scene["satellites"].items())[:8]],
+        notes=figure_notes(extra=[
+            "この図は観測地の空（高度・方位）の見かけの位置。軌道の形や地球からの距離は分からない",
+            "engine=simple は実写背景への合成（学生・観賞向け）、accurate は座標を正確に描いた星図",
+            "人工衛星は CelesTrak の最新TLEをSGP4で伝播したその時刻の位置（予報ではない）",
+            "地平線下の天体は描かれない（リストにも「なし(地平線下)」と出る）",
+            "惑星・月の位置は JPL de421 + Skyfield（観測地の視位置）",
+        ]),
+        caption="{:.2f}°N {:.2f}°E の {} の空。惑星: {} ／ 人工衛星: {}".format(
+            ll[0], ll[1], scene["time_utc"],
+            ", ".join(scene["planets"]) or "なし",
+            ", ".join(scene["satellites"]) or "なし"),
+        verify=(_sky_verify(img_bytes, [(nm, s["az"], s["alt"])
+                                        for nm, s in scene["satellites"].items()])
+                if not use_acc else
+                {"ok": True, "engine": "accurate (matplotlib)",
+                 "note": "極座標版は投影が異なるため配置検査は対象外（注記のみ）"}),
+    )
+    lines.append("")
+    lines.append(figure_text_block(fig))
     lines.append("画像は上に表示（base64 " + ("PNG" if mime == "image/png" else "JPEG") +
                  "）。出典: JPL de421 + Skyfield / CelesTrak TLE + SGP4")
     return CallToolResult(
@@ -454,5 +532,6 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
         structuredContent={"time_utc": scene["time_utc"], "lat": ll[0], "lon": ll[1],
                            "engine": eng_label, "planets": scene["planets"],
                            "stars": scene["stars"], "satellites": scene["satellites"],
+                           "figure": fig,
                            "source": "JPL de421+Skyfield / CelesTrak+SGP4"},
     )

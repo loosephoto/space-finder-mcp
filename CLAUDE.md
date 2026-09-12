@@ -108,6 +108,7 @@ uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールの�
 - 共通処理は `img_common.py`（フォント/JPEG/アンチメリジアン）・`stac_common.py`（bbox/雲量検証）・`cache.py` に集約。同じ処理を各モジュールに重複実装しない。
 - 依存追加は最小限（標準ライブラリを優先）。画像は Pillow/matplotlib を関数内で遅延 import。
 - ドキュメント・コメントは日本語。ツールの docstring は**クライアント向け仕様**（例文・引数・認証要否を書く）。
+- **描画系ツールは `structuredContent.figure`（`schema: "figure/1"`）を返す**。視点(`view`)・主天体の置き方(`primary`：楕円は**焦点**であって中心ではない)・縮尺(`scale`)・円錐曲線(`conic`)・注記(`notes`)・自己検証(`verify`)を含め、注記は `img_common` の `figure_notes` 等で**数値から生成**する（手書きは図と文が食い違う）。`content` にも `figure_text_block()` で同じ注記を出し、docstring に「`figure.notes` は要約せず引用する」と明記。**閉じない軌道（e≥1 / a<0）を楕円として描かない**。検査は `scripts/check-tools.py --figures`。
 
 ## リリース手順
 

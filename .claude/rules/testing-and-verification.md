@@ -14,6 +14,7 @@ uv run python scripts/check-tools.py --only sat_tle,apod   # 変更したツー�
 `check-tools.py` の終了コードは 0=正常 / 1=異常（例外漏れ・structuredContent欠落・タイムアウト・デッドコード）。CI では `--json` を使う。
 
 ## 変更内容ごとの追加確認
+- **描画系を変更したとき**: `uv run python scripts/check-tools.py --figures` で figure/1（注記・caption・verify.ok）を検査する。
 
 | 変更 | 追加で確認すること |
 |:--|:--|

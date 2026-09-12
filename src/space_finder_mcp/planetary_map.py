@@ -12,7 +12,9 @@ import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import disk_get
-from .img_common import encode_jpeg, load_font, split_at_antimeridian
+from .img_common import (encode_jpeg, figure_notes, figure_payload,
+                         figure_text_block, load_font, primary_spec, scale_spec,
+                         split_at_antimeridian, view_spec)
 from .input_utils import as_float, as_int
 
 UA = {"User-Agent": "space-finder-mcp/0.25 (MCP; planetary orbiter track)"}
@@ -507,11 +509,42 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
 
     view = "全面" if whole else f"局所 {span_deg:.0f}°"
     step_disp = step if step >= 1 else f"{step * 60:.0f} 秒"
+    # 図の注記（figure/1）: 図の誤読を防ぐための自己申告。content にも同じ注記を出す。
+    marker_visible = not (lx <= cx <= lx + lab_w and ly <= cy <= ly + lab_h)
+    fig = figure_payload(
+        kind="ground_track_map",
+        title=f"{ja} の{body_cfg['ja']}面位置（{body_cfg['attrib']}）",
+        view=view_spec("body_surface", "equirectangular",
+                       f"{body_cfg['ja']}面の緯度経度図（等角図法）。オレンジ線＝真下の点の軌跡",
+                       why="3Dの軌道ではなく天体面への投影。軌道面や傾斜はこの図からは"
+                           "読み取れない（表示範囲は地図ズームに依存）"),
+        primary=primary_spec(body_cfg["ja"], "surface_map",
+                             note="天体面の地図なので主天体は図の中心に置いていない"),
+        scale=scale_spec("linear", to_scale=True, unit="deg",
+                         exaggerated=["現在位置マーカー（実寸ではない）"]),
+        markers=[{"id": "current", "label": f"{ja} 現在位置", "lat": round(lat0, 4),
+                  "lon": round(lon0, 4), "altitude_km": round(alt0, 2),
+                  "px": [round(cx), round(cy)]}],
+        notes=figure_notes(extra=[
+            f"オレンジ線は指定時刻の前後 {minutes} 分の{body_cfg['ja']}面軌道＝真下の点の軌跡。"
+            "3Dの軌道の形ではない",
+            "等角図法のため高緯度ほど東西方向が圧縮されて見える",
+            f"表示は「{view}」（span_deg={span_deg:g}）。地図は NASA Trek の{body_cfg['attrib']}",
+            f"マーカーは指定時刻の真下の点。高度 {alt0:.1f} km・{body_cfg['ja']}中心距離 "
+            f"{cur['dist_km']:.1f} km・速度 {spd}",
+            "過去の探査機（かぐや等）は運用終了済みで、位置は軌道要素からの外挿になる場合がある",
+        ]),
+        caption=f"{ja} の{body_cfg['ja']}面位置（{tstr}）。真下の点は {ns} {abs(lat0):.2f}° / "
+                f"{ew} {abs(lon0):.2f}°、高度 {alt0:.1f} km。",
+        verify={"ok": bool(marker_visible), "marker_visible": bool(marker_visible)},
+    )
     lines = [
         f"🛰 **{ja}** の{body_cfg['ja']}面位置（{tstr}）:",
         f"📍 {body_cfg['ja']}面: {ns} {abs(lat0):.2f}° / {ew} {abs(lon0):.2f}°",
         f"🛰 高度 {alt0:.1f} km ・ {body_cfg['ja']}中心距離 {cur['dist_km']:.1f} km ・ 速度 {spd}",
         f"🛤 軌道トレイル: 前後 {minutes} 分（{step_disp} 刻み）。オレンジ線=軌道。表示: {view}",
+        "",
+        figure_text_block(fig),
         f"出典: JPL Horizons + IAU{body_cfg['ja']}自転モデル ／ 地図 {body_cfg['attrib']}",
     ]
     return CallToolResult(
@@ -524,6 +557,7 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
             "dist_from_body_center_km": round(cur["dist_km"], 1),
             "trail_minutes": minutes, "step_min": round(step, 4), "trail_points": len(trail),
             "view": view, "span_deg": span_deg, "zoom": zoom,
+            "figure": fig,
             "source": f"JPL Horizons + IAU rotation + NASA Trek {body_cfg['attrib']}",
         },
     )

@@ -58,8 +58,8 @@ category: space
 | `alma_search` | ALMA（アルマ望遠鏡）科学アーカイブの観測データ検索（観測対象・座標・周波数帯・公開/要権限） | ALMA Science Archive (NAOJ, IVOA TAP) | 不要 |
 | `radio_sources_now` | TART オープン電波望遠鏡が「いま観測できる電波源」（GNSS・静止衛星等）を仰角順に表示 | TART source catalog (NZ) | 不要 |
 | `sky_map_with_satellites` | 指定地の空に太陽系の惑星と人工衛星を重ねた画像（matplotlib正確版=PNG/Pillow簡易版=JPEGを選択） | JPL de421+Skyfield / CelesTrak+SGP4 | 不要 |
-| `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
-| `solar_eclipse_series` | 日食（太陽が月に欠ける過程）の時系列パネル画像（食の始まり〜最大〜終わり7枚・次回日食の自動検索・max_magnitude対応） | JPL DE421+Skyfield | 不要 |
+| `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示）。`view="comet_orbit"` で彗星の軌道面ビュー（太陽＝焦点の楕円／e≥1 は双曲線の枝） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
+| `solar_eclipse_series` | 日食（太陽が月に欠ける過程）の時系列パネル画像（7枚・食分と太陽高度・次回日食の自動検索・max_magnitude対応。**地平線下で見えない食は返さない**） | JPL DE421+Skyfield | 不要 |
 | `eodashboard_collections` | EO Dashboard（NASA×ESA×JAXA共同）の173データセットをテーマ・機関・キーワードで検索 | EO Dashboard (GitHub catalog) | 不要 |
 | `eodashboard_detail` | EO Dashboardの1データセットの詳細（衛星・センサー・説明・画像・参照リンク） | EO Dashboard (GitHub catalog) | 不要 |
 | `space_weather` | NASA宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象） | NASA DONKI | キー(任意/DEMO_KEY可) |
@@ -118,7 +118,10 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 「MROは火星のどこ？」                        → planetary_orbiter_track(body="mars", orbiter="mro")
 「パーサヴィアランスの現在地を火星地図で」    → planetary_rover_location_map(body="mars", rover="perseverance")
 「太陽系を上から見た図」「はやぶさ2は今どこ」 → solar_system_now(probe="はやぶさ2")
-「東京で見える次の日食を画像で」              → solar_eclipse_series(place="東京")
+「ハレー彗星の軌道を見せて」                  → solar_system_now(comet="ハレー彗星", view="comet_orbit")
+「紫金山・アトラスの軌道は？」                → solar_system_now(comet="C/2023 A3", view="comet_orbit")  # e>1 は双曲線の枝
+「東京で見える次の日食を画像で」              → solar_eclipse_series(place="東京")  # 可視の食が無ければ「見つかりません」＋date 案内
+「2030年の日食を東京で」                      → solar_eclipse_series(place="東京", date="2030-06-01")
 「今夜の観測に向く時間帯は？」                → astronomy_weather(place="東京")
 「東京の今夜の空に何が見える？」              → sky_map_with_satellites(place="東京")
 「火星の画像を見せて」                        → search_space_images(query="mars")
@@ -126,12 +129,23 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 「天宮は今どこ？」                            → tiangong_now()
 ```
 
+## 図の注記 figure/1（描画系ツールの応答）
+
+描画系ツール（`solar_system_now` / `sat_ground_track` / `planetary_orbiter_track` / `planetary_rover_location_map` / `sky_map_with_satellites` / `solar_eclipse_series`）は、`structuredContent.figure` に **視点(view)・主天体の置き方(primary: 楕円は焦点であって中心ではない)・縮尺(scale)・円錐曲線(conic)・注記(notes)・自己検証(verify)・説明(caption)** を返します。`content` にも同じ注記が `### ⚠️ 図の注記` として入ります。
+
+- **回答に図を説明するときは `figure.notes` を要約・言い換えせず、そのまま引用する**（「主天体は焦点」「対数縮尺」「地上軌道は投影」等の但し書きを落とすと図の誤読を招く）。
+- **`conic.kind` が `hyperbola`/`parabola` のとき、その軌道は閉じていない**（遠日点なし）。「周回軌道」と説明しないこと。
+- `verify.ok` が真なら、描いた画素から測った近点/遠点距離が数値と一致し、ラベルが線に被っていないことを意味します。
+- `solar_eclipse_series` は**その観測地で太陽が地平線より上にある時間帯だけ**を描きます。全日食が地平線下なら図を返さず「見えません（最大高度 −67°）」と明示します（見えない食を図にすると誤解させるため）。
+- 検査: `scripts/check-tools.py --figures`（注記が空・`verify.ok` が偽なら exit 1）。既定引数では通らない経路（`view="comet_orbit"`、可視の日食）も明示的に叩きます。
+
 ## 開発ワークフロー（検証ゲート）
 
 ```bash
 uv run python -m compileall -q src/space_finder_mcp   # 構文
 uv run python scripts/check-tools.py --dead-code      # デッドコード（0件を維持）
 uv run python scripts/check-tools.py --offline        # ネットワーク全断で例外漏れ検査
+uv run python scripts/check-tools.py --figures        # 描画系の図の注記(figure/1)を検査
 uv run python scripts/check-tools.py                  # 全45ツール実呼び出し（数分、exit 1 で失敗）
 ```
 
@@ -173,6 +187,4 @@ uv run python scripts/check-tools.py                  # 全45ツール実呼び�
 
 ## 更新履歴
 
-- v0.25.2 — api.nasa.gov の呼び出し枠を投げる前に確認する `nasa_budget.py`（DEMO_KEY 30/時・`Retry-After` 尊重・`budget` を structuredContent に添付）、探査機/彗星の Horizons 取得を分単位キーでキャッシュ（1req→0req）、SBDB 軌道要素を24時間キャッシュ
-- v0.25.1 — 引数の防御的数値変換（`input_utils.as_int` / `as_float`、51箇所）で例外漏れを解消、`uk_stac_search` のキーワード検索修正、Claude Code / Codex インストール対応（CLAUDE.md / AGENTS.md / mcp.json / .env.example）、リポジトリ直下 `.env` 対応、検証ゲート `scripts/check-tools.py` 同梱
-- v0.25.0 — 汎用の天体周回機/ローバー位置マップを追加（`planetary_orbiter_track` / `planetary_rover_location_map`）。専用ルーチン（lunar_track 等）を統合
+- v0.26.0 — 描画系6ツールに `structuredContent.figure`（`figure/1`: 視点・主天体の置き方・縮尺・円錐曲線・注記・自己検証）を導入し、注記を数値から生成（LLM は要約せず引用）。彗星の軌道面ビュー `solar_system_now(view="comet_orbit")` を追加（e>1 は双曲線として描き分け）。`check-tools.py --figures` を新設（注記なし・`verify.ok` 偽で exit 1、既定引数で通らない経路も実行）。`verify` が画素から描画を測り直す仕組み（彗星=近点/遠点、日食=PA軸の明部長から食分、ローバー=マーカー画素から緯度経度、衛星=az/alt から画素位置）で実バグ3件を修正：日食図のパネルはみ出し・「最大食分」ラベルの固定・衛星ラベル枠による他衛星マーカーの隠れ。日食は現地日付をまたぐ食の切り詰めと、地平線下の見えない食の誤報告も修正（可視区間のみ描画、高度を注記）。

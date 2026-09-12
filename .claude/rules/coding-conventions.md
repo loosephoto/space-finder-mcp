@@ -24,6 +24,23 @@
 - キーに **引数オブジェクトを使わない**（Skyfield の site などは毎回別物でキャッシュが効かない）。丸めたスカラー（緯度経度2桁・日付）をキーにする。
 - ライブ性が重要なツール（`iss_now`・`tiangong_now`・位置計算）はキャッシュしない。
 
+## 図の注記（figure/1・描画系ツールのみ）
+
+自前で図を描くツール（solar_system_now / sat_ground_track / planetary_orbiter_track /
+planetary_rover_location_map / sky_map_with_satellites / solar_eclipse_series）は、
+`structuredContent.figure` に「どう描いたか」を自己申告する。
+
+- 主天体は**円錐曲線の焦点**に置く（`primary.at = "focus"`）。楕円の中心に置くと、高離心率の
+  軌道が「主天体の周りを回る丸い軌道」に見えてしまう（実際に誤描画した事例あり）。
+- **e ≥ 1 / 半長軸 a < 0 の軌道（C/彗星など）を楕円として描かない**。閉じていない＝遠点は
+  存在せず、`a(1+e)` は負になる。`conic_from_elements` が kind を ellipse/parabola/hyperbola
+  に判定するので、双曲線は枝として有限距離まで描く。
+- 注記(`notes`)は `figure_notes` などで**数値から生成**する。手書きにすると図と注記がドリフトする。
+- `content` にも `figure_text_block()` で同じ注記を出し、docstring に
+  「`figure.notes` は要約・言い換えせず、そのまま引用すること」と書く（LLM 向けの指示）。
+- 図の自己検証(`verify`)を入れる: 描いた画素から近点/遠点距離を逆算して a(1±e) と照合
+  （`verify_curve`）、ラベル矩形に曲線色が混入していないこと（文字と線の重なり）も見る。
+- 検査: `uv run python scripts/check-tools.py --figures`（注記が空・`verify.ok` が偽なら exit 1）。
 ## 構造
 
 - 共通処理は `img_common.py`（フォント探索/JPEG化/アンチメリジアン分割）、`stac_common.py`（bbox/雲量検証）、`cache.py`、`env_config.py` に集約し、各ツールへ重複実装しない。

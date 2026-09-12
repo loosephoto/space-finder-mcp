@@ -24,7 +24,9 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 # planetary_map の汎用コアと画像共通ヘルパーを再利用
 from .planetary_map import BODIES, _fetch_tiles
-from .img_common import load_font
+from .img_common import (figure_notes, figure_payload, figure_text_block,
+                         load_font, pixel_near, primary_spec, scale_spec,
+                         view_spec)
 from .input_utils import as_float, as_int
 
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
@@ -77,6 +79,22 @@ def _mmgis_route(mid: str) -> Optional[list]:
     except (requests.RequestException, KeyError, ValueError):
         return None
 
+
+
+def _rover_verify(img, cx, cy, clat, clon, left, top, scale, W, H):
+    """描いた現在地マーカーから緯度経度を逆算し、投影とマーカー描画を検証する。
+
+    等角図法(gx=(lon+180)/360*W, gy=(90-lat)/180*H)の逆変換なので、
+    「地図のどこに描いたか」と「報告した座標」が食い違えばここで落ちる。
+    """
+    inv_lon = ((cx / scale) + left) / max(W, 1) * 360.0 - 180.0
+    inv_lat = 90.0 - (((cy / scale) + top) / max(H, 1) * 180.0)
+    err = max(abs(inv_lon - clon), abs(inv_lat - clat))
+    painted = pixel_near(img, (cx, cy), (255, 40, 30), tol=120, r=5)
+    return {"ok": bool(err <= 0.01 and painted > 0),
+            "latlon_from_px": [round(inv_lon, 4), round(inv_lat, 4)],
+            "latlon_from_px_error_deg": round(err, 4),
+            "marker_pixels": painted}
 
 def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance",
                                  zoom: Optional[int] = None, span_deg: float = 0.5,
@@ -223,11 +241,36 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
     jpeg = buf.getvalue()
     imgc = ImageContent(type="image", data=base64.b64encode(jpeg).decode("ascii"),
                         mimeType="image/jpeg", altText=f"{rover_ja} の{body_cfg['ja']}現在地マップ")
+    fig = figure_payload(
+        kind="ground_track_map",
+        title=f"{rover_ja}の{body_cfg['ja']}現在地マップ（{body_cfg['attrib']}）",
+        view=view_spec("body_surface", "equirectangular",
+                       f"{body_cfg['ja']}面の地図（等角図法）に着陸地点・走行経路・現在地を合成",
+                       why="移動の履歴を地図上で見るための図。天体の形や軌道は描いていない"),
+        primary=primary_spec(body_cfg["ja"], "surface_map",
+                             note="天体面の地図なので主天体は図の中心に置いていない"),
+        scale=scale_spec("linear", to_scale=True, unit="deg",
+                         exaggerated=["着陸地点(青)・現在地(赤)のマーカーは実寸ではない"]),
+        markers=[{"id": "current", "label": f"{rover_ja} 現在地", "lat": clat, "lon": clon,
+                  "sol": wp.get("sol"), "rover_distance_km": wp.get("dist_km")}],
+        notes=figure_notes(extra=[
+            "橙線は NASA MMGIS の waypoint 列（通過点）を結んだもので、実際の細かい走行軌跡ではない",
+            "青●は着陸地点、赤●は現在地。走行距離は着陸地点からの累積 km",
+            "地図は NASA Trek の等角図法のため、高緯度ほど東西方向が圧縮されて見える",
+            "座標・sol・RMC は NASA MMGIS (mars.nasa.gov) の公開 waypoint データ",
+        ]),
+        caption=f"{rover_ja}（{rv}）の{body_cfg['ja']}現在地。"
+                f"座標 {clat:.4f}°{'N' if clat >= 0 else 'S'} / {clon:.4f}°E、sol {wp.get('sol')}、"
+                f"着陸地点から {wp.get('dist_km')} km。",
+        verify=_rover_verify(img, cx, cy, clat, clon, left, top, scale, W, H),
+    )
     lines = [
         f"🔴 **{rover_ja}（{rv}）の{body_cfg['ja']}現在地マップ**:",
         f"📍 座標: {clat:.4f}° {'N' if clat >= 0 else 'S'} / {clon:.4f}°E ・ sol {wp.get('sol')}",
         f"🛣 走行距離: {wp.get('dist_km')} km（RMC {wp.get('rmc')}）",
         "画像は上に表示。着陸地点(青)からの走行経路(橙線)と現在地(赤●)を地図に合成。",
+        "",
+        figure_text_block(fig),
         f"出典: NASA MMGIS (mars.nasa.gov) + Trek WMTS（認証不要）",
     ]
     return CallToolResult(
@@ -236,5 +279,6 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
                            "lat": clat, "lon": clon, "sol": wp.get("sol"),
                            "dist_km": wp.get("dist_km"), "rmc": wp.get("rmc"),
                            "zoom": zoom, "span_deg": span_deg,
+                           "figure": fig,
                            "source": "NASA MMGIS + Trek WMTS"},
     )

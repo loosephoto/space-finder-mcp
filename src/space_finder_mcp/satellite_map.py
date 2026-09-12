@@ -23,7 +23,9 @@ import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .celestrak import WELL_KNOWN, fetch_tle
-from .img_common import encode_jpeg, load_font, split_at_antimeridian
+from .img_common import (encode_jpeg, figure_notes, figure_payload,
+                         figure_text_block, load_font, primary_spec, scale_spec,
+                         split_at_antimeridian, view_spec)
 from .input_utils import as_float, as_int
 
 # ---- NASA Blue Marble 用 UA（TLE 取得は celestrak.fetch_tle に共通化）----
@@ -283,11 +285,47 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
     imgc = ImageContent(type="image", data=base64.b64encode(jpeg).decode("ascii"),
                         mimeType="image/jpeg", altText=f"{sat_name} の地上軌道")
 
+    # 図の注記（figure/1）: 図の誤読を防ぐための自己申告。content にも同じ注記を出す。
+    inv_lon = cx / max(W, 1) * 360.0 - 180.0      # 描いたマーカー画素から緯度経度を逆算
+    inv_lat = 90.0 - cy / max(HH, 1) * 180.0
+    proj_err = max(abs(inv_lon - lon0), abs(inv_lat - lat0))
+    marker_visible = not (lx <= cx <= lx + lab_w and ly <= cy <= ly + lab_h)
+    fig = figure_payload(
+        kind="ground_track_map",
+        title=f"{sat_name} の地上軌道（世界地図・等角図法）",
+        view=view_spec("earth_surface", "equirectangular",
+                       "地球全面の緯度経度図（等角図法）。オレンジ線＝衛星の真下の点の軌跡",
+                       why="3Dの軌道そのものではなく地表への投影なので、軌道面の形や傾斜は"
+                           "この図からは読み取れない"),
+        primary=primary_spec("地球", "surface_map",
+                             note="全球図なので主天体は図の中心に置いていない"),
+        scale=scale_spec("linear", to_scale=True, unit="deg",
+                         exaggerated=[f"衛星マーカー（半径{r}px・実寸ではない）"]),
+        markers=[{"id": "current", "label": f"{sat_name} 現在位置", "lat": round(lat0, 4),
+                  "lon": round(lon0, 4), "altitude_km": round(alt0, 1),
+                  "px": [round(cx), round(cy)]}],
+        notes=figure_notes(extra=[
+            f"オレンジ線は指定時刻の前後 {minutes} 分（{step} 分刻み）の地上軌道＝真下の点の軌跡。"
+            "3Dの軌道の形ではない",
+            "地図は等角図法（緯度経度）のため、高緯度ほど東西方向が圧縮されて見える",
+            "経度±180°をまたぐ部分は線を分割して描いている（地図の端を横切らせない）",
+            f"マーカー（赤●＋白中心）は指定時刻の真下の点。高度 {alt0:.0f} km・速度 約{speed0*3600:.0f} km/h",
+            "位置は CelesTrak の最新TLEを Skyfield(SGP4) で伝播したその時刻の値（予報ではない）",
+        ]),
+        caption=f"{sat_name} の地上軌道（{tstr}）。真下の点は {ns} {abs(lat0):.2f}度 / "
+                f"{ew} {abs(lon0):.2f}度、高度 {alt0:.0f} km。",
+        verify={"ok": bool(proj_err <= 0.05 and marker_visible),
+                "latlon_from_px_deg": [round(inv_lon, 4), round(inv_lat, 4)],
+                "latlon_from_px_error_deg": round(proj_err, 4),
+                "marker_visible": bool(marker_visible)},
+    )
     text_lines = [
         f"🛰 **{sat_name}** の地上軌道（{tstr}）:",
         f"📍 現在地: {ns} {abs(lat0):.2f}度 / {ew} {abs(lon0):.2f}度（真下の点）",
         f"🛰 高度 {alt0:.0f} km ・ 速度 約{speed0*3600:.0f} km/h",
         f"🛤 軌道トレイル: 前後 {minutes} 分（{step} 分刻み）。オレンジ線=軌道。",
+        "",
+        figure_text_block(fig),
         "出典: CelesTrak TLE + Skyfield(SGP4) ／ 地図 NASA Blue Marble（認証不要）",
     ]
     return CallToolResult(
@@ -297,6 +335,7 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
             "latitude": round(lat0, 4), "longitude": round(lon0, 4),
             "altitude_km": round(alt0, 1), "speed_kmh": round(speed0 * 3600),
             "trail_minutes": minutes, "step_min": step, "trail_points": len(trail),
+            "figure": fig,
             "source": "CelesTrak + Skyfield + NASA Blue Marble",
         },
     )

@@ -59,6 +59,7 @@ uv run python scripts/check-tools.py                  # 全45ツール実呼び�
 9. 過去ミッション（かぐや等）は正確に「表示できない」と返す（誤った天体を出さない）。
 10. 依存追加は最小限。Pillow / matplotlib は遅延 import。ドキュメント・コメントは日本語。
 11. **ツールを追加・削除・変更したら `README.md` のツール表と `SKILL.md` を同一変更内で更新**。
+12. **描画系ツール（自前で図を描くツール）は `structuredContent.figure`（`schema: "figure/1"`）を返す**。視点(`view`)・主天体の置き方(`primary`：楕円は**焦点**であって中心ではない)・縮尺(`scale`)・円錐曲線(`conic`)・注記(`notes`)・自己検証(`verify`)を含め、**注記は数値から生成**する（`img_common` の `Conic` / `conic_from_elements` / `figure_notes` / `figure_payload` / `figure_text_block` / `verify_curve` を使う。手書きすると図と文が食い違う）。`content` にも同じ注記を `figure_text_block()` で出し、docstring に「`figure.notes` は要約せず引用する」と明記する。検査は `scripts/check-tools.py --figures`（注記が空・`verify.ok` が偽なら exit 1）。
 
 ## 主要ファイル
 
