@@ -100,7 +100,7 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
             result_map[label] = rows
             result_json[label] = jrows
         except requests.RequestException as e:
-            errors.append(f"{label}: {str(e)[:80]}")
+            errors.append("{}: {}".format(label, nasa_budget.redact(e)[:80]))
 
     def _parse_flare(data, lim):
         rows, jrows = [], []

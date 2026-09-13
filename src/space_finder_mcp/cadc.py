@@ -16,6 +16,7 @@ from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_FORECAST, ttl_cache, is_error_result
 from .input_utils import as_int
+from .name_common import resolve_object
 
 TAP = "https://ws.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/argus/sync"
 UA = {"User-Agent": "space-finder-mcp/0.13 (MCP; CADC TAP)"}
@@ -63,7 +64,9 @@ def cadc_observations(object_name: Optional[str] = None,
     パブリックメタデータは認証不要。画像ダウンロードは一部要認証。
 
     Args:
-        object_name: 天体名（例 "M31", "Orion", "NGC 300"）。座標指定より優先。
+        object_name: 天体名（例 "M31", "Orion", "NGC 300", "M104", "Sombrero", "HL Tau"）。
+            座標指定より優先。内蔵テーブルに無い名前は **SIMBAD/NED（Sesame）で座標解決**し、
+            和名（オリオン大星雲 等）も英語名に展開して解決する（推測では検索しない）。
         ra: 赤経（度）。object_name 省略時、dec と併用。
         dec: 赤緯（度）。
         radius: 検索半径（度, 既定 0.5）。
@@ -81,17 +84,36 @@ def cadc_observations(object_name: Optional[str] = None,
         "ngc 2808": (138.01, -64.86), "ngc2808": (138.01, -64.86),
         "cartwheel": (6.06, -33.71), "cartwheel galaxy": (6.06, -33.71),
     }
+    resolved = None
     if object_name:
         key = object_name.strip().lower()
         if key in _KNOWN:
             ra, dec = _KNOWN[key]
             object_name = object_name.strip()
+            resolved = {"input": object_name, "matched": object_name, "via": "内蔵テーブル"}
         else:
-            return CallToolResult(
-                content=[TextContent(type="text", text=f"天体 '{object_name}' の座標を内蔵テーブルで解決できませんでした。ra/dec を直接指定してください。")],
-                structuredContent={"error": "unknown object", "object": object_name,
-                                   "note": "内蔵の座標テーブル（M31/M42/オリオン/かに星雲/プレアデス等）にありません"},
-            )
+            # 内蔵テーブルに無い名前は Sesame/CDS（SIMBAD・NED 横断）で座標解決する。
+            # 以前はここで即エラーにしていたため、M104 / Sombrero / HL Tau / 和名 といった
+            # 自然な入力で必ず失敗していた（実測 2026-09）。
+            hit = resolve_object(object_name)
+            if hit:
+                ra, dec = hit["ra_deg"], hit["dec_deg"]
+                object_name = hit["input_name"]
+                resolved = {"input": hit["input_name"], "matched": hit["matched_name"],
+                            "via": hit["resolver"], "otype": hit.get("otype"),
+                            "ra_deg": ra, "dec_deg": dec,
+                            "other_resolvers": [p["resolver"] for p in hit["all_positions"][1:]],
+                            "resolver_spread_deg": hit.get("resolver_spread_deg")}
+            else:
+                return CallToolResult(
+                    content=[TextContent(type="text", text=(
+                        f"天体 '{object_name}' の座標を解決できませんでした"
+                        "（内蔵テーブル → SIMBAD/NED(Sesame) の順で試行）。\n"
+                        "英語の星表名（例 'M104', 'NGC 4594', 'HL Tau'）で指定するか、"
+                        "ra/dec（度）を直接指定してください。"))],
+                    structuredContent={"error": "unresolved object", "object": object_name,
+                                       "note": "内蔵テーブル → Sesame（SIMBAD/NED）でも解決できませんでした"},
+                )
     elif ra is None or dec is None:
         return CallToolResult(
             content=[TextContent(type="text", text="object_name か、ra(赤経)とdec(赤緯)を指定してください。")],
@@ -124,6 +146,11 @@ def cadc_observations(object_name: Optional[str] = None,
             structuredContent={"object": object_name, "ra": ra, "dec": dec, "radius": radius, "total": 0, "results": []},
         )
     lines = [f"🔭 CADC 観測データ（{'天体' if object_name else f'RA {ra}° Dec {dec}° r={radius}°'}）: {len(rows)} 件"]
+    if resolved:
+        lines.append("ℹ️ 名前解決: 「{}」→ {}（{}） RA {:.4f}° Dec {:.4f}°{}".format(
+            resolved["input"], resolved["matched"], resolved["via"], ra, dec,
+            "　※他の解決: " + ", ".join(resolved["other_resolvers"])
+            if resolved.get("other_resolvers") else ""))
     records = []
     for i, r in enumerate(rows, 1):
         # CSV は列順: obsID, observationID, telescope, instrument, target, type, date
@@ -138,5 +165,6 @@ def cadc_observations(object_name: Optional[str] = None,
     return CallToolResult(
         content=[TextContent(type="text", text="\n".join(lines))],
         structuredContent={"object": object_name, "ra": ra, "dec": dec, "radius": radius,
+                           "name_resolution": resolved,
                            "shown": len(records), "results": records},
     )

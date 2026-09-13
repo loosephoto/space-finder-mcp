@@ -13,7 +13,8 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import disk_get
 from .img_common import (encode_jpeg, figure_notes, figure_payload,
-                         figure_text_block, load_font, primary_spec, scale_spec,
+                         figure_text_block, load_font, media_link_line,
+                         primary_spec, save_output, scale_spec,
                          split_at_antimeridian, view_spec)
 from .input_utils import as_float, as_int
 
@@ -313,6 +314,12 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
         zoom: 地図ズーム 1〜最大（既定: span_deg>=360 なら1=全面, それ未満は3）。
         span_deg: 表示する経度幅（度。360=天体全面, 既定 120, 最大 360）。
         out_px: 出力画像の長辺ピクセル（既定 900, 最大 1600）。
+
+    インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
+    content の先頭へ「🖼️ [生成した画像を開く（…）](file:///…) ｜ 保存先: `…`」という
+    アイコン付きリンクを必ず出します（画像は %LOCALAPPDATA%\\Temp\\space_finder_mcp\\out に
+    保存し、同じパスを structuredContent.image_path にも入れます）。
+    回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
     '''
     from PIL import Image, ImageDraw
 
@@ -506,6 +513,8 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
     jpeg = encode_jpeg(img)   # 3.5MB 超は縮小して再エンコード（img_common）
     imgc = ImageContent(type="image", data=base64.b64encode(jpeg).decode("ascii"),
                         mimeType="image/jpeg", altText=f"{ja} の{body_cfg['ja']}面位置")
+    # インライン画像を描けないハーネス向け: 保存してリンクを先頭に出す
+    out_path = save_output(jpeg, "planetary_orbiter_track", "jpg")
 
     view = "全面" if whole else f"局所 {span_deg:.0f}°"
     step_disp = step if step >= 1 else f"{step * 60:.0f} 秒"
@@ -539,6 +548,8 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
         verify={"ok": bool(marker_visible), "marker_visible": bool(marker_visible)},
     )
     lines = [
+        media_link_line(f"生成した画像を開く（{ja} の{body_cfg['ja']}面軌道マップ）",
+                        path=out_path, kind="figure"),
         f"🛰 **{ja}** の{body_cfg['ja']}面位置（{tstr}）:",
         f"📍 {body_cfg['ja']}面: {ns} {abs(lat0):.2f}° / {ew} {abs(lon0):.2f}°",
         f"🛰 高度 {alt0:.1f} km ・ {body_cfg['ja']}中心距離 {cur['dist_km']:.1f} km ・ 速度 {spd}",
@@ -557,7 +568,7 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
             "dist_from_body_center_km": round(cur["dist_km"], 1),
             "trail_minutes": minutes, "step_min": round(step, 4), "trail_points": len(trail),
             "view": view, "span_deg": span_deg, "zoom": zoom,
-            "figure": fig,
+            "figure": fig, "image_path": out_path,
             "source": f"JPL Horizons + IAU rotation + NASA Trek {body_cfg['attrib']}",
         },
     )

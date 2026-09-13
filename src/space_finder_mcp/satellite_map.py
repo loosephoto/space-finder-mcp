@@ -24,7 +24,8 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .celestrak import WELL_KNOWN, fetch_tle
 from .img_common import (encode_jpeg, figure_notes, figure_payload,
-                         figure_text_block, load_font, primary_spec, scale_spec,
+                         figure_text_block, load_font, media_link_line,
+                         primary_spec, save_output, scale_spec,
                          split_at_antimeridian, view_spec)
 from .input_utils import as_float, as_int
 
@@ -111,6 +112,12 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
             準天頂衛星(みちびき)の8の字軌道を見るには 720 前後を指定。
         step: トレイルの時間刻み（分。既定 1、最小 0.5）。小さいほど滑らか。
         out_px: 出力画像の幅ピクセル（既定 1200、最大 2048）。
+
+    インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
+    content の先頭へ「🖼️ [生成した画像を開く（…）](file:///…) ｜ 保存先: `…`」という
+    アイコン付きリンクを必ず出します（画像は %LOCALAPPDATA%\\Temp\\space_finder_mcp\\out に
+    保存し、同じパスを structuredContent.image_path にも入れます）。
+    回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
     """
     # ---- 引数解決 ----
     name = str(name).strip() if name is not None else ""
@@ -284,6 +291,8 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
     jpeg = encode_jpeg(img)
     imgc = ImageContent(type="image", data=base64.b64encode(jpeg).decode("ascii"),
                         mimeType="image/jpeg", altText=f"{sat_name} の地上軌道")
+    # インライン画像を描けないハーネス（CLI/Android 系）向け: 保存してリンクを先頭に出す
+    out_path = save_output(jpeg, "sat_ground_track", "jpg")
 
     # 図の注記（figure/1）: 図の誤読を防ぐための自己申告。content にも同じ注記を出す。
     inv_lon = cx / max(W, 1) * 360.0 - 180.0      # 描いたマーカー画素から緯度経度を逆算
@@ -320,6 +329,8 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
                 "marker_visible": bool(marker_visible)},
     )
     text_lines = [
+        media_link_line(f"生成した画像を開く（{sat_name} の地上軌道マップ）",
+                        path=out_path, kind="figure"),
         f"🛰 **{sat_name}** の地上軌道（{tstr}）:",
         f"📍 現在地: {ns} {abs(lat0):.2f}度 / {ew} {abs(lon0):.2f}度（真下の点）",
         f"🛰 高度 {alt0:.0f} km ・ 速度 約{speed0*3600:.0f} km/h",
@@ -335,7 +346,7 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
             "latitude": round(lat0, 4), "longitude": round(lon0, 4),
             "altitude_km": round(alt0, 1), "speed_kmh": round(speed0 * 3600),
             "trail_minutes": minutes, "step_min": step, "trail_points": len(trail),
-            "figure": fig,
+            "figure": fig, "image_path": out_path,
             "source": "CelesTrak + Skyfield + NASA Blue Marble",
         },
     )

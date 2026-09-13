@@ -12,6 +12,7 @@ import requests
 from functools import lru_cache
 from mcp.types import CallToolResult, TextContent
 from .input_utils import as_int
+from .name_common import expand_terms
 
 BASE = "https://celestrak.org/NORAD/elements/gp.php"
 UA = {"User-Agent": "space-finder-mcp/0.3 (MCP; CelesTrak TLE)"}
@@ -23,6 +24,13 @@ WELL_KNOWN: dict[str, int] = {
     "meteor-m2": 40069, "goes-16": 41866, "goes-17": 41868, "goes-18": 51850,
     "tiangong": 48274, "sentinel-2a": 40697, "sentinel-2b": 42063, "sentinel-1a": 39634,
     "kepu": 44414, "hinode": 29479, "aqua": 27424, "terra": 25994, "suomi-npp": 37849,
+    # 以下は CelesTrak GROUP=active（16,563 機）の OBJECT_NAME と突合して確認した現役機
+    # （name_common.JA_ALIASES の英語名と同じ綴りで引けるようにしてある）
+    "himawari-8": 40267, "himawari-9": 41836,
+    "alos-2": 39766, "alos-4": 60182, "gosat": 33492, "gosat-2": 43672,
+    "gcom-w1": 38337, "gcom-c1": 43065, "ajisai": 16908,
+    "arase": 41896, "reimei": 28810, "hisaki": 39253,
+    "tianhe": 48274, "wentian": 53239, "mengtian": 54216,
 }
 
 
@@ -50,10 +58,19 @@ def _get(params: dict, timeout: int = 30) -> requests.Response:
 
 @lru_cache(maxsize=64)
 def _fetch_tle_cached(params_tuple: tuple) -> tuple:
-    """TLE を取得（同一セッション内で同じ問い合わせはキャッシュ）。TLE は数時間有効。"""
+    """TLE を取得（同一セッション内で同じ問い合わせはキャッシュ）。TLE は数時間有効。
+
+    CelesTrak は該当なし・制限時に **リスト以外の JSON**（例 {"Error": ...}）を返すことが
+    ある。tuple(dict) はキー列（文字列のタプル）になり、利用側で
+    `'str' object has no attribute 'get'` として **例外がツール外へ漏れる**（実測 2026-09）。
+    リスト以外・辞書以外の要素は「該当なし」に正規化する（規約1: 例外を漏らさない）。
+    """
     p = dict(params_tuple)
     p["FORMAT"] = "JSON"
-    return tuple(_get(p).json())
+    data = _get(p).json()
+    if not isinstance(data, list):
+        return ()
+    return tuple(d for d in data if isinstance(d, dict))
 
 
 def _fetch_tle(params: dict) -> list[dict]:
@@ -141,6 +158,8 @@ def sat_tle(name: Optional[str] = None, norad_id: Optional[int] = None,
 
     Args:
         name: 衛星名または省略名（例 "iss", "hubble", "tiangong", "goes-18"）。
+            **和名は英語名/既知名へ自動解決**する（"ひので"→29479, "ひまわり9号"→41836,
+            "宇宙ステーション"→iss）。解決できない場合は既知の名前を提示して停止する。
         norad_id: NORAD カタログ番号（例 25544=ISS）。name より優先。
         group: CelesTrak の衛星グループ（例 "stations", "weather", "amateur", "science"）。
         limit: 返す件数（既定 5、最大 20）。
@@ -151,14 +170,16 @@ def sat_tle(name: Optional[str] = None, norad_id: Optional[int] = None,
         params["CATNR"] = norad_id
     elif name:
         nm = name.strip().lower()
+        # 和名（ひので / ひまわり9号 等）は英語名へ展開してから照合する
+        terms = [t.lower() for t in expand_terms(name)]
         # 既知の衛星名をNORAD IDに解決（完全一致を最優先）
-        exact = next((nid for key, nid in WELL_KNOWN.items() if nm == key), None)
+        exact = next((WELL_KNOWN[t] for t in terms if t in WELL_KNOWN), None)
         if exact is not None:
             params["CATNR"] = exact
         else:
             # 部分一致は短い名前の誤マッチを避けるため、長い入力のみ許可
             cands = [(key, nid) for key, nid in WELL_KNOWN.items()
-                     if len(nm) >= 4 and (key in nm or nm in key)]
+                     if any(len(t) >= 4 and (key in t or t in key) for t in terms)]
             uniq = {nid for _, nid in cands}
             if len(uniq) == 1:
                 params["CATNR"] = uniq.pop()
@@ -172,7 +193,8 @@ def sat_tle(name: Optional[str] = None, norad_id: Optional[int] = None,
                                        "candidates": [{"name": k, "norad_id": v} for k, v in cands]},
                 )
             else:
-                params["NAME"] = name.strip()
+                # 解決できない名前は、和名の英語名があればそれで CelesTrak の名前検索へ
+                params["NAME"] = terms[1] if len(terms) > 1 else name.strip()
     elif group:
         params["GROUP"] = group
     else:
@@ -183,7 +205,11 @@ def sat_tle(name: Optional[str] = None, norad_id: Optional[int] = None,
         # 該当なしのとき CelesTrak は 404 を返す（接続障害と区別して案内する）
         if getattr(getattr(e, "response", None), "status_code", None) == 404:
             return CallToolResult(
-                content=[TextContent(type="text", text="指定した衛星の軌道要素が見つかりませんでした。NORAD ID や別名をお試しください。")],
+                content=[TextContent(type="text", text=(
+                    "指定した衛星の軌道要素が見つかりませんでした。\n"
+                    + ("和名→英語名の展開: " + ", ".join(terms) + "\n" if len(terms) > 1 else "")
+                    + "既知の名前: " + ", ".join(sorted(WELL_KNOWN))
+                    + "\nNORAD ID（例 25544=ISS）か、上記の別名をお試しください。"))],
                 structuredContent={"error": "not found",
                                    "query": {"name": name, "norad_id": norad_id, "group": group},
                                    "total": 0, "results": []},

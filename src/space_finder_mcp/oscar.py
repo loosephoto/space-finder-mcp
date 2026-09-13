@@ -15,6 +15,7 @@ from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, ttl_cache, is_error_result
 from .input_utils import as_int
+from .name_common import expand_terms
 
 OSCAR = "https://space.oscar.wmo.int/api/v1"
 UA = {"User-Agent": "space-finder-mcp/0.9 (MCP; WMO OSCAR/Space)"}
@@ -36,7 +37,9 @@ def satellite_status(query: Optional[str] = None, agency: Optional[str] = None,
     content に表示用サマリ、structuredContent に JSON を返す。
 
     Args:
-        query: 検索語（衛星名・略称の部分一致。例 "meteor", "resurs", "goes", "kanopus"）。
+        query: 検索語（衛星名・略称の部分一致）。**和名は英語名に自動展開**する
+            （"ひまわり"→himawari, "だいち"→alos, "宇宙ステーション"→iss）。
+            例 "meteor", "resurs", "goes", "himawari", "だいち"。
         agency: 機関名（例 "Roscosmos", "NOAA", "EUMETSAT", "JAXA"）。
         limit: 返す件数（既定 10、最大 20）。
     """
@@ -45,6 +48,8 @@ def satellite_status(query: Optional[str] = None, agency: Optional[str] = None,
     # （常に全件を返す）。そのため全件をページングで取得し、クライアントサイドで
     # フィルタする。max_pages までスキャンして十分な件数を集める。
     query_l = (query or "").strip().lower()
+    # 和名（ひまわり / だいち 等）は英語名へ展開してから照合する（OSCAR は英語のみ）
+    q_terms = [t.lower() for t in expand_terms(query)] if query else []
     agency_l = (agency or "").strip().lower()
     max_pages = 10  # 最大300件スキャン
 
@@ -72,7 +77,7 @@ def satellite_status(query: Optional[str] = None, agency: Optional[str] = None,
             str(s.get("acronym") or ""), str(s.get("fullname") or ""),
             str(s.get("slug") or ""), str(s.get("space_agency") or ""),
         ]).lower()
-        if query_l and query_l not in hay:
+        if q_terms and not any(t in hay for t in q_terms):
             return False
         if agency_l and agency_l not in str(s.get("space_agency") or "").lower():
             return False
@@ -82,8 +87,14 @@ def satellite_status(query: Optional[str] = None, agency: Optional[str] = None,
     matched = len(sats)
     if not sats:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"条件（query={query}, agency={agency}）に一致する衛星がスキャン範囲に見つかりませんでした。")],
-            structuredContent={"query": query, "agency": agency, "total": 0, "results": []},
+            content=[TextContent(type="text", text=(
+                f"条件（query={query}, agency={agency}）に一致する衛星がスキャン範囲"
+                f"（{len(sats_all)}/{total} 件）に見つかりませんでした。\n"
+                "和名→英語名の展開: " + (", ".join(q_terms) if q_terms else "（指定なし）")
+                + "\nヒント: 英語の略称（himawari / alos / gcom / goes / meteor 等）や "
+                  "agency=JAXA, NOAA, EUMETSAT, Roscosmos で絞ってみてください。"))],
+            structuredContent={"query": query, "agency": agency, "total": 0,
+                               "scanned": len(sats_all), "query_terms": q_terms, "results": []},
         )
 
     sats = sats[:limit]
@@ -105,7 +116,10 @@ def satellite_status(query: Optional[str] = None, agency: Optional[str] = None,
         }
         records.append(rec)
 
-    lines = [f"🛰 WMO OSCAR の気象・地球観測衛星（全 {total} 件中、先頭 {len(records)} 件）: 出典 WMO公式"]
+    lines = [f"🛰 WMO OSCAR の気象・地球観測衛星（カタログ全 {total} 件 / スキャン "
+             f"{len(sats_all)} 件中 {matched} 件一致、先頭 {len(records)} 件）: 出典 WMO公式"]
+    if q_terms and query_l not in q_terms:
+        lines.append(f"_※ 和名「{query}」を英語名（{' / '.join(q_terms)}）に展開して検索しました_")
     for i, s in enumerate(records, 1):
         mark = {"運用中": "🟢", "計画中": "🔵", "延長運用": "🟡", "退役": "🔴", "故障": "⛔"}.get(s["status_ja"], "•")
         launch = s["launch_date"] or "?"
@@ -120,5 +134,6 @@ def satellite_status(query: Optional[str] = None, agency: Optional[str] = None,
     return CallToolResult(
         content=[TextContent(type="text", text="\n".join(lines))],
         structuredContent={"query": query, "agency": agency, "total": total,
+                           "matched": matched, "scanned": len(sats_all), "query_terms": q_terms,
                            "shown": len(records), "results": records},
     )

@@ -22,9 +22,10 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import disk_get
 from .celestrak import fetch_tle
-from .img_common import (as_image, encode_jpeg, figure_notes, figure_payload,
-                         figure_text_block, load_font, pixel_near,
-                         primary_spec, scale_spec, view_spec)
+from .img_common import (as_image, body_rgb, encode_jpeg, figure_notes,
+                         figure_payload, figure_text_block, load_font,
+                         media_link_line, pixel_near, primary_spec, rgb_hex,
+                         save_output, scale_spec, symbol_rgb, view_spec)
 from .input_utils import as_float
 
 _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
@@ -61,17 +62,17 @@ _KNOWN_COORDS = {
     "ハワイ": (19.82, -155.47), "hawaii": (19.82, -155.47),
 }
 
-# 惑星・月の見た目 (種類別アイコン用): 名前 -> (主色RGB, 分類, 半径比)
-# 分類: rocky(岩石惑星) / gas(ガス惑星) / moon(月)
+# 惑星・月の見た目: 名前 -> (主色RGB, 分類)。色は img_common.BODY_COLORS（共通の
+# 単一の出典）から引き、分類（表示サイズ用）だけをここで持つ。
 _PLANET_VISUAL = {
-    "月":   ((224, 224, 226), "moon"),
-    "水星": ((168, 168, 170), "rocky"),
-    "金星": ((242, 226, 180), "rocky"),
-    "火星": ((214, 96, 77),   "rocky"),
-    "木星": ((212, 168, 118), "gas"),
-    "土星": ((226, 196, 146), "gas"),
-    "天王星": ((176, 224, 230), "gas"),
-    "海王星": ((96, 140, 232), "gas"),
+    "月":   (body_rgb("月"),   "moon"),
+    "水星": (body_rgb("水星"), "rocky"),
+    "金星": (body_rgb("金星"), "rocky"),
+    "火星": (body_rgb("火星"), "rocky"),
+    "木星": (body_rgb("木星"), "gas"),
+    "土星": (body_rgb("土星"), "gas"),
+    "天王星": (body_rgb("天王星"), "gas"),
+    "海王星": (body_rgb("海王星"), "gas"),
 }
 # 岩石惑星の種類別アイコン (火星はクレーター風・金星は雲、水星はクレーター) を色分けで表現するため
 # 描画では color で区別 + 土星に環、木星に縞を描く。
@@ -157,13 +158,15 @@ def _compute(lat, lon, when_iso=None):
               "土星": eph["saturn barycenter"], "天王星": eph["uranus barycenter"],
               "海王星": eph["neptune barycenter"]}
     planets = {}
+    body_errors = {}
     for nm, b in bodies.items():
         try:
             az, alt = _body_aa(b)
             if alt > 0:
                 planets[nm] = {"az": az, "alt": alt}
-        except Exception:
-            pass
+        except Exception as e:
+            # 黙って落とすと「今夜はその惑星が見えない」と誤解させる。理由を残して content に出す。
+            body_errors[nm] = "{}: {}".format(type(e).__name__, str(e)[:100])
 
     stars = {}
     for nm, rah, decd in _BRIGHT_STARS:
@@ -171,10 +174,11 @@ def _compute(lat, lon, when_iso=None):
             az, alt = _body_aa(Star(ra_hours=rah, dec_degrees=decd))
             if alt > 0:
                 stars[nm] = {"az": az, "alt": alt}
-        except Exception:
-            pass
+        except Exception as e:
+            body_errors[nm] = "{}: {}".format(type(e).__name__, str(e)[:100])
 
     sats = {}
+    sat_errors = {}
     for nm, catnr, kind in _SAT_CATALOG:
         try:
             tle = _fetch_tle(catnr)
@@ -192,26 +196,67 @@ def _compute(lat, lon, when_iso=None):
             # 先頭=昇ってくる側(過去)、後方=沈む側(未来)。ピーク時刻でもパス全体が見える。
             trail = []
             if kind == "leo":
-                for i in range(-20, 21, 1):  # -60分 〜 +60分（3分刻み）
-                    az, alt = _sat_aa(ts.tt_jd(t.tt + i * 3.0 * 60.0 / 86400.0))
+                # 前後 _TRAIL_MINUTES 分を _TRAIL_STEP_MIN 分刻み。粗い刻みだと LEO の
+                # 可視パスが数点しか取れず、破線が描かれていないように見えてしまう。
+                for i in range(-_TRAIL_MINUTES, _TRAIL_MINUTES + 1, _TRAIL_STEP_MIN):
+                    az, alt = _sat_aa(ts.tt_jd(t.tt + i * _TRAIL_STEP_MIN * 60.0 / 86400.0))
                     if alt > 0:
                         trail.append({"az": az, "alt": alt})
             if alt0 > 0:
                 sats[nm] = {"catnr": catnr, "kind": kind, "az": az0, "alt": alt0, "trail": trail}
-        except Exception:
-            pass
+        except Exception as e:
+            # 黙って落とすと「図に衛星が出ない」だけの症状になり原因が追えない。理由を残す。
+            sat_errors[nm] = "{}: {}".format(type(e).__name__, str(e)[:120])
 
     return {"time_utc": tstr, "lat": lat, "lon": lon, "planets": planets,
-            "stars": stars, "satellites": sats}
+            "stars": stars, "satellites": sats, "satellite_errors": sat_errors,
+            "body_errors": body_errors}
 
 
-# ---------- 描画エンジン A: matplotlib (正確) ----------
+# ---------- 色・記号の指定（両エンジン共通の単一の出典） ----------
+# ここを直せば matplotlib 版と Pillow 版の両方に反映される。
+# 手書きで色を散らすと「図の色と説明が食い違う」事故になる。
+_C_STAR = (210, 214, 235)        # 恒星
+_C_SAT = (255, 60, 50)           # 人工衛星のマーカー
+_C_SAT_LABEL = (255, 176, 166)   # 人工衛星の名札
+_C_TRAIL = (255, 138, 128)       # 軌道予測の破線
+_C_GRID = (80, 90, 130)          # 方位線・仰角リング
+_C_COMPASS = (210, 220, 245)     # 北/東/南/西の文字
+_C_RING = symbol_rgb("ring")     # 土星の環（img_common の共通記号色）
+_C_BAND = symbol_rgb("band")     # 木星の縞
+_C_CAP = symbol_rgb("cap")       # 火星の極冠
+_ACC_BG = (11, 16, 38)           # accurate: 空の地色
+_ACC_FRAME = (4, 6, 15)          # accurate: 図の外枠
+_ACC_GRID = (51, 51, 68)         # accurate: 仰角リング/目盛り
+_ACC_RIM = (136, 153, 187)       # accurate: 地平線
+# 人工衛星の軌道予測（破線）を描く範囲と刻み（分）
+_TRAIL_MINUTES = 60
+_TRAIL_STEP_MIN = 1
+
+
+def _planet_hex(name):
+    """惑星・月の指定色（img_common.BODY_COLORS）を #rrggbb で返す。
+
+    matplotlib 版・Pillow 版・凡例・figure.markers・注記の色はすべてこの 1 か所から引く。
+    色を手書きすると「accurate だけ全惑星が青」のような食い違いが生まれる。
+    """
+    return rgb_hex(body_rgb(name))
+
+
+# accurate 版のマーカー径（simple 版の px 径 r0 を pt 面積へ換算したもの）
+_PLANET_PT = {"moon": 490, "rocky": 650, "gas": 1045}   # simple: 26 / 30 / 38 px
+_SAT_PT = 165                                           # simple: 15 px
+
+
 def _render_accurate(scene):
+    """matplotlib 版。座標は正確なまま、配色・記号・名札は simple 版と同一の指定にする。"""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import numpy as np
     from matplotlib import font_manager
+    from matplotlib.lines import Line2D
+    from matplotlib.transforms import offset_copy
     for f in font_manager.fontManager.ttflist:
         if f.name in ("Noto Sans JP", "Meiryo", "Yu Gothic"):
             plt.rcParams["font.family"] = f.name
@@ -225,33 +270,72 @@ def _render_accurate(scene):
     ax.set_rlim(0, 90)
     ax.set_yticklabels([])
     for g in (30, 60):
-        ax.plot(np.linspace(0, 2 * np.pi, 100), np.full(100, g), color="#334", lw=0.6, ls=":")
-    ax.plot(np.linspace(0, 2 * np.pi, 100), np.full(100, 89), color="#8899bb", lw=2)
-    ax.set_facecolor("#0b1026")
-    fig.patch.set_facecolor("#04060f")
+        ax.plot(np.linspace(0, 2 * np.pi, 100), np.full(100, g), color=rgb_hex(_ACC_GRID), lw=0.6, ls=":")
+    ax.plot(np.linspace(0, 2 * np.pi, 100), np.full(100, 89), color=rgb_hex(_ACC_RIM), lw=2)
+    ax.set_facecolor(rgb_hex(_ACC_BG))
+    fig.patch.set_facecolor(rgb_hex(_ACC_FRAME))
 
+    drawn_trail = False
     for nm, s in scene["stars"].items():
-        ax.scatter(math.radians(s["az"]), s["alt"], s=14, color="#d0d0e2", marker="*", zorder=2, alpha=0.85)
+        ax.scatter(math.radians(s["az"]), s["alt"], s=14, color=rgb_hex(_C_STAR),
+                   marker="*", zorder=2, alpha=0.9)
     for nm, s in scene["planets"].items():
-        c = "#f4c542" if nm == "月" else ("#ffd66e" if nm == "金星" else "#7fd0ff")
-        ax.scatter(math.radians(s["az"]), s["alt"], s=(70 if nm == "月" else 55),
-                   color=c, edgecolor="white", lw=0.8, zorder=5)
-        ax.annotate(nm, (math.radians(s["az"]), s["alt"]), textcoords="offset points",
-                    xytext=(9, 7), fontsize=11, color="white", zorder=6,
+        th, r = math.radians(s["az"]), s["alt"]
+        kind = _PLANET_VISUAL.get(nm, ((200, 200, 210), "rocky"))[1]
+        size = _PLANET_PT.get(kind, _PLANET_PT["rocky"])
+        # 光背（視認性）→ 本体 → 表面の特徴 → 名札 の順に重ねる（文字は最後＝隠れない）
+        ax.scatter(th, r, s=size * 1.34, color=_planet_hex(nm), alpha=0.28,
+                   edgecolor="none", zorder=4)
+        ax.scatter(th, r, s=size, color=_planet_hex(nm), edgecolor="white", lw=0.8, zorder=5)
+        if nm == "土星":                       # 環
+            ax.scatter(th, r, s=size * 2.1, facecolor="none", edgecolor=rgb_hex(_C_RING),
+                       lw=1.4, zorder=6)
+        elif nm == "木星":                     # 縞（本体の上下に細線）
+            for dy in (7, -7):
+                tr = offset_copy(ax.transData, fig=fig, y=dy, units="points")
+                ax.plot([th], [r], marker="_", ms=9, mew=2.6, color=rgb_hex(_C_BAND),
+                        transform=tr, zorder=6)
+        elif nm == "火星":                     # 極冠
+            tr = offset_copy(ax.transData, fig=fig, y=7, units="points")
+            ax.plot([th], [r], marker="o", ms=3.4, color=rgb_hex(_C_CAP), transform=tr, zorder=6)
+        ax.annotate(nm, (th, r), textcoords="offset points", xytext=(11, 9), fontsize=11,
+                    color="white", zorder=7,
                     bbox=dict(boxstyle="round,pad=0.15", fc="#00000099", ec="none"))
     for nm, s in scene["satellites"].items():
-        az, alt = s["az"], s["alt"]
-        ax.scatter(math.radians(az), alt, s=150, color="#ff3b30", edgecolor="white", lw=1.4, zorder=7)
-        ax.annotate(nm, (math.radians(az), alt), textcoords="offset points", xytext=(12, 13),
-                    fontsize=10, color="#ffc2ba", fontweight="bold", zorder=8,
-                    bbox=dict(boxstyle="round,pad=0.22", fc="#4a0000d9", ec="#ff3b30"))
+        az, alt = math.radians(s["az"]), s["alt"]
+        ax.scatter(az, alt, s=_SAT_PT * 2.3, color=rgb_hex(_C_SAT), alpha=0.30,
+                   edgecolor="none", zorder=7)
+        ax.scatter(az, alt, s=_SAT_PT, color=rgb_hex(_C_SAT), edgecolor="white", lw=1.4, zorder=8)
+        ax.annotate(nm, (az, alt), textcoords="offset points", xytext=(14, 15),
+                    fontsize=10, color=rgb_hex(_C_SAT_LABEL), fontweight="bold", zorder=9,
+                    bbox=dict(boxstyle="round,pad=0.22", fc="#4a0000d9", ec=rgb_hex(_C_SAT)))
         if s.get("trail"):
+            drawn_trail = True
             ax.plot([math.radians(p["az"]) for p in s["trail"]], [p["alt"] for p in s["trail"]],
-                    color="#ff8a80", lw=1.6, alpha=0.9, ls="--", zorder=6)
+                    color=rgb_hex(_C_TRAIL), lw=2.2, alpha=0.95, ls="--", zorder=6)
     for lbl, deg in (("北", 0), ("東", 90), ("南", 180), ("西", 270)):
         ax.text(math.radians(deg), 99, lbl, ha="center", va="center", fontsize=15,
-                color="#c8cdd8", fontweight="bold")
-    ax.set_title("{} ・ {} の空と人工衛星（正確な星図）\n赤●=衛星, 破線=軌道予測, 青●=惑星, 黄=月, ＊=恒星".format(scene["lat"], scene["time_utc"]),
+                color=rgb_hex(_C_COMPASS), fontweight="bold")
+    # 凡例は実際に描いたものだけを指定色表から生成する（手書きだと図と食い違う）
+    legend_items = [
+        (Line2D([], [], marker="o", ls="", markersize=7, markerfacecolor=_planet_hex(nm),
+                markeredgecolor="white"), "{} {}".format(nm, _planet_hex(nm)))
+        for nm in scene["planets"]]
+    legend_items.append(
+        (Line2D([], [], marker="o", ls="", markersize=9, markerfacecolor=rgb_hex(_C_SAT),
+                markeredgecolor="white"), "人工衛星"))
+    legend_items.append(
+        (Line2D([], [], marker="*", ls="", markersize=8, markerfacecolor=rgb_hex(_C_STAR),
+                markeredgecolor="none"), "恒星"))
+    if drawn_trail:
+        legend_items.append(
+            (Line2D([], [], ls="--", color=rgb_hex(_C_TRAIL)),
+             "軌道予測（前後{}分・{}分刻み）".format(_TRAIL_MINUTES, _TRAIL_STEP_MIN)))
+    lg = ax.legend([h for h, _ in legend_items], [t for _, t in legend_items],
+                   loc="lower left", fontsize=8.5, facecolor=rgb_hex(_ACC_BG),
+                   edgecolor=rgb_hex(_ACC_GRID), labelcolor="white", framealpha=0.85)
+    lg.set_zorder(10)
+    ax.set_title("{} ・ {} の空と人工衛星（正確な星図）".format(scene["lat"], scene["time_utc"]),
                  fontsize=12, color="white", pad=20)
     buf = io.BytesIO()
     plt.savefig(buf, format="png", dpi=150, facecolor=fig.get_facecolor(), bbox_inches="tight")
@@ -268,7 +352,7 @@ def _fetch_bg(url, max_bytes=3500000):
 def _render_simple(scene):
     """Pillow 簡易合成。惑星を種類別アイコンで、衛星を強調して描く（学生向け・視認性重視）。"""
     from PIL import Image, ImageDraw, ImageFilter
-    # 惑星の見た目は既定色（実物らしい色）。背景の実写が写るため少しだけ明るめに。
+    # 惑星の見た目・恒星・人工衛星の色は _PLANET_VISUAL / _C_* の指定色（accurate 版と共通）。
     # 背景取得
     url = _BG_CANDIDATES[0]
     data = _fetch_bg(url)
@@ -302,25 +386,24 @@ def _render_simple(scene):
     # 仰角リング
     for g in (30, 60):
         r = R * (90 - g) / 90.0
-        dr.ellipse([CX - r, CY - r, CX + r, CY + r], outline=(80, 90, 130, 255), width=2)
+        dr.ellipse([CX - r, CY - r, CX + r, CY + r], outline=_C_GRID + (255,), width=2)
     # 方位線 + N/E/S/W
     for az, lab in ((0, "北"), (90, "東"), (180, "南"), (270, "西")):
         x, y = proj(az, 0)
-        dr.line([CX, CY, x, y], fill=(80, 90, 130, 255), width=2)
+        dr.line([CX, CY, x, y], fill=_C_GRID + (255,), width=2)
         x2, y2 = CX + (x - CX) * 1.07, CY + (y - CY) * 1.07
-        dr.text((x2 - 14, y2 - 12), lab, font=load_font(28, True), fill=(210, 220, 245, 255))
+        dr.text((x2 - 14, y2 - 12), lab, font=load_font(28, True), fill=_C_COMPASS + (255,))
 
     # 恒星（薄い点・小さめ）
     for nm, s in scene["stars"].items():
         x, y = proj(s["az"], s["alt"])
-        dr.ellipse([x - 3, y - 3, x + 3, y + 3], fill=(210, 214, 235, 220))
+        dr.ellipse([x - 3, y - 3, x + 3, y + 3], fill=_C_STAR + (220,))
 
     # 惑星・月（種類別アイコン）
     def draw_planet(name, px, py, kind):
-        base = _PLANET_VISUAL.get(name, ((200, 200, 210), "rocky"))
-        color = base[0]
+        color = body_rgb(name)   # 指定色（accurate 版と共通）
         if kind == "moon":
-            r0 = 26; color = (226, 226, 230)
+            r0 = 26
         elif kind == "rocky":
             r0 = 30
         else:
@@ -330,14 +413,14 @@ def _render_simple(scene):
         dr.ellipse([px - r0, py - r0, px + r0, py + r0], fill=color + (255,))
         # 土星: 環
         if name == "土星":
-            dr.ellipse([px - r0 - 16, py - 8, px + r0 + 16, py + 8], outline=(226, 206, 160, 255), width=5)
+            dr.ellipse([px - r0 - 16, py - 8, px + r0 + 16, py + 8], outline=_C_RING + (255,), width=5)
         # 木星: 縞
         elif name == "木星":
-            dr.line([px - r0, py - 8, px + r0, py - 8], fill=(196, 148, 108, 255), width=3)
-            dr.line([px - r0, py + 6, px + r0, py + 6], fill=(196, 148, 108, 255), width=3)
+            dr.line([px - r0, py - 8, px + r0, py - 8], fill=_C_BAND + (255,), width=3)
+            dr.line([px - r0, py + 6, px + r0, py + 6], fill=_C_BAND + (255,), width=3)
         # 火星: 極冠
         elif name == "火星":
-            dr.ellipse([px - 6, py - r0 + 2, px + 6, py - r0 + 14], fill=(240, 240, 240, 255))
+            dr.ellipse([px - 6, py - r0 + 2, px + 6, py - r0 + 14], fill=_C_CAP + (255,))
         # ラベル
         lx, ly = px + r0 + 10, py - 12
         dr.rectangle([lx - 4, ly, lx + 130, ly + 30], fill=(10, 12, 25, 215))
@@ -356,8 +439,8 @@ def _render_simple(scene):
         sat_items.append((nm, s, x, y, 15 if s["kind"] == "leo" else 13))
     for nm, s, x, y, r0 in sat_items:
         # 光背
-        dr.ellipse([x - r0 - 8, y - r0 - 8, x + r0 + 8, y + r0 + 8], fill=(255, 80, 60, 60))
-        dr.ellipse([x - r0, y - r0, x + r0, y + r0], fill=(255, 60, 50, 255),
+        dr.ellipse([x - r0 - 8, y - r0 - 8, x + r0 + 8, y + r0 + 8], fill=_C_SAT + (60,))
+        dr.ellipse([x - r0, y - r0, x + r0, y + r0], fill=_C_SAT + (255,),
                    outline=(255, 255, 255, 255), width=3)
         if s["kind"] == "leo" and s.get("trail"):
             # 軌道予測を細い破線で
@@ -365,7 +448,7 @@ def _render_simple(scene):
             for tp in s["trail"]:
                 tx, ty = proj(tp["az"], tp["alt"])
                 if prev is not None:
-                    dr.line([prev[0], prev[1], tx, ty], fill=(255, 138, 128, 200), width=3)
+                    dr.line([prev[0], prev[1], tx, ty], fill=_C_TRAIL + (200,), width=3)
                 prev = (tx, ty)
     bw, bh = 254, 32
     taken = [[x - r0 - 2, y - r0 - 2, x + r0 + 2, y + r0 + 2] for _, _, x, y, r0 in sat_items]
@@ -380,7 +463,7 @@ def _render_simple(scene):
             bx, by = min(max(8, x + r0 + 10), W - bw - 8), min(max(140, y - 16), H - 90 - bh)
         taken.append([bx, by, bx + bw, by + bh])
         dr.rectangle([bx, by, bx + bw, by + bh], fill=(80, 0, 0, 230))
-        dr.text((bx + 4, by + 2), nm, font=load_font(20, True), fill=(255, 176, 166, 255))
+        dr.text((bx + 4, by + 2), nm, font=load_font(20, True), fill=_C_SAT_LABEL + (255,))
 
     # ヘッダバナー
     dr.rectangle([0, 16, W, 112], fill=(0, 0, 0, 210))
@@ -442,7 +525,8 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
       - "simple"(既定):   Pillow による実写背景の簡易合成。惑星を種類別の色アイコンで
         大きく・明瞭に描き、学生が見やすい見た目重視の画像。
       - "accurate":       matplotlib による正確な星図。座標グリッド・軌道予測線を精確表示
-        （科学・教育の詳細用途向け）。
+        （科学・教育の詳細用途向け）。マーカーの色・光背・土星の環・木星の縞・火星の極冠・
+        名札・凡例は simple 版と同じ指定色（_PLANET_VISUAL / _C_*）から作る。
     画像は content に base64 インライン表示、座標は structuredContent に JSON。
 
     Args:
@@ -451,6 +535,12 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
         lon: 観測地の経度。
         when: 観測時刻 ISO8601（例 "2026-09-09T11:00:00Z"）。省略時は現在時刻。
         engine: "simple"(既定/Pillow) / "accurate"(matplotlib)。
+
+    インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
+    content の先頭へ「🖼️ [生成した画像を開く（…）](file:///…) ｜ 保存先: `…`」という
+    アイコン付きリンクを必ず出します（画像は %LOCALAPPDATA%\\Temp\\space_finder_mcp\\out に
+    保存し、同じパスを structuredContent.image_path にも入れます）。
+    回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
     """
     ll = _resolve_place(place, lat, lon)
     if ll is None and (lat is not None or lon is not None):
@@ -484,7 +574,12 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
         )
     img = ImageContent(type="image", data=base64.b64encode(img_bytes).decode("ascii"),
                        mimeType=mime, altText=alt)
+    # インライン画像を描けないハーネス向け: 保存してリンクを先頭に出す
+    out_path = save_output(img_bytes, "sky_map_with_satellites",
+                           "png" if mime == "image/png" else "jpg")
     lines = [
+        media_link_line("生成した画像を開く（星空マップ・{}）".format(eng_label),
+                        path=out_path, kind="figure"),
         "🗺️ **{} の空（惑星と人工衛星・{}）**".format(scene["time_utc"], eng_label),
         "場所: 緯度 {:.2f}° 経度 {:.2f}°".format(ll[0], ll[1]),
         "",
@@ -493,6 +588,10 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
     ]
     for nm, s in scene["satellites"].items():
         lines.append("- {}: 方位 {:.0f}° 仰角 {:.0f}°".format(nm, s["az"], s["alt"]))
+    for nm, msg in (scene.get("satellite_errors") or {}).items():
+        lines.append("- ⚠️ {}: 位置を計算できませんでした（{}）".format(nm, msg))
+    for nm, msg in (scene.get("body_errors") or {}).items():
+        lines.append("- ⚠️ {}: 位置を計算できませんでした（{}）".format(nm, msg))
     fig = figure_payload(
         kind="sky_view",
         title="{} の空（惑星・人工衛星）".format(scene["time_utc"]),
@@ -503,15 +602,28 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
                              note="観測地から見た空の図。地球や軌道の形は描いていない"),
         scale=scale_spec("linear", to_scale=True, unit="deg",
                          exaggerated=["惑星・人工衛星のマーカー（実寸ではない）"]),
-        markers=[{"id": k, "label": k, "az_deg": round(v.get("az", 0.0), 1),
-                  "alt_deg": round(v.get("alt", 0.0), 1)}
-                 for k, v in list(scene["satellites"].items())[:8]],
+        markers=([{"id": nm, "label": nm, "kind": "planet", "color": _planet_hex(nm),
+                   "az_deg": round(v["az"], 1), "alt_deg": round(v["alt"], 1)}
+                  for nm, v in scene["planets"].items()]
+                 + [{"id": k, "label": k, "kind": "satellite", "color": "#ff3b30",
+                     "az_deg": round(v.get("az", 0.0), 1),
+                     "alt_deg": round(v.get("alt", 0.0), 1)}
+                    for k, v in list(scene["satellites"].items())[:8]]),
         notes=figure_notes(extra=[
             "この図は観測地の空（高度・方位）の見かけの位置。軌道の形や地球からの距離は分からない",
             "engine=simple は実写背景への合成（学生・観賞向け）、accurate は座標を正確に描いた星図",
             "人工衛星は CelesTrak の最新TLEをSGP4で伝播したその時刻の位置（予報ではない）",
             "地平線下の天体は描かれない（リストにも「なし(地平線下)」と出る）",
             "惑星・月の位置は JPL de421 + Skyfield（観測地の視位置）",
+            "惑星・月のマーカー色は実物の見た目に合わせた指定色（{}）".format(
+                ", ".join("{}={}".format(nm, _planet_hex(nm))
+                          for nm in scene["planets"]) or "該当なし"),
+            ("軌道予測の破線は {} の可視区間（前後{}分・{}分刻み）".format(
+                ", ".join(k for k, v in scene["satellites"].items() if v.get("trail")),
+                _TRAIL_MINUTES, _TRAIL_STEP_MIN)
+             if any(v.get("trail") for v in scene["satellites"].values()) else
+             "軌道予測の破線を描ける低軌道衛星がこの時刻は地平線上にないため、破線は描かれていない"
+             "（静止衛星は動かないので破線を描かない）"),
         ]),
         caption="{:.2f}°N {:.2f}°E の {} の空。惑星: {} ／ 人工衛星: {}".format(
             ll[0], ll[1], scene["time_utc"],
@@ -532,6 +644,8 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
         structuredContent={"time_utc": scene["time_utc"], "lat": ll[0], "lon": ll[1],
                            "engine": eng_label, "planets": scene["planets"],
                            "stars": scene["stars"], "satellites": scene["satellites"],
-                           "figure": fig,
+                           "satellite_errors": scene.get("satellite_errors") or {},
+                           "body_errors": scene.get("body_errors") or {},
+                           "figure": fig, "image_path": out_path,
                            "source": "JPL de421+Skyfield / CelesTrak+SGP4"},
     )

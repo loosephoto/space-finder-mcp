@@ -27,9 +27,10 @@ import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import TTL_DAILY, ttl_cache
-from .img_common import (conic_from_elements, figure_notes, figure_payload,
-                         figure_text_block, load_font, primary_spec,
-                         scale_spec, verify_curve, view_spec)
+from .img_common import (body_rgb, conic_from_elements, figure_notes,
+                         figure_payload, figure_text_block, load_font,
+                         media_link_line, primary_spec, rgb_hex, save_output,
+                         scale_spec, symbol_rgb, verify_curve, view_spec)
 
 _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
 os.makedirs(_DATA_DIR, exist_ok=True)
@@ -48,16 +49,18 @@ _ASTEROID_ALIASES = {
 _REQUIRED_ELEMS = ("e", "a", "i", "om", "w", "ma", "n")
 
 # 惑星 (日本語名, de421天体名, 主色RGB, 軌道長半径AU)
+# 色は img_common.BODY_COLORS（共通の単一の出典）。sky_overlay と同じ値を使う
+# （v0.27 で天王星だけ (150,210,220) と食い違っていたのを統一）。
 _PLANETS = [
-    ("水星", "mercury", (168, 168, 170), 0.387),
-    ("金星", "venus", (242, 226, 180), 0.723),
-    ("地球", "earth", (110, 150, 235), 1.000),
-    ("火星", "mars", (214, 96, 77), 1.524),
-    ("木星", "jupiter barycenter", (212, 168, 118), 5.20),
-    ("土星", "saturn barycenter", (226, 196, 146), 9.58),
-    ("天王星", "uranus barycenter", (150, 210, 220), 19.2),
-    ("海王星", "neptune barycenter", (96, 140, 232), 30.1),
-    ("冥王星", "pluto barycenter", (176, 140, 120), 39.5),
+    ("水星", "mercury", body_rgb("水星"), 0.387),
+    ("金星", "venus", body_rgb("金星"), 0.723),
+    ("地球", "earth", body_rgb("地球"), 1.000),
+    ("火星", "mars", body_rgb("火星"), 1.524),
+    ("木星", "jupiter barycenter", body_rgb("木星"), 5.20),
+    ("土星", "saturn barycenter", body_rgb("土星"), 9.58),
+    ("天王星", "uranus barycenter", body_rgb("天王星"), 19.2),
+    ("海王星", "neptune barycenter", body_rgb("海王星"), 30.1),
+    ("冥王星", "pluto barycenter", body_rgb("冥王星"), 39.5),
 ]
 
 
@@ -167,8 +170,8 @@ def _comet_position(name, jd):
     return _kepler_position(el, jd)
 
 
-# 彗星の描画色 (シアン系・彗星らしい) とマーカー指定
-_COMET_COLOR = (150, 235, 255)
+# 彗星の描画色 (シアン系・彗星らしい) とマーカー指定（記号色は img_common が単一の出典）
+_COMET_COLOR = symbol_rgb("comet")
 
 
 # ---------- 共通データ層 ----------
@@ -383,10 +386,11 @@ def _render_simple(scene):
         dr.ellipse([px - rad, py - rad, px + rad, py + rad], fill=col,
                    outline=tuple(min(255, c + 70) for c in col), width=2)
         if jname == "土星":
-            dr.ellipse([px - rad - 14, py - 6, px + rad + 14, py + 6], outline=(226, 206, 160), width=5)
+            dr.ellipse([px - rad - 14, py - 6, px + rad + 14, py + 6],
+                       outline=symbol_rgb("ring"), width=5)
         elif jname == "木星":
-            dr.line([px - rad, py - 8, px + rad, py - 8], fill=(196, 148, 108), width=3)
-            dr.line([px - rad, py + 5, px + rad, py + 5], fill=(196, 148, 108), width=3)
+            dr.line([px - rad, py - 8, px + rad, py - 8], fill=symbol_rgb("band"), width=3)
+            dr.line([px - rad, py + 5, px + rad, py + 5], fill=symbol_rgb("band"), width=3)
         lx = px + rad + 8 if (px + rad + 170 < W) else px - rad - 178
         lx = max(lx, 10); ly = py - 10
         dr.rectangle([lx, ly, lx + 178, ly + 30], fill=(8, 10, 22, 230))
@@ -409,10 +413,10 @@ def _render_simple(scene):
         dr = ImageDraw.Draw(img)
         dr.line([px - rad - 7, py, px + rad + 7, py], fill=(200, 255, 215), width=2)
         dr.line([px, py - rad - 7, px, py + rad + 7], fill=(200, 255, 215), width=2)
-        dr.ellipse([px - rad, py - rad, px + rad, py + rad], fill=(96, 200, 120),
+        dr.ellipse([px - rad, py - rad, px + rad, py + rad], fill=symbol_rgb("asteroid"),
                    outline=(220, 255, 230), width=2)
         rr2 = scale(d["sma"])
-        dr.ellipse([CX - rr2, CY - rr2, CX + rr2, CY + rr2], outline=(96, 190, 120), width=2)
+        dr.ellipse([CX - rr2, CY - rr2, CX + rr2, CY + rr2], outline=symbol_rgb("asteroid"), width=2)
         lx, ly = px + 16, py - 14
         if lx + 240 > W:
             lx = px - rad - 250
@@ -501,7 +505,7 @@ def _render_simple(scene):
     glow = glow.filter(ImageFilter.GaussianBlur(30))
     img.paste(Image.alpha_composite(img.convert("RGBA"), glow).convert("RGB"), (0, 0))
     dr = ImageDraw.Draw(img)
-    dr.ellipse([CX - 26, CY - 26, CX + 26, CY + 26], fill=(255, 220, 120),
+    dr.ellipse([CX - 26, CY - 26, CX + 26, CY + 26], fill=body_rgb("太陽"),
                outline=(255, 245, 200), width=2)
     dr.text((CX - 14, CY - 8), "太陽", font=load_font(18, True), fill=(120, 80, 0))
 
@@ -585,16 +589,19 @@ def _render_accurate(scene):
         if d.get("error"):
             continue
         ang = math.radians(d["eclLon"])
+        ast_rgb = symbol_rgb("asteroid")
         ax.scatter(d["au"] * math.cos(ang), d["au"] * math.sin(ang),
-                   color="#3ddc6a", marker="+", s=160, linewidths=2.5, zorder=6)
+                   color=rgb_hex(ast_rgb), marker="+", s=160, linewidths=2.5, zorder=6)
         ax.annotate("{}\n{:.2f}AU".format(name, d["au"]),
                     (d["au"] * math.cos(ang), d["au"] * math.sin(ang)),
-                    textcoords="offset points", xytext=(8, 6), fontsize=10, color="#b6ffcf",
+                    textcoords="offset points", xytext=(8, 6), fontsize=10,
+                    color=rgb_hex(symbol_rgb("asteroid_label")),
                     fontweight="bold", zorder=7,
-                    bbox=dict(boxstyle="round,pad=0.2", fc="#0a2b14d9", ec="#3ddc6a"))
+                    bbox=dict(boxstyle="round,pad=0.2", fc="#0a2b14d9",
+                              ec=rgb_hex(ast_rgb)))
 
     # 太陽
-    ax.scatter(0, 0, s=300, color="#ffd86e", edgecolor="#fff5c2", lw=1.5, zorder=8)
+    ax.scatter(0, 0, s=300, color=rgb_hex(body_rgb("太陽")), edgecolor="#fff5c2", lw=1.5, zorder=8)
     ax.annotate("太陽", (0, 0), textcoords="offset points", xytext=(-12, -26),
                 fontsize=11, color="#ffe9a3", fontweight="bold", ha="center", zorder=9)
 
@@ -614,7 +621,7 @@ def _render_accurate(scene):
 
 
 # ---------- 彗星の軌道面ビュー（figure 注記つき） ----------
-_COMET_ORBIT_COLOR = (255, 150, 60)   # 軌道線の色（verify_curve がこの色を画素から測る）
+_COMET_ORBIT_COLOR = symbol_rgb("comet_orbit")   # 軌道線の色（verify_curve がこの色を画素から測る）
 
 
 def _au_fmt(v):
@@ -786,13 +793,13 @@ def _render_comet_orbit(cid, el, pos_xyz, when_str):
                (ax_ + 14, ay_ + 12, "la"), (ax_ + 14, ay_ - 34, "la")],
               "遠日点 {} AU".format(_au_fmt(apo)), f_s, (150, 190, 255))
     sr = 12
-    dr.ellipse([X0 - sr, Y0 - sr, X0 + sr, Y0 + sr], fill=(255, 220, 120),
+    dr.ellipse([X0 - sr, Y0 - sr, X0 + sr, Y0 + sr], fill=body_rgb("太陽"),
                outline=(255, 245, 200), width=2)
     label([(X0 + sr + 8, Y0 - sr - 26, "la"), (X0 + sr + 8, Y0 + sr + 6, "la"),
            (X0 - sr - 96, Y0 - sr - 26, "la"), (X0 - sr - 96, Y0 + sr + 6, "la")],
           "太陽＝焦点", f_m, (255, 235, 170))
     cx_, cy_ = to_px(xp, yp)
-    dr.ellipse([cx_ - 7, cy_ - 7, cx_ + 7, cy_ + 7], fill=(150, 235, 255),
+    dr.ellipse([cx_ - 7, cy_ - 7, cx_ + 7, cy_ + 7], fill=_COMET_COLOR,
                outline=(255, 255, 255), width=2)
     label([(cx_ + 14, cy_ - 40, "la"), (cx_ + 14, cy_ + 16, "la"),
            (cx_ - 250, cy_ - 40, "la"), (cx_ - 250, cy_ + 16, "la")],
@@ -909,7 +916,11 @@ def _comet_orbit_result(name, when_iso=None):
     imgc = ImageContent(type="image", data=base64.b64encode(png).decode("ascii"),
                         mimeType="image/png",
                         altText="{} の軌道（軌道面を真横から見た図）".format(el.get("fullname") or cid))
+    # インライン画像を描けないハーネス向け: 保存してリンクを先頭に出す
+    out_path = save_output(png, "solar_system_comet_orbit", "png")
     lines = [
+        media_link_line("生成した画像を開く（{} の彗星軌道面ビュー）".format(
+            el.get("fullname") or cid), path=out_path, kind="figure"),
         "☄️ **{} の軌道（彗星自身の軌道面を真横から見た図）**".format(el.get("fullname") or cid),
         "時刻: {}".format(tstr),
         "離心率 e={:.6f} ・ 近日点 {} AU ・ {}".format(
@@ -928,7 +939,7 @@ def _comet_orbit_result(name, when_iso=None):
             "e": el["e"], "a_au": el.get("a"), "q_au": el["q"],
             "incl_deg": el.get("i_deg"), "typ": el["typ"],
             "au": rr, "eclLon": lon, "eclLat": lat,
-            "figure": fig, "source": el.get("source", ""),
+            "figure": fig, "image_path": out_path, "source": el.get("source", ""),
         },
     )
 
@@ -975,6 +986,12 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
         view: "system"(既定)=太陽系俯瞰図 / "comet_orbit"=彗星の軌道面ビュー。
             comet_orbit は comet の指定が必須で、彗星自身の軌道面を真横から見た図
             （太陽＝円錐曲線の焦点）を返す。e>=1 の C/彗星は閉じない双曲線の枝として描く。
+
+    インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
+    content の先頭へ「🖼️ [生成した画像を開く（…）](file:///…) ｜ 保存先: `…`」という
+    アイコン付きリンクを必ず出します（画像は %LOCALAPPDATA%\\Temp\\space_finder_mcp\\out に
+    保存し、同じパスを structuredContent.image_path にも入れます）。
+    回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
     """
     vw = str(view or "system").strip().lower()
     if vw in ("comet_orbit", "comet", "orbit"):
@@ -1029,7 +1046,11 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
         )
     img = ImageContent(type="image", data=base64.b64encode(png).decode("ascii"),
                        mimeType="image/png", altText=alt)
+    # インライン画像を描けないハーネス向け: 保存してリンクを先頭に出す
+    out_path = save_output(png, "solar_system_now", "png")
     lines = [
+        media_link_line("生成した画像を開く（太陽系俯瞰図・{}）".format(eng_label),
+                        path=out_path, kind="figure"),
         "☀️ **太陽系俯瞰図（太陽中心・{}）**".format(eng_label),
         "時刻: {}".format(scene["time_utc"]),
         "**惑星位置（太陽からの距離AU）**: " + ", ".join(
@@ -1086,6 +1107,6 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
         structuredContent={"time_utc": scene["time_utc"], "engine": eng_label,
                            "planets": scene["planets"], "asteroids": scene["asteroids"],
                            "probes": scene["probes"], "comets": scene["comets"],
-                           "figure": fig,
+                           "figure": fig, "image_path": out_path,
                            "source": "JPL DE421+SBDB+Horizons / Skyfield"},
     )

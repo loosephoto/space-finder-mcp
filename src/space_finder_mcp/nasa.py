@@ -89,10 +89,10 @@ def apod(key: str, date: Optional[str] = None) -> CallToolResult:
             text = ("APOD はまだ公開されていません（試行日: " + ", ".join(candidates) +
                     "）。NASA 側の当日分公開は米国東部時間の夜になることがあります。")
         else:
-            text = _rate_limit_text(last_err) or f"NASA APOD の取得に失敗しました: {last_err}"
+            text = _rate_limit_text(last_err) or "NASA APOD の取得に失敗しました: " + nasa_budget.redact(last_err)
         return CallToolResult(
             content=[TextContent(type="text", text=text)],
-            structuredContent={"error": str(last_err), "status": status,
+            structuredContent={"error": nasa_budget.redact(last_err), "status": status,
                                "tried_dates": candidates, "source": "api.nasa.gov",
                                "budget": nasa_budget.status(key)},
         )
@@ -130,7 +130,7 @@ def neo_today(key: str) -> CallToolResult:
         return CallToolResult(
             content=[TextContent(type="text",
                                  text=_rate_limit_text(e) or f"NASA NEO の取得に失敗しました: {e}")],
-            structuredContent={"error": str(e), "status": status, "source": "api.nasa.gov",
+            structuredContent={"error": nasa_budget.redact(e), "status": status, "source": "api.nasa.gov",
                                "budget": nasa_budget.status(key)},
         )
     lines = [f"今日（{today}）地球に接近する小惑星:"]

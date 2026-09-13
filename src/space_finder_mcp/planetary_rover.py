@@ -25,8 +25,8 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 # planetary_map の汎用コアと画像共通ヘルパーを再利用
 from .planetary_map import BODIES, _fetch_tiles
 from .img_common import (figure_notes, figure_payload, figure_text_block,
-                         load_font, pixel_near, primary_spec, scale_spec,
-                         view_spec)
+                         load_font, media_link_line, pixel_near, primary_spec,
+                         save_output, scale_spec, view_spec)
 from .input_utils import as_float, as_int
 
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
@@ -112,6 +112,12 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
         zoom: 地図ズーム。省略時は天体の最大ズーム（火星7）。高倍率ほど詳細。
         span_deg: 表示する画角(経度幅・度)。大きいほど広範囲・解像度低下。既定0.5。
         out_px: 出力画像の長辺ピクセル(既定1000, 最大2000)。
+
+    インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
+    content の先頭へ「🖼️ [生成した画像を開く（…）](file:///…) ｜ 保存先: `…`」という
+    アイコン付きリンクを必ず出します（画像は %LOCALAPPDATA%\\Temp\\space_finder_mcp\\out に
+    保存し、同じパスを structuredContent.image_path にも入れます）。
+    回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
     """
     from PIL import Image, ImageDraw
 
@@ -241,6 +247,8 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
     jpeg = buf.getvalue()
     imgc = ImageContent(type="image", data=base64.b64encode(jpeg).decode("ascii"),
                         mimeType="image/jpeg", altText=f"{rover_ja} の{body_cfg['ja']}現在地マップ")
+    # インライン画像を描けないハーネス向け: 保存してリンクを先頭に出す
+    out_path = save_output(jpeg, "planetary_rover_location_map", "jpg")
     fig = figure_payload(
         kind="ground_track_map",
         title=f"{rover_ja}の{body_cfg['ja']}現在地マップ（{body_cfg['attrib']}）",
@@ -265,6 +273,8 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
         verify=_rover_verify(img, cx, cy, clat, clon, left, top, scale, W, H),
     )
     lines = [
+        media_link_line(f"生成した画像を開く（{rover_ja} の{body_cfg['ja']}現在地マップ）",
+                        path=out_path, kind="figure"),
         f"🔴 **{rover_ja}（{rv}）の{body_cfg['ja']}現在地マップ**:",
         f"📍 座標: {clat:.4f}° {'N' if clat >= 0 else 'S'} / {clon:.4f}°E ・ sol {wp.get('sol')}",
         f"🛣 走行距離: {wp.get('dist_km')} km（RMC {wp.get('rmc')}）",
@@ -279,6 +289,6 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
                            "lat": clat, "lon": clon, "sol": wp.get("sol"),
                            "dist_km": wp.get("dist_km"), "rmc": wp.get("rmc"),
                            "zoom": zoom, "span_deg": span_deg,
-                           "figure": fig,
+                           "figure": fig, "image_path": out_path,
                            "source": "NASA MMGIS + Trek WMTS"},
     )

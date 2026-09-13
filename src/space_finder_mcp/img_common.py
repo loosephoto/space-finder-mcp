@@ -13,9 +13,15 @@ from __future__ import annotations
 
 import io
 import math
+import os
+import time
+import urllib.parse
+import uuid
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Iterable, List, Optional, Tuple
+
+from .cache import CACHE_ROOT
 
 # フォント探索順（先頭ほど優先）。bold はメイリオ Bold を最優先にする。
 _FONT_CANDIDATES = {
@@ -24,6 +30,51 @@ _FONT_CANDIDATES = {
     True: ("C:/Windows/Fonts/meiryob.ttc", "C:/Windows/Fonts/yugothb.ttc",
            "C:/Windows/Fonts/msgothic.ttc"),
 }
+
+
+# ---------- 天体・記号の表示色（描画系ツール共通の単一の出典） ----------
+# 「実物の見た目に寄せた色」を 1 か所で決める。ここを直せば sky_overlay /
+# solar_system の Pillow 版・matplotlib 版・凡例・figure 注記にすべて反映される
+# （モジュールごとに色を手書きすると、同じ天王星が図ごとに違う色になる）。
+BODY_COLORS = {
+    "太陽": (255, 220, 120),
+    "月": (224, 224, 226),
+    "水星": (168, 168, 170),
+    "金星": (242, 226, 180),
+    "地球": (110, 150, 235),
+    "火星": (214, 96, 77),
+    "木星": (212, 168, 118),
+    "土星": (226, 196, 146),
+    "天王星": (176, 224, 230),   # 淡い青緑（v0.27 で sky_overlay 側の値に統一）
+    "海王星": (96, 140, 232),
+    "冥王星": (176, 140, 120),
+}
+
+# 天体そのものではないが複数ツールで重複していた記号色
+SYMBOL_COLORS = {
+    "ring": (226, 206, 160),          # 土星の環
+    "band": (196, 148, 108),          # 木星の縞
+    "cap": (240, 240, 240),           # 火星の極冠
+    "asteroid": (96, 200, 120),       # 小惑星マーカー（緑の十字）
+    "asteroid_label": (182, 255, 207),
+    "comet": (150, 235, 255),         # 彗星（シアンの核）
+    "comet_orbit": (255, 150, 60),    # 彗星の軌道面ビューの軌道線
+}
+
+
+def body_rgb(name: str, default: Tuple[int, int, int] = (200, 200, 210)) -> Tuple[int, int, int]:
+    """天体名（日本語）→ 表示色RGB。未登録は default。"""
+    return BODY_COLORS.get(str(name), default)
+
+
+def symbol_rgb(key: str, default: Tuple[int, int, int] = (200, 200, 210)) -> Tuple[int, int, int]:
+    """記号色（ring/band/cap/asteroid/comet 等）→ RGB。"""
+    return SYMBOL_COLORS.get(str(key), default)
+
+
+def rgb_hex(rgb) -> str:
+    """(r, g, b) → #rrggbb（matplotlib 用）。"""
+    return "#{:02x}{:02x}{:02x}".format(*rgb)
 
 
 @lru_cache(maxsize=128)
@@ -342,3 +393,84 @@ def pixel_near(image, xy: Tuple[float, float], color: Tuple[int, int, int],
     d = (abs(a[y0:y1, x0:x1, 0] - color[0]) + abs(a[y0:y1, x0:x1, 1] - color[1])
          + abs(a[y0:y1, x0:x1, 2] - color[2]))
     return int((d < tol).sum())
+
+
+# ---------- 生成物の保存と「メディアより前のリンク」 ----------
+# Hermes 等のリッチなクライアントは ImageContent をそのまま描画できるが、CLI 系・
+# Android 系のハーネス（codex / opencode など）は画像ブロックを無視するため、
+# 「画像が生成されたのに何も表示されない」ように見える。そこで content の
+# 先頭側に、アイコン付きのクリック可能なリンク（URL、無ければ保存したファイル）を
+# 必ず置く。順序は「メディア本体より前」を守る。
+OUTPUT_DIR = os.path.join(os.path.dirname(CACHE_ROOT), "out")
+
+_MEDIA_ICONS = {"image": "🖼️", "figure": "🖼️", "audio": "🎧", "video": "🎬", "file": "📄"}
+
+
+def file_uri(path: str) -> str:
+    """ローカルパスを file:// URI に変換する（Windows の C:\\... も可）。"""
+    p = os.path.abspath(str(path)).replace("\\", "/")
+    if not p.startswith("/"):
+        p = "/" + p
+    return "file://" + urllib.parse.quote(p, safe="/:")
+
+
+def save_output(data: bytes, tool: str, ext: str = "png", keep: int = 200) -> Optional[str]:
+    """生成した画像をディスクに保存して絶対パスを返す（失敗時 None）。
+
+    インライン表示できないハーネスでもユーザーが開けるようにするための出力。
+    keep 件を超えた古いファイルは削除する（無制限に溜めない）。
+    """
+    try:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        name = "{}_{}_{}.{}".format(tool, stamp, uuid.uuid4().hex[:6], ext.lstrip("."))
+        path = os.path.join(OUTPUT_DIR, name)
+        tmp = path + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)            # 途中読み込みを避けるため置換で確定
+        try:
+            files = sorted((os.path.join(OUTPUT_DIR, n) for n in os.listdir(OUTPUT_DIR)),
+                           key=os.path.getmtime, reverse=True)
+            for old in files[keep:]:
+                os.remove(old)
+        except OSError:
+            pass
+        return path
+    except OSError:
+        return None
+
+
+def markdown_link_url(url: str) -> str:
+    """URL を markdown リンク内で安全に使える形にする。
+
+    生の空白・括弧はリンクの終端と紛らわしく、リンクが壊れて切れる（NASA の
+    アセットURLには空白入り動画名がある）。既存の %XX は壊さないよう、
+    問題になる文字だけをパーセントエンコードする。
+    """
+    out = []
+    for ch in str(url or ""):
+        if ch in " <>\"`()":
+            out.append("%{:02X}".format(ord(ch)))
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def media_link_line(label: str, *, url: Optional[str] = None, path: Optional[str] = None,
+                    kind: str = "image", note: Optional[str] = None) -> str:
+    """メディア本体より前に置く「アイコン付きリンク行」を作る。
+
+    url があればそれを、無ければ保存した path を file:// URI にしてリンクにする。
+    リンク先を作れないときは空文字を返す（呼び出し側で行ごと落とせる）。
+    """
+    icon = _MEDIA_ICONS.get(kind, "🔗")
+    target = markdown_link_url(url) if url else (file_uri(path) if path else "")
+    if not target:
+        return ""
+    line = "{} [{}]({})".format(icon, label, target)
+    if path:
+        line += " ｜ 保存先: `{}`".format(path)
+    if note:
+        line += " ｜ {}".format(note)
+    return line

@@ -55,7 +55,7 @@ category: space
 | `power_climate` | 任意地点の過去の気候・太陽エネルギー統計（気温・日射量・風速） | NASA POWER | 不要 |
 | `eso_seeing` | ESO パラナル天文台（チリ, VLT）のリアルタイム大気コンディション（シーイング・可降水量・気象） | ESO ASM API | 不要 |
 | `cadc_observations` | CADC（カナダ天文データセンター）の観測データ検索（HST・ジェミニ等） | CADC TAP | 不要(画像DLは一部要登録) |
-| `alma_search` | ALMA（アルマ望遠鏡）科学アーカイブの観測データ検索（観測対象・座標・周波数帯・公開/要権限） | ALMA Science Archive (NAOJ, IVOA TAP) | 不要 |
+| `alma_search` | ALMA（アルマ望遠鏡）科学アーカイブの観測データ検索（観測対象・座標・周波数帯・種別/分解能/QA・公開/要権限・実データ製品） | ALMA Science Archive (NAOJ, IVOA TAP) | 不要 |
 | `radio_sources_now` | TART オープン電波望遠鏡が「いま観測できる電波源」（GNSS・静止衛星等）を仰角順に表示 | TART source catalog (NZ) | 不要 |
 | `sky_map_with_satellites` | 指定地の空に太陽系の惑星と人工衛星を重ねた画像（matplotlib正確版=PNG/Pillow簡易版=JPEGを選択） | JPL de421+Skyfield / CelesTrak+SGP4 | 不要 |
 | `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示）。`view="comet_orbit"` で彗星の軌道面ビュー（太陽＝焦点の楕円／e≥1 は双曲線の枝） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
@@ -173,8 +173,11 @@ uv run python scripts/check-tools.py                  # 全45ツール実呼び�
 2. **レート制限**: `DEMO_KEY` は 30リクエスト/時/IP の共有枠（`apod`・`neo_today`・`space_weather` で共有）。サーバー側で使用数を数えており、枠を使い切ると HTTP を出さずに回復目安を返し、429 を受けた場合は `Retry-After` を尊重します（`structuredContent.budget` に上限・使用数・残りを添付）。
 3. **曖昧入力**: 衛星名などで候補が複数ある場合は推測せず、NORAD ID 付きの候補を提示して停止します。
 4. **過去ミッション**: かぐや（SELENE）・あかつき等は「現在位置を表示できない」と正直に返します。
-5. **描画エンジン**: `simple`（Pillow合成・学生向け視認性重視・JPEG・既定）と `accurate`（matplotlib・正確座標・PNG）。遠方探査機・彗星は線形縮尺では枠外のため自動的に `simple` を使用します。
-6. **認証付きダウンロード非対応**: ESA Copernicus は検索とプレビューURLのみ（OAuth2 ダウンロードは行いません）。
+5. **描画エンジン**: `simple`（Pillow合成・学生向け視認性重視・JPEG・既定）と `accurate`（matplotlib・正確座標・PNG）。天体・記号の色は `img_common.BODY_COLORS`（惑星・月・太陽の実物色）/ `SYMBOL_COLORS`（環・縞・極冠・小惑星・彗星）が単一の出典で、`sky_map_with_satellites` と `solar_system_now` の両エンジンが同じ値を参照し、`accurate` の凡例は実際に描いたマーカーだけを色コード付きで出します。遠方探査機・彗星は線形縮尺では枠外のため自動的に `simple` を使用します。
+6. **名前解決のフォールバック**: 天体名・衛星名は `name_common.py` の共通段階で解決します（内蔵テーブル → 表記ゆれ → 和名→英語名 → Sesame/CDS で名前→座標 → 候補提示して停止）。`cadc_observations` は内蔵テーブルに無い名前（M104/Sombrero/HL Tau/和名）を SIMBAD で解決、`satellite_status` と `sat_tle` は和名（ひまわり/ひので/だいち/宇宙ステーション等、`JA_ALIASES` 103キー）を英語名・NORAD ID に展開します（現役機は `celestrak.WELL_KNOWN` に実測 NORAD ID 登録済み＝オフライン解決、番号なしファミリー名は候補提示）。解決できないときは推測せず候補を提示します。
+7. **応答にキーを載せない**: `apod`/`neo_today`/`space_weather` のエラー文字列は requests 由来で `api_key=<値>` を含むため、外向けテキストは `nasa_budget.redact()` を通して伏せ字化します（`budget.key` は `DEMO_KEY`/`custom` のみ）。
+8. **メディアのリンク**: 生成画像は `%LOCALAPPDATA%\Temp\space_finder_mcp\out` に保存し、`content` の**先頭行**に `🖼️ [生成した画像を開く（…）](file:///…)` を出します（`structuredContent.image_path` に実パス）。検索系は各項目の直後に `🖼️/🎧/🎬 [◯◯を開く: タイトル](URL)` を出します。CLI系・Android系ハーネス（codex / opencode）はインライン画像を描画しないため、回答時はこのリンクを必ず提示してください（アイコン: 🖼️画像 / 🎧音声 / 🎬動画）。
+7. **認証付きダウンロード非対応**: ESA Copernicus は検索とプレビューURLのみ（OAuth2 ダウンロードは行いません）。
 
 ## 参考リンク
 
@@ -187,4 +190,4 @@ uv run python scripts/check-tools.py                  # 全45ツール実呼び�
 
 ## 更新履歴
 
-- v0.26.0 — 描画系6ツールに `structuredContent.figure`（`figure/1`: 視点・主天体の置き方・縮尺・円錐曲線・注記・自己検証）を導入し、注記を数値から生成（LLM は要約せず引用）。彗星の軌道面ビュー `solar_system_now(view="comet_orbit")` を追加（e>1 は双曲線として描き分け）。`check-tools.py --figures` を新設（注記なし・`verify.ok` 偽で exit 1、既定引数で通らない経路も実行）。`verify` が画素から描画を測り直す仕組み（彗星=近点/遠点、日食=PA軸の明部長から食分、ローバー=マーカー画素から緯度経度、衛星=az/alt から画素位置）で実バグ3件を修正：日食図のパネルはみ出し・「最大食分」ラベルの固定・衛星ラベル枠による他衛星マーカーの隠れ。日食は現地日付をまたぐ食の切り詰めと、地平線下の見えない食の誤報告も修正（可視区間のみ描画、高度を注記）。
+- v0.27.0 — **メディアより前にアイコン付きリンク**（`🖼️/🎧/🎬`。生成画像は `%LOCALAPPDATA%\Temp\space_finder_mcp\out` に保存し `content` 先頭と `structuredContent.image_path` に file:// リンク。CLI/Android 系ハーネス向け）。**名前解決の共通基盤 `name_common.py`**（内蔵テーブル→表記ゆれ→和名→英語名103キー→Sesame/CDS で名前→座標→候補提示。現役機の和名→NORAD ID は実測登録で21/61がオフライン解決）。`alma_search` に `product_type`/`public_only`/`with_products`（datalink の実データ製品）とデータ種別・分解能・pwv・QA2・PI・論文を追加。`img_common.BODY_COLORS`/`SYMBOL_COLORS` で両エンジンの配色を統一（matplotlib 版が全惑星を同色で描いていた不具合、土星の環・木星の縞・火星の極冠・色コード凡例を simple 版と一致）。軌道予測の破線を1分刻みに。**CelesTrak の非リストJSONで例外が漏れる不具合**と、**エラー文字列に api_key が露出する不具合**を修正（`nasa_budget.redact()`）。

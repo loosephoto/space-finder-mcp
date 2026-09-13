@@ -26,7 +26,8 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import TTL_DAILY, ttl_cache
 from .img_common import (as_image, figure_notes, figure_payload,
-                         figure_text_block, load_font, scale_spec, view_spec)
+                         figure_text_block, load_font, media_link_line,
+                         save_output, scale_spec, view_spec)
 from .input_utils import as_float
 
 _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
@@ -247,6 +248,12 @@ def solar_eclipse_series(date: Optional[str] = None, place: Optional[str] = None
         lat: 観測地の緯度。lon と併用時は place より優先。
         lon: 観測地の経度。
         max_magnitude: True で最大食のみの単一パネルを返す（既定 False=時系列）。
+
+    インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
+    content の先頭へ「🖼️ [生成した画像を開く（…）](file:///…) ｜ 保存先: `…`」という
+    アイコン付きリンクを必ず出します（画像は %LOCALAPPDATA%\\Temp\\space_finder_mcp\\out に
+    保存し、同じパスを structuredContent.image_path にも入れます）。
+    回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
     """
     ll = _resolve_place(place, lat, lon)
     if ll is None and (lat is not None or lon is not None):
@@ -557,7 +564,11 @@ def _finalize(ev, place_ja, date_disp, ll):
             ev.get("sun_alt_deg") or 0.0),
         verify=_eclipse_verify(png, ev),
     )
+    # インライン画像を描けないハーネス向け: 保存してリンクを先頭に出す
+    out_path = save_output(png, "solar_eclipse_series", "png")
     lines = [
+        media_link_line("生成した画像を開く（{} の時系列パネル）".format(ev["kind"]),
+                        path=out_path, kind="figure"),
         "🌞 **{}（{} ・ {}）**".format(ev["kind"], place_ja, date_disp),
         "最大食分: {:.3f}（{}%）".format(ev["max_mag"], int(ev["max_mag"] * 100)),
         "",
@@ -568,7 +579,7 @@ def _finalize(ev, place_ja, date_disp, ll):
                           structuredContent={"kind": ev["kind"], "max_magnitude": ev["max_mag"],
                                              "date": date_disp, "place": place_ja,
                                              "lat": ll[0], "lon": ll[1],
-                                             "figure": fig,
+                                             "figure": fig, "image_path": out_path,
                                              "source": "JPL DE421+Skyfield"})
 
 

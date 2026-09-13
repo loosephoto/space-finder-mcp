@@ -180,6 +180,17 @@ def wait_text(seconds: float, used: int, key: Optional[str] = None) -> str:
             f"{human_wait(seconds)}後に回復します。")
 
 
+def redact(text) -> str:
+    """エラー文言などから API キーの値を伏せる（キーを応答に載せない）。
+
+    requests の例外文字列は URL 全体を含むため `api_key=<実際のキー>` がそのまま
+    structuredContent に載ってしまう（実測: apod の 429 応答）。DEMO_KEY 以外の
+    キーを設定している利用者で秘密が漏れるので、外へ出す文字列はここを通す。
+    """
+    import re as _re
+    return _re.sub(r"(api_key=)[^&\s\"']+", r"\1***", str(text))
+
+
 def status(key: Optional[str] = None) -> dict:
     """LLM向けの予算状況（structuredContent に添える用）。"""
     k = key or current_key()
