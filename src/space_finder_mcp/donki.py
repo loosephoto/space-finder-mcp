@@ -61,6 +61,25 @@ def _get(endpoint: str, params: dict, timeout: int = 30) -> list:
     return r.json()
 
 
+@ttl_cache(TTL_SHORT, maxsize=64)
+def _get_cached(endpoint: str, start_date: Optional[str] = None,
+                end_date: Optional[str] = None) -> list:
+    """DONKI 1エンドポイントを**カテゴリ単位**でキャッシュして取得する。
+
+    `space_weather(kind="all")` は FLR/CME/GST/SEP の4エンドポイントを叩くため、
+    `DEMO_KEY`（30 req/h/IP の共有枠）を1回の呼び出しで4消費する。カテゴリ単位で
+    キャッシュすると、続けて kind を変えたとき（all → flare 等）や同じ kind の
+    再呼び出しで同じカテゴリを取り直さず、枠の消費と 429 のリスクを減らせる。
+    例外（429 等）はそのまま伝播しキャッシュされない（失敗を固定化しない）。
+    """
+    p = {}
+    if start_date:
+        p["startDate"] = start_date
+    if end_date:
+        p["endDate"] = end_date
+    return _get(endpoint, p)
+
+
 @ttl_cache(TTL_SHORT, maxsize=32, skip_if=is_error_result)
 def space_weather(kind: str = "all", start_date: Optional[str] = None,
                   end_date: Optional[str] = None, limit: int = 10) -> CallToolResult:
@@ -95,7 +114,8 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
 
     def _handle(cat: str, label: str, parse):
         try:
-            data = _get(cat, params)
+            # カテゴリ単位のキャッシュ経由（枠の消費を最小化する）
+            data = _get_cached(cat, params.get("startDate"), params.get("endDate"))
             rows, jrows = parse(data, limit)
             result_map[label] = rows
             result_json[label] = jrows
@@ -185,11 +205,15 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
         budget = nasa_budget.status()
         advice = ""
         if not ok_budget:
-            advice = (" NASA API の呼び出し枠を使い切っています（直近1時間 "
-                      f"{used}/{budget['limit_per_hour']} 回）。"
-                      f"{nasa_budget.human_wait(wait)}後に回復します。")
+            # 「使い切りました（直近1時間 n/30 回）」と出すと数字と矛盾して見える
+            # （実測: 自プロセスは 1/30 でも NASA 側は 429）。DEMO_KEY は同一IPの
+            # 他クライアントと共有枠なので、原因別の文言（429 後の待機 / 枠切れ）に任せる。
+            advice = " " + (nasa_budget.blocked_message()
+                            or f"{nasa_budget.human_wait(wait)}後に回復します。")
+        # advice 側に「NASA_API_KEY で緩和」が入っているので、二重に書かない
+        tail = "" if advice else " NASA_API_KEY を設定すると制限が緩和されます。"
         return CallToolResult(
-            content=[TextContent(type="text", text="宇宙天気データを取得できませんでした（NASA API のレート制限や一時的障害の可能性）。" + advice + "NASA_API_KEY を設定すると制限が緩和されます。")],
+            content=[TextContent(type="text", text="宇宙天気データを取得できませんでした（NASA API のレート制限や一時的障害の可能性）。" + advice + tail)],
             structuredContent={"error": "fetch failed", "kind": kind, "detail": errors,
                                "budget": budget},
         )

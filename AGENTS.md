@@ -52,14 +52,14 @@ uv run python scripts/check-tools.py                  # 全45ツール実呼び�
 2. `content` = 人間向け表示（画像は `ImageContent`）、`structuredContent` = LLM向け純粋JSON。両方返すのが基本。
 3. 数値変換は防御的に。ツール入口の数値引数は必ず `input_utils.as_int` / `as_float` を通す（`float("?")` 等で例外を外へ漏らさない）。`d[key]` ではなく `.get()`。
 4. キャッシュは `cache.py` の `ttl_cache` / `disk_get` を使う。**エラー応答はキャッシュしない**。キャッシュ値を書き換えるなら `deepcopy`。
-5. 共通処理は `img_common.py` / `stac_common.py` / `name_common.py` / `cache.py` に集約し、重複実装しない。
+5. 共通処理は `img_common.py` / `surface_map.py`（天体面地図のタイル合成・等角投影・地点マーカー・画素検証） / `stac_common.py` / `name_common.py` / `cache.py` に集約し、重複実装しない。
 6. 現在位置系（`iss_now`・`tiangong_now`・位置計算）は**キャッシュしない**（リアルタイム性優先）。ただし高コストな外部呼び出し（Horizons の状態ベクトル）は**分単位に丸めたキー**でキャッシュしてよい（探査機は1分で数kmしか動かない）。
 7. api.nasa.gov へ投げる前に `nasa_budget.check()` を通す（枠を使い切っていたら HTTP を出さない）。429 は `nasa_budget.note_429()` で `Retry-After` を記録する。
 8. 曖昧な入力（複数候補の衛星名など）は推測せず**候補を提示して停止**する。
 9. 過去ミッション（かぐや等）は正確に「表示できない」と返す（誤った天体を出さない）。
 10. 依存追加は最小限。Pillow / matplotlib は遅延 import。ドキュメント・コメントは日本語。
 11. **ツールを追加・削除・変更したら `README.md` のツール表と `SKILL.md` を同一変更内で更新**。
-12. **描画系ツール（自前で図を描くツール）は `structuredContent.figure`（`schema: "figure/1"`）を返す**。視点(`view`)・主天体の置き方(`primary`：楕円は**焦点**であって中心ではない)・縮尺(`scale`)・円錐曲線(`conic`)・注記(`notes`)・自己検証(`verify`)を含め、**注記は数値から生成**する（`img_common` の `Conic` / `conic_from_elements` / `figure_notes` / `figure_payload` / `figure_text_block` / `verify_curve` を使う。手書きすると図と文が食い違う）。`content` にも同じ注記を `figure_text_block()` で出し、docstring に「`figure.notes` は要約せず引用する」と明記する。検査は `scripts/check-tools.py --figures`（注記が空・`verify.ok` が偽なら exit 1）。
+12. **描画系ツール（自前で図を描くツール）は `structuredContent.figure`（`schema: "figure/1"`）を返す**。視点(`view`)・主天体の置き方(`primary`：楕円は**焦点**であって中心ではない)・縮尺(`scale`)・円錐曲線(`conic`)・注記(`notes`)・自己検証(`verify`)を含め、**注記は数値から生成**する（`img_common` の `Conic` / `conic_from_elements` / `figure_notes` / `figure_payload` / `figure_text_block` / `verify_curve` を使う。手書きすると図と文が食い違う）。`content` にも同じ注記を `figure_text_block()` で出し、docstring に「`figure.notes` は要約せず引用する」と明記する。近点／遠点が**画面上で分解できない**場合（超長距離の楕円で近日点が誇張した主天体の円盤の内側に入る等）は、`verify_curve` の `occluders=[(中心x, 中心y, 半径px)]` に円盤を渡すと等値検査をやめて上界検査へ自動で切り替える（`periapsis_resolvable` / `periapsis_check` に残る）。このときは注記にも「この縮尺では図から確認できない」旨を**数値から生成**して明示すること（ゲートが要求）。加えて、曲線に重なるラベルは**描かず**（`skipped_labels` を注記に出す。重ねて描くと図と文が食い違う）、画面外へはみ出すラベル矩形は `verify_curve` 側でクランプされることを前提にしない（描かないこと）。検査は `scripts/check-tools.py --figures`（注記が空・`verify.ok` が偽なら exit 1。超長距離楕円の経路も叩く）。
 
 ## 主要ファイル
 
@@ -68,6 +68,7 @@ src/space_finder_mcp/
 ├── server.py        # FastMCP サーバー定義・45ツール登録
 ├── cache.py         # キャッシュ基盤（TTLメモリ / ディスク資産）
 ├── img_common.py    # 画像共通（フォント探索 / JPEG化 / アンチメリジアン分割）
+├── surface_map.py   # 天体面地図の共通描画（タイル合成 / 等角投影 / 地点マーカー / 画素検証）
 ├── stac_common.py   # STAC系の入力検証（bbox / 雲量）
 ├── name_common.py   # 天体名・衛星名の解決（表記ゆれ / 和名→英語 / Sesame で名前→座標）
 ├── input_utils.py   # 引数の防御的数値変換（as_int / as_float）

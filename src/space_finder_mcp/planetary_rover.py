@@ -23,9 +23,11 @@ import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
 # planetary_map の汎用コアと画像共通ヘルパーを再利用
-from .planetary_map import BODIES, _fetch_tiles
+from .planetary_map import BODIES
+from .surface_map import (draw_marker, marker_scan_radius, surface_view,
+                         tile_failure_note, verify_marker)
 from .img_common import (figure_notes, figure_payload, figure_text_block,
-                         load_font, media_link_line, pixel_near, primary_spec,
+                         load_font, media_link_line, primary_spec,
                          save_output, scale_spec, view_spec)
 from .input_utils import as_float, as_int
 
@@ -81,21 +83,6 @@ def _mmgis_route(mid: str) -> Optional[list]:
 
 
 
-def _rover_verify(img, cx, cy, clat, clon, left, top, scale, W, H):
-    """描いた現在地マーカーから緯度経度を逆算し、投影とマーカー描画を検証する。
-
-    等角図法(gx=(lon+180)/360*W, gy=(90-lat)/180*H)の逆変換なので、
-    「地図のどこに描いたか」と「報告した座標」が食い違えばここで落ちる。
-    """
-    inv_lon = ((cx / scale) + left) / max(W, 1) * 360.0 - 180.0
-    inv_lat = 90.0 - (((cy / scale) + top) / max(H, 1) * 180.0)
-    err = max(abs(inv_lon - clon), abs(inv_lat - clat))
-    painted = pixel_near(img, (cx, cy), (255, 40, 30), tol=120, r=5)
-    return {"ok": bool(err <= 0.01 and painted > 0),
-            "latlon_from_px": [round(inv_lon, 4), round(inv_lat, 4)],
-            "latlon_from_px_error_deg": round(err, 4),
-            "marker_pixels": painted}
-
 def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance",
                                  zoom: Optional[int] = None, span_deg: float = 0.5,
                                  out_px: int = 1000) -> CallToolResult:
@@ -119,7 +106,7 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
     保存し、同じパスを structuredContent.image_path にも入れます）。
     回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
     """
-    from PIL import Image, ImageDraw
+    from PIL import ImageDraw          # 画像の生成は surface_map 側で行う
 
     b = str(body).strip().lower()
     if b not in BODIES:
@@ -167,38 +154,17 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
         )
     clat, clon = wp["lat"], wp["lon"]
 
-    # ---- タイル合成（planetary_map 再利用）----
+    # ---- タイル合成・切り出し・投影は共通ルーチン（surface_map）----
     try:
-        mosaic, center_px, tl, cols, rows = _fetch_tiles(body_cfg, clon, clat, span_deg, zoom)
+        sv = surface_view(body_cfg, clon, clat, span_deg, zoom, out_px,
+                          regional_dim=None)          # ローバー図は減光しない（従来の見た目を維持）
     except Exception as e:
         return CallToolResult(
             content=[TextContent(type="text", text=f"{body_cfg['ja']}地図タイル取得に失敗: {e}")],
             structuredContent={"error": str(e)},
         )
-    W = cols * 256; H = rows * 256
-    gx_rover = tl[0] + center_px[0]; gy_rover = tl[1] + center_px[1]
-    span_global_px = span_deg / (360.0 / W)
-    half = span_global_px / 2.0
-    left = int(gx_rover - half); top = int(gy_rover - half)
-    side = int(2 * half)
-    right = left + side; bottom = top + side
-    if left < 0:
-        left, right = 0, side
-    if top < 0:
-        top, bottom = 0, side
-    if right > W:
-        right, left = W, W - side
-    if bottom > H:
-        bottom, top = H, H - side
-    m_left = max(0, left - tl[0]); m_top = max(0, top - tl[1])
-    m_right = min(mosaic.size[0], m_left + side); m_bottom = min(mosaic.size[1], m_top + side)
-    crop = mosaic.crop((m_left, m_top, m_right, m_bottom))
-    img = crop.resize((out_px, out_px), Image.LANCZOS)
-    scale = out_px / float(side)
-
-    def g2px(lon, lat):
-        gx = (lon + 180) / 360.0 * W; gy = (90 - lat) / 180.0 * H
-        return (gx - left) * scale, (gy - top) * scale
+    img = sv["img"]
+    g2px = sv["g2px"]
 
     d = ImageDraw.Draw(img)
     # 走行経路
@@ -212,8 +178,7 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
                       outline=(255, 255, 255), width=3)
     # 現在地
     cx, cy = g2px(clon, clat)
-    d.ellipse([cx - 13, cy - 13, cx + 13, cy + 13], fill=(255, 40, 30),
-              outline=(255, 255, 255), width=4)
+    draw_marker(d, (cx, cy), 13, fill=(255, 40, 30), outline_w=4)
     # 旧 _font は常にメイリオ Bold 優先だったため bold=True で等価
     f_big = load_font(30, bold=True); f_mid = load_font(22, bold=True); f_sm = load_font(20, bold=True)
     # 現在地ラベル
@@ -266,11 +231,13 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
             "青●は着陸地点、赤●は現在地。走行距離は着陸地点からの累積 km",
             "地図は NASA Trek の等角図法のため、高緯度ほど東西方向が圧縮されて見える",
             "座標・sol・RMC は NASA MMGIS (mars.nasa.gov) の公開 waypoint データ",
+            tile_failure_note(sv),
         ]),
         caption=f"{rover_ja}（{rv}）の{body_cfg['ja']}現在地。"
                 f"座標 {clat:.4f}°{'N' if clat >= 0 else 'S'} / {clon:.4f}°E、sol {wp.get('sol')}、"
                 f"着陸地点から {wp.get('dist_km')} km。",
-        verify=_rover_verify(img, cx, cy, clat, clon, left, top, scale, W, H),
+        verify=verify_marker(img, (cx, cy), clon, clat, sv["inv"],
+                             r=marker_scan_radius(13)),
     )
     lines = [
         media_link_line(f"生成した画像を開く（{rover_ja} の{body_cfg['ja']}現在地マップ）",

@@ -27,6 +27,7 @@ import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import TTL_DAILY, ttl_cache
+from .name_common import split_names as _split_object_names
 from .img_common import (body_rgb, conic_from_elements, figure_notes,
                          figure_payload, figure_text_block, load_font,
                          media_link_line, primary_spec, rgb_hex, save_output,
@@ -729,8 +730,9 @@ def _render_comet_orbit(cid, el, pos_xyz, when_str):
     太陽は円錐曲線の焦点（楕円の中心ではない）。e>=1 の C/彗星は双曲線の枝として
     近日点から有限距離(r_max)までを描く。返すのは (PIL画像, figure ブロック)。
     """
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageFilter
     W, H = 1400, 900
+    sun_r_px = 12.0                     # 誇張した太陽円盤の半径(px)。描画・注記・検証で共有
     a, e, q = el.get("a"), float(el["e"]), float(el["q"])
     incl = el.get("i_deg")
     if e < 1.0:
@@ -761,49 +763,68 @@ def _render_comet_orbit(cid, el, pos_xyz, when_str):
     seq = list(pts) + ([pts[0]] if (e < 1.0 and pts) else [])
     pts_px = [to_px(px_, py_) for (px_, py_) in seq]
 
+    mask_ink = None           # 曲線を膨張したマスク（label() が配置可否の判定に使う）
+    skipped_labels: list = []  # どこにも置けなかったラベル（注記に出して情報を落とさない）
+
     def label(cands, text, font, fill):
-        """曲線画素と重ならない候補を選んで描く（候補: (x, y, anchor)）。"""
-        picked = None
+        """曲線マスクと重ならない候補にだけ描く（候補: (x, y, anchor)）。
+
+        どの候補に置いても曲線に載るなら**描かない**。曲線へ重ねて描くと図と注記が
+        食い違い（自己検証の label_overlap_px も 0 にならない）、fallback で画面外へ
+        はみ出すと描画自体が落ちる。置けなかった文字列は skipped_labels に残して注記に出す。
+        """
         for (x, y, anc) in cands:
             bb = tuple(int(v) for v in dr.textbbox((x, y), text, font=font, anchor=anc))
             if bb[0] < 6 or bb[1] < 4 or bb[2] > W - 6 or bb[3] > H - 92:
                 continue
-            if not any(bb[0] - 8 <= qx <= bb[2] + 8 and bb[1] - 8 <= qy <= bb[3] + 8
-                       for (qx, qy) in pts_px):
-                picked = (x, y, anc, bb)
-                break
-        if picked is None:
-            x, y, anc = cands[0]
-            picked = (x, y, anc, tuple(int(v) for v in
-                                       dr.textbbox((x, y), text, font=font, anchor=anc)))
-        x, y, anc, bb = picked
-        boxes.append(bb)
-        dr.text((x, y), text, font=font, fill=fill, anchor=anc)
+            if mask_ink is not None and mask_ink.crop(
+                    (bb[0] - 4, bb[1] - 4, bb[2] + 4, bb[3] + 4)).getbbox() is not None:
+                continue
+            if any(bb[0] - 8 <= qx <= bb[2] + 8 and bb[1] - 8 <= qy <= bb[3] + 8
+                   for (qx, qy) in pts_px):
+                continue
+            boxes.append(bb)
+            dr.text((x, y), text, font=font, fill=fill, anchor=anc)
+            return True
+        skipped_labels.append(text)
+        return False
 
     dr.line(pts_px, fill=_COMET_ORBIT_COLOR, width=3)
+    # ラベル配置用マスク: 描いた曲線を膨張させ、文字が線に載らない候補だけを採る
+    # （720点の頂点サンプルだけでは、頂点間隔の粗い針状軌道で隙間をすり抜ける）
+    _mask = Image.new("1", (W, H), 0)
+    ImageDraw.Draw(_mask).line(pts_px, fill=1, width=5)
+    mask_ink = _mask.filter(ImageFilter.MaxFilter(7))
+
     hx, hy = to_px(q, 0.0)
     dr.ellipse([hx - 5, hy - 5, hx + 5, hy + 5], fill=(255, 90, 90))
     label([(hx + 12, hy + 12, "la"), (hx + 12, hy - 34, "la"), (hx - 170, hy + 12, "la"),
-           (hx - 170, hy - 34, "la")], "近日点 {} AU".format(_au_fmt(q)), f_s, (255, 150, 150))
+           (hx - 170, hy - 34, "la"), (hx + 16, hy + 44, "la"), (hx - 190, hy + 44, "la")],
+          "近日点", f_s, (255, 150, 150))
     ax_ = ay_ = None
     if apo:
         ax_, ay_ = to_px(-apo, 0.0)
         dr.ellipse([ax_ - 5, ay_ - 5, ax_ + 5, ay_ + 5], fill=(150, 190, 255))
         label([(ax_ - 12, ay_ + 12, "ra"), (ax_ - 12, ay_ - 34, "ra"),
-               (ax_ + 14, ay_ + 12, "la"), (ax_ + 14, ay_ - 34, "la")],
-              "遠日点 {} AU".format(_au_fmt(apo)), f_s, (150, 190, 255))
-    sr = 12
+               (ax_ + 14, ay_ + 12, "la"), (ax_ + 14, ay_ - 34, "la"),
+               (ax_ - 12, ay_ + 44, "ra"), (ax_ + 14, ay_ + 44, "la")],
+              "遠日点", f_s, (150, 190, 255))
+    sr = sun_r_px
     dr.ellipse([X0 - sr, Y0 - sr, X0 + sr, Y0 + sr], fill=body_rgb("太陽"),
                outline=(255, 245, 200), width=2)
     label([(X0 + sr + 8, Y0 - sr - 26, "la"), (X0 + sr + 8, Y0 + sr + 6, "la"),
-           (X0 - sr - 96, Y0 - sr - 26, "la"), (X0 - sr - 96, Y0 + sr + 6, "la")],
+           (X0 - sr - 96, Y0 - sr - 26, "la"), (X0 - sr - 96, Y0 + sr + 6, "la"),
+           (X0 + sr + 8, Y0 - 10, "la"), (X0 - sr - 96, Y0 - 10, "la"),
+           (X0 - 46, Y0 + sr + 34, "la"), (X0 - 46, Y0 - sr - 54, "la")],
           "太陽＝焦点", f_m, (255, 235, 170))
     cx_, cy_ = to_px(xp, yp)
     dr.ellipse([cx_ - 7, cy_ - 7, cx_ + 7, cy_ + 7], fill=_COMET_COLOR,
                outline=(255, 255, 255), width=2)
     label([(cx_ + 14, cy_ - 40, "la"), (cx_ + 14, cy_ + 16, "la"),
-           (cx_ - 250, cy_ - 40, "la"), (cx_ - 250, cy_ + 16, "la")],
-          "現在位置（日心 {:.3f} AU）".format(r_now), f_s, (170, 240, 255))
+           (cx_ - 250, cy_ - 40, "la"), (cx_ - 250, cy_ + 16, "la"),
+           (cx_ + 14, cy_ + 66, "la"), (cx_ - 250, cy_ + 66, "la"),
+           (cx_ + 14, cy_ - 90, "la"), (cx_ - 250, cy_ - 90, "la")],
+          "現在位置", f_s, (170, 240, 255))
     nu_now = math.atan2(yp, xp)
     nu2 = nu_now + math.radians(0.8)
     p_ = (a * (1.0 - e * e)) if (a is not None and abs(e - 1.0) > 1e-9) else (2.0 * q)
@@ -820,11 +841,15 @@ def _render_comet_orbit(cid, el, pos_xyz, when_str):
             continue
         tx, ty = to_px(-au, 0.0)
         dr.line([(tx, ty - 8), (tx, ty + 8)], fill=(150, 160, 185), width=2)
-        label([(tx - 20, ty + 12, "la"), (tx - 20, ty - 28, "la")], _au_fmt(au), f_b,
+        label([(tx - 20, ty + 12, "la"), (tx - 20, ty - 28, "la"),
+               (tx + 8, ty + 12, "la"), (tx + 8, ty - 28, "la"),
+               (tx - 20, ty + 42, "la"), (tx - 20, ty - 58, "la"),
+               (tx + 8, ty + 42, "la"), (tx + 8, ty - 58, "la")], _au_fmt(au), f_b,
               (160, 172, 195))
         if abs(au - 1.0) < 1e-9:
             label([(tx - 66, ty - 36, "la"), (tx - 66, ty + 14, "la"),
-                   (tx - 66, ty - 62, "la")], "地球軌道 1 AU", f_b, (140, 175, 240))
+                   (tx - 66, ty - 62, "la"), (tx + 26, ty - 36, "la"),
+                   (tx + 26, ty + 14, "la")], "地球軌道 1 AU", f_b, (140, 175, 240))
     dr.line([(pl + 10, pb + 62), (pl + 10 + 1.0 * ppau, pb + 62)], fill=(210, 214, 230), width=3)
     dr.text((pl + 14, pb + 36), "1 AU", font=f_b, fill=(210, 214, 230))
 
@@ -843,14 +868,27 @@ def _render_comet_orbit(cid, el, pos_xyz, when_str):
     dr.text((34, H - 38), "出典: {}".format(el.get("source", "")), font=f_b, fill=(190, 200, 220))
 
     conic = conic_from_elements(a=a, e=e, q=q, incl_deg=incl)
+    extra = [
+        "●は{}時点の彗星位置（日心距離 {:.3f} AU・この軌道面内の実際の位置）".format(when_str, r_now),
+        "太陽・マーカーの大きさは誇張している（軌道の縮尺と同一ではない）",
+        "惑星や地球の位置は描いていない。目盛の 1 AU は地球軌道の半径（距離の目安）",
+        "要素は指定時刻付近の接触軌道要素。惑星の摂動で実際の道は変わる",
+    ]
+    # 超長距離の楕円では近日点が誇張した太陽円盤の内側に入り、画素からは近点距離を
+    # 確認できない（曲線の右端画素は円盤の縁になる）。「確認できない」ことを注記にも
+    # 数値から生成して残す（黙って合格にしない）。
+    if q * ppau < sun_r_px + 2.0:
+        extra.append(
+            "近日点 {} AU は画面上 {:.2f} px で、誇張した太陽の描画円盤（半径 {} px ＝ 約 {} AU）の"
+            "内側にある。この縮尺では図から近点距離を確認できないため、自己検証は遠日点側と"
+            "「近点側の上界」で行っている".format(
+                _au_fmt(q), q * ppau, sun_r_px, _au_fmt(sun_r_px / max(ppau, 1e-12))))
+    if skipped_labels:
+        extra.append("図が混み合って図中に配置できなかったラベル（{}）。値は上の注記と見出しにある".format(
+            "／".join(skipped_labels)))
     notes = figure_notes(
         conic, primary="太陽", unit="AU", periapsis_label="近日点", apoapsis_label="遠日点",
-        extra=[
-            "●は{}時点の彗星位置（日心距離 {:.3f} AU・この軌道面内の実際の位置）".format(when_str, r_now),
-            "太陽・マーカーの大きさは誇張している（軌道の縮尺と同一ではない）",
-            "惑星や地球の位置は描いていない。目盛の 1 AU は地球軌道の半径（距離の目安）",
-            "要素は指定時刻付近の接触軌道要素。惑星の摂動で実際の道は変わる",
-        ])
+        extra=extra)
     caption = ("{} の軌道。太陽を焦点とする{}（e={:.6f}、近日点 {} AU{}）。{}時点の日心距離は {:.3f} AU。".format(
         el.get("fullname") or cid, "楕円" if e < 1.0 else "双曲線の枝", e, _au_fmt(q),
         "・遠日点 {} AU".format(_au_fmt(apo)) if apo else "・遠日点なし", when_str, r_now))
@@ -871,7 +909,8 @@ def _render_comet_orbit(cid, el, pos_xyz, when_str):
         conic=conic, markers=markers, notes=notes, caption=caption,
         verify=verify_curve(img, color=_COMET_ORBIT_COLOR, focus_xy=(X0, Y0),
                             px_per_unit=ppau, periapsis=q, apoapsis=apo,
-                            tol_ratio=0.06, label_boxes=boxes),
+                            tol_ratio=0.06, label_boxes=boxes,
+                            occluders=[(X0, Y0, sun_r_px)]),
     )
     return img, fig
 
@@ -892,6 +931,8 @@ def _comet_orbit_result(name, when_iso=None):
         cid, el = _comet_elements(name)
     except (requests.RequestException, ValueError, KeyError) as e:
         msg = "彗星の軌道要素を取得できませんでした（{}）: {}".format(name, str(e)[:150])
+        if not str(name).isascii():
+            msg += "\n" + _comet_unknown_hint(name)
         return CallToolResult(content=[TextContent(type="text", text=msg)],
                               structuredContent={"error": msg, "query": str(name),
                                                  "source": "JPL SBDB / Horizons"})
@@ -944,6 +985,165 @@ def _comet_orbit_result(name, when_iso=None):
     )
 
 
+# 1枚に並べるパネルの上限（文字が読めるサイズを保つため。超過分は描画せず、その旨を明示する）
+_COMET_PANEL_MAX = 4
+
+
+def _comet_multi_result(names, when_iso=None):
+    """複数の彗星を「1彗星=1パネル」で縦に並べた1枚の画像を返す。
+
+    彗星ごとに**軌道面も縮尺も違う**ため、1つの座標系に重ねると嘘になる
+    （軌道面が違う＝真横から見た形は同時に成立しない／a が2桁違うと小さい軌道が点になる）。
+    そこで各パネルは既存の単体描画（その彗星自身の軌道面・独自の縮尺）をフル解像度のまま
+    並べ、figure には「パネルごとに縮尺が違う」ことを数値から生成した注記として入れる。
+    1天体の取得・描画に失敗しても他パネルは描き、失敗理由を panels[].error に残す。
+    """
+    import base64
+    loader, _eph = _load()
+    ts = loader.timescale()
+    t = _resolve_when(when_iso, ts)
+    if t is None:
+        msg = "when の形式が不正です (ISO8601: YYYY-MM-DDTHH:MM[:SS])"
+        return CallToolResult(content=[TextContent(type="text", text=msg)],
+                              structuredContent={"error": msg})
+    tstr = t.utc_strftime("%Y-%m-%d %H:%M UTC")
+    jd = t.tt
+    requested = [n for n in names if n]
+    picked = requested[:_COMET_PANEL_MAX]
+    imgs, panels, failed = [], [], []
+    for nm in picked:
+        try:
+            cid, el = _comet_elements(nm)
+            if el["typ"] == "horizons":
+                x, y, z, rr, lon, lat = _horizons_position(cid, jd)
+            else:
+                x, y, z, rr, lon, lat = _kepler_position(el.get("_raw") or el, jd)
+            img, fig = _render_comet_orbit(cid, el, (x, y, z), tstr)
+        except (requests.RequestException, ValueError, KeyError) as e:
+            failed.append({"comet": nm, "error": str(e)[:150]}); continue
+        except Exception as e:                       # 描画系の想定外もこの彗星だけ落とす
+            failed.append({"comet": nm, "error": "描画に失敗: " + str(e)[:120]}); continue
+        imgs.append(img)
+        panels.append({
+            "markers": [dict(m, panel=len(imgs) + 1, px_in_panel=m.get("px"))
+                        for m in (fig.get("markers") or [])],
+            "name": el.get("fullname") or cid, "id": cid, "typ": el["typ"],
+            "e": el["e"], "a_au": el.get("a"), "q_au": el["q"], "incl_deg": el.get("i_deg"),
+            "au": rr, "px_per_AU": fig["scale"].get("px_per_AU"),
+            "conic": fig["conic"], "verify": fig["verify"],
+            "notes": fig["notes"], "source": el.get("source", ""),
+        })
+    if not imgs:
+        msg = "指定された彗星の軌道要素を取得できませんでした: " + " / ".join(
+            "{}（{}）".format(f["comet"], f["error"]) for f in failed)
+        for f in failed:
+            if not str(f["comet"]).isascii():
+                msg += "\n" + _comet_unknown_hint(f["comet"])
+        return CallToolResult(content=[TextContent(type="text", text=msg)],
+                              structuredContent={"error": msg, "errors": failed,
+                                                 "query": requested})
+    # 縦に合成（各パネルはフル解像度のまま。縮小するとラベルが読めなくなる）
+    from PIL import Image, ImageDraw
+    gap = 10
+    w, h = imgs[0].size
+    canvas = Image.new("RGB", (w, h * len(imgs) + gap * (len(imgs) - 1)), (10, 14, 26))
+    for i, im in enumerate(imgs):
+        canvas.paste(im, (0, i * (h + gap)))
+    png = None
+    try:
+        buf = io.BytesIO()
+        canvas.save(buf, format="PNG")
+        png = buf.getvalue()
+    except Exception as e:
+        msg = "複数彗星の図の生成に失敗しました: {}".format(str(e)[:150])
+        return CallToolResult(content=[TextContent(type="text", text=msg)],
+                              structuredContent={"error": msg})
+    out_path = save_output(png, "solar_system_comet_orbit_multi", "png")
+
+    # ---- 注記は数値から生成（パネル間で縮尺が違うことを必ず書く）----
+    aa = [p_["a_au"] for p_ in panels if p_.get("a_au")]
+    ratio_txt = ""
+    if aa and min(abs(v) for v in aa) > 0:
+        ratio = max(abs(v) for v in aa) / min(abs(v) for v in aa)
+        if ratio >= 1.5:
+            ratio_txt = "（a は {} 倍の開き）".format(_au_fmt(ratio))
+    notes = [
+        "この画像はパネルの並びで、**1パネル＝1彗星をその彗星自身の軌道面で真横から見た図**。"
+        "太陽はどのパネルでも円錐曲線の焦点（楕円の中心ではない）",
+        "**パネルごとに縮尺が違う**。同じ長さの線でも表す距離はパネル間で一致しない"
+        "（内向きの目盛と 1 AU スケールバーはそのパネルの中だけで有効）" + ratio_txt,
+        "軌道面の向き・傾斜は彗星ごとに違う。パネルをまたいで軌道の形や大きさを"
+        "そのまま重ね合わせて比べることはできない（視線方向も縮尺も揃っていない）",
+    ]
+    for i, p_ in enumerate(panels, 1):
+        apo = p_["conic"].get("apo")
+        notes.append("パネル{}: {} ／ e={:.6f} ／ 近日点 {} AU ／ {}".format(
+            i, p_["name"], p_["e"], _au_fmt(p_["q_au"]),
+            "遠日点 {} AU（閉じた楕円）".format(_au_fmt(apo)) if p_["conic"].get("closed")
+            else "遠日点なし（閉じない軌道）"))
+        if not p_["verify"].get("periapsis_resolvable", True):
+            notes.append("パネル{}（{}）: 近日点は画面上で分解できず、この縮尺では図から確認できない"
+                         "（自己検証は遠日点側と近点側の上界）".format(i, p_["name"]))
+    if failed:
+        notes.append("取得できなかった天体: " + " / ".join(
+            "{}（{}）".format(f["comet"], f["error"]) for f in failed))
+    if len(requested) > len(picked):
+        notes.append("要求 {} 件のうち {} 件を描画（1枚に並べられる上限 {} パネル）。"
+                     "残り: {}".format(len(requested), len(picked), _COMET_PANEL_MAX,
+                                     "、".join(requested[len(picked):])))
+    title = "彗星{}天体の軌道（パネルごとにその彗星自身の軌道面・縮尺）".format(len(panels))
+    caption = ("彗星{}天体（{}）の軌道を1彗星1パネルで並べた図。パネルごとに軌道面と縮尺が異なり、"
+               "太陽は各パネルの焦点。{}時点の日心距離はパネル内に記載。").format(
+        len(panels), "、".join(p_["name"] for p_ in panels), tstr)
+    scale = scale_spec("per_panel_linear", to_scale=True, unit="AU",
+                       exaggerated=["太陽の円盤", "近日点・現在位置のマーカー"])
+    scale["per_panel_px_per_AU"] = {p_["name"]: p_["px_per_AU"] for p_ in panels}
+    fig = figure_payload(
+        kind="orbit_plane_set", title=title,
+        view=view_spec("orbital_plane_per_panel", "side",
+                       "各パネルはその彗星自身の軌道面を真横から見た図（パネルごとに独立）",
+                       why="彗星ごとに軌道面が異なるため、1つの座標系に重ねると『真横から見た形』が"
+                           "同時に成立しない。a（軌道長半径）が2桁以上違うと共通縮尺では小さい軌道が"
+                           "点や線に潰れるため、縮尺もパネル独立にしている"),
+        primary=primary_spec("太陽", "focus",
+                             note="どのパネルでも太陽はそのパネルの円錐曲線の焦点"),
+        scale=scale,
+        markers=[m for p_ in panels for m in (p_.get("markers") or [])],
+        notes=notes, caption=caption,
+        verify={"ok": all(p_["verify"].get("ok") for p_ in panels),
+                "panels": [{"name": p_["name"], "ok": p_["verify"].get("ok"),
+                            "periapsis_check": p_["verify"].get("periapsis_check"),
+                            "label_overlap_px": p_["verify"].get("label_overlap_px")}
+                           for p_ in panels],
+                "label_overlap_px": sum(p_["verify"].get("label_overlap_px") or 0 for p_ in panels)})
+    fig["panels"] = [{"name": p_["name"], "conic": p_["conic"], "verify": p_["verify"],
+                      "px_per_AU": p_["px_per_AU"], "notes": p_["notes"]} for p_ in panels]
+    imgc = ImageContent(type="image", data=base64.b64encode(png).decode("ascii"),
+                        mimeType="image/png",
+                        altText="彗星{}天体の軌道（各パネルはその彗星自身の軌道面）".format(len(panels)))
+    lines = [media_link_line("生成した画像を開く（彗星{}天体の軌道パネル）".format(len(panels)),
+                             path=out_path, kind="figure"),
+             "☄️ **彗星{}天体の軌道（1彗星=1パネル／各パネルはその彗星自身の軌道面）**".format(len(panels)),
+             "時刻: {}".format(tstr)]
+    for i, p_ in enumerate(panels, 1):
+        lines.append("{}. {}: e={:.6f} ・ 近日点 {} AU ・ {} ・ 指定時刻の日心距離 {:.3f} AU".format(
+            i, p_["name"], p_["e"], _au_fmt(p_["q_au"]),
+            "遠日点 {} AU".format(_au_fmt(p_["conic"].get("apo"))) if p_["conic"].get("closed")
+            else "遠日点なし（閉じない軌道）", p_["au"]))
+    lines += ["", figure_text_block(fig),
+              "出典: " + " / ".join(sorted({p_["source"] for p_ in panels if p_["source"]}))
+              + " ／ 描画: Pillow"]
+    return CallToolResult(
+        content=[TextContent(type="text", text="\n".join(lines)), imgc],
+        structuredContent={
+            "time_utc": tstr, "requested": requested,
+            "requested_count": len(requested), "drawn_count": len(panels),
+            "comets": [{k: v for k, v in p_.items() if k not in ("notes",)} for p_ in panels],
+            "errors": failed, "figure": fig, "image_path": out_path,
+        },
+    )
+
+
 # ---------- 選択ツール ----------
 def solar_system_now(when=None, asteroid: Optional[str] = None,
                      asteroid2: Optional[str] = None, probe: Optional[str] = None,
@@ -986,6 +1186,9 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
         view: "system"(既定)=太陽系俯瞰図 / "comet_orbit"=彗星の軌道面ビュー。
             comet_orbit は comet の指定が必須で、彗星自身の軌道面を真横から見た図
             （太陽＝円錐曲線の焦点）を返す。e>=1 の C/彗星は閉じない双曲線の枝として描く。
+            **comet にカンマ区切りで複数（または comet2 を併用、最大4天体）指定すると、
+            1彗星=1パネルで並べた1枚の画像**を返す（パネルごとに軌道面と縮尺が異なる。
+            その旨は figure.notes に数値から生成して入る）。
 
     インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
     content の先頭へ「🖼️ [生成した画像を開く（…）](file:///…) ｜ 保存先: `…`」という
@@ -1003,10 +1206,17 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
             return CallToolResult(content=[TextContent(type="text", text=msg)],
                                   structuredContent={"error": msg,
                                                      "known_comets": sorted(_COMET_ALIASES)})
-        return _comet_orbit_result(str(first).strip(), when)
-    asts = [a for a in (asteroid, asteroid2) if a and str(a).strip()]
-    prbs = [a for a in (probe, probe2) if a and str(a).strip()]
-    coms = [a for a in (comet, comet2) if a and str(a).strip()]
+        names = _split_object_names(comet) + [n for n in _split_object_names(comet2)
+                                             if n not in _split_object_names(comet)]
+        if not names:
+            names = [str(first).strip()]
+        if len(names) == 1:
+            return _comet_orbit_result(names[0], when)
+        return _comet_multi_result(names, when)
+    # 複数指定は comet_orbit と同じ解釈（カンマ区切り＋2番目の引数）
+    asts = _split_object_names(asteroid) + _split_object_names(asteroid2)
+    prbs = _split_object_names(probe) + _split_object_names(probe2)
+    coms = _split_object_names(comet) + _split_object_names(comet2)
     try:
         scene = _compute(when, asts, prbs, coms)
     except (OSError, KeyError, ValueError) as e:

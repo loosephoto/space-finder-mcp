@@ -311,12 +311,27 @@ def verify_curve(image, *, color: Tuple[int, int, int], focus_xy: Tuple[float, f
                  px_per_unit: float, periapsis: float, apoapsis: Optional[float] = None,
                  tol_ratio: float = 0.05, tol_px: float = 4.0,
                  label_boxes: Iterable[Tuple] = (),
-                 tol_color: int = 60, axis: str = "x") -> dict:
+                 tol_color: int = 60, axis: str = "x",
+                 occluders: Iterable[Tuple[float, float, float]] = (),
+                 min_feature_px: float = 3.0) -> dict:
     """描いた曲線の画素から近点／遠点距離を逆算し、幾何が数値どおりか検証する。
 
     高離心率の楕円は「主天体を中心に描いてしまう」誤りが起きやすいため、
     主天体＝焦点からの距離を画素から測って a(1-e) / a(1+e) と突き合わせる。
     併せて、ラベル矩形に曲線色が混入していないこと（文字と線の重なり）も検査する。
+
+    超長距離の楕円では近日点が画面で数 px 以下になり、しかも**曲線の上に描いた
+    主天体の円盤が近点付近を上書きする**ため、「曲線色の右端画素」は近点ではなく
+    円盤の縁になる（測っても無意味）。そこで近点が分解できない場合は等値検査を
+    やめ、上界検査だけを行う（可視の曲線が焦点から 円盤半径+tol_px を超えて
+    近点側へ伸びていないこと）。主天体を楕円の中心に置く誤りはこの上界だけで
+    検出でき、遠点側の等値検査も併せて効く。判定は `periapsis_resolvable` と
+    `periapsis_check`（equality / upper_bound）に残すので、呼び出し側は
+    「この縮尺では図から確認できない」旨を注記に**数値から生成**して明示すること。
+
+    Args:
+        occluders: 曲線の上に描いた円盤 [(中心x, 中心y, 半径px), ...]（主天体の円盤など）。
+        min_feature_px: これ未満の大きさの特徴は画素から確認できないとみなす下限（px）。
     """
     from PIL import Image
     img = image if hasattr(image, "size") else Image.open(image)
@@ -351,7 +366,24 @@ def verify_curve(image, *, color: Tuple[int, int, int], focus_xy: Tuple[float, f
     res = {"periapsis_measured": _rd(d_near), "periapsis_expected": _rd(periapsis),
            "periapsis_error_pct": round(abs(d_near - periapsis) / max(1e-9, periapsis) * 100, 2),
            "resolution_per_px": round(1.0 / max(px_per_unit, 1e-12), 6)}
-    ok = _near(d_near, periapsis)
+    # 近点が「主天体の円盤の内側」か「画素の下限未満」なら、等値検査はできない
+    occ_r = max([float(r_) for (_, _, r_) in occluders] or [0.0])
+    peri_px = abs(float(periapsis)) * max(px_per_unit, 1e-12)
+    resolvable = peri_px >= max(float(min_feature_px), occ_r + 2.0)
+    if resolvable:
+        res["periapsis_resolvable"] = True
+        res["periapsis_check"] = "equality"
+        ok = _near(d_near, periapsis)
+    else:
+        limit = (occ_r + tol_px) / max(px_per_unit, 1e-12)
+        res["periapsis_resolvable"] = False
+        res["periapsis_check"] = "upper_bound"
+        res["periapsis_occluder_px"] = round(occ_r, 1)
+        res["periapsis_upper_bound"] = _rd(limit)
+        res["periapsis_unresolved_reason"] = (
+            "近点は画面上 {:.2f} px（描いた円盤の半径 {:.1f} px／分解能下限 {} px）で、"
+            "画素からは確認できない".format(peri_px, occ_r, min_feature_px))
+        ok = d_near <= limit          # 円盤半径を超えて近点側へ伸びていないこと
     if apoapsis:
         res["apoapsis_measured"] = _rd(d_far)
         res["apoapsis_expected"] = _rd(apoapsis)
@@ -359,8 +391,12 @@ def verify_curve(image, *, color: Tuple[int, int, int], focus_xy: Tuple[float, f
         ok = ok and _near(d_far, apoapsis)
     overlap = 0
     for (x0, y0, x1, y1) in label_boxes:
-        for y in range(int(y0), int(min(y1, h))):
-            for x in range(int(x0), int(min(x1, w))):
+        # 画面外を通る矩形でも例外を出さない（両端をクランプする。片側だけだと
+        # 負の y で IndexError になり、描画中のツール呼び出しが丸ごと失敗する）
+        xa, xb = max(0, int(x0)), min(w, int(x1))
+        ya, yb = max(0, int(y0)), min(h, int(y1))
+        for y in range(ya, yb):
+            for x in range(xa, xb):
                 r, g, b = px[x, y]
                 if abs(r - color[0]) + abs(g - color[1]) + abs(b - color[2]) < tol_color:
                     overlap += 1

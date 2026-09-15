@@ -36,6 +36,14 @@ os.makedirs(_DATA_DIR, exist_ok=True)
 # 太陽・月の実半径 (km)
 _R_SUN = 696000.0
 _R_MOON = 1737.4
+# 既定（date 省略）で「その観測地でこれから見える次の日食」を探す窓（日）。
+# 実測: 東京では 800日（約2年）以内に可視の日食が無い期間があり、既定引数で
+# 「見つかりません」しか返せなかった（東京の次の可視日食は 2030-06-01 の部分日食）。
+# 太陽が地平線下で見えない食も候補から外れるため、窓は4年弱に広げる。
+_SEARCH_DAYS = 1400
+# 新月の粗い走査（15分刻み）で取りこぼさないための余裕（度）。
+# 15分刻みのサンプリング誤差 ~0.07° を吸収し、縁の食も候補に残す。
+_SCREEN_MARGIN_DEG = 0.1
 
 def _local_tz(lat, lon):
     """緯度経度から現地タイムゾーンの UTC オフセット(時間, DST込み)を Open-Meteo で取得。
@@ -149,9 +157,22 @@ def _scan_day(eph, ts, site, sun, moon, y, mo, d, jst_offset):
     utc0 = jst0 - datetime.timedelta(hours=jst_offset)
     jd_start = ts.utc(utc0.year, utc0.month, utc0.day,
                       utc0.hour, utc0.minute).tt - 6 / 24.0
+    # まず30分刻み（73点）で走査して「食が起きている時間帯」だけを特定する。食は2〜3時間
+    # 続くので30分刻みでも取りこぼさない。食の無い日はここで終わる（実測: 全36時間を2分
+    # 刻みで舐めると ~5秒/日、30分刻みなら ~0.3秒/日。探索では食の無い日を何日も調べる）。
+    span = []
+    for i in range(36 * 2 + 1):
+        jd = jd_start + i * 30 / 1440.0
+        tt = ts.tt_jd(jd)
+        rs, rm, sep, pa = _geom(site, tt, sun, moon)
+        if sep < (rs + rm):
+            span.append(jd)
+    if not span:
+        return None
+    # 食の時間帯（前後40分の余裕）だけ 2分刻みで精密走査する（最大食分の分解能を確保）
     occ = []
-    for i in range(36 * 60):
-        jd = jd_start + i / 1440.0
+    jd = span[0] - 40 / 1440.0
+    while jd <= span[-1] + 40 / 1440.0:
         tt = ts.tt_jd(jd)
         rs, rm, sep, pa = _geom(site, tt, sun, moon)
         if sep < (rs + rm):
@@ -159,6 +180,7 @@ def _scan_day(eph, ts, site, sun, moon, y, mo, d, jst_offset):
             alt, _az, _ = (sun - site).at(tt).altaz()
             occ.append({"jd": jd, "rs": rs, "rm": rm, "sep": sep, "pa": pa,
                         "alt": float(alt.degrees)})
+        jd += 2 / 1440.0
     if not occ:
         return None
     vis = [o for o in occ if o["alt"] > 0.0]
@@ -236,7 +258,7 @@ def solar_eclipse_series(date: Optional[str] = None, place: Optional[str] = None
     指定した観測地・日付で太陽と月の視位置を JPL DE421 + Skyfield で実測計算し、
     食の始まり〜最大〜終わりを複数パネルに並べて合成。月の位置角も正確に反映。
 
-    date を省略した場合は、その観測地で「これから起こる次の日食」を約2年（800日）先まで自動検索。
+    date を省略した場合は、その観測地で「これから起こる次の日食」を約4年（1400日）先まで自動検索（800日では可視の食が無い観測地があるため）。
     描画するのは、その観測地で太陽が地平線より上にある時間帯だけ。最大食分も可視区間の中で
     求める。全日食が地平線下なら「見えません」と明示して図は返さない（見えない食を図にして
     誤解させないため。日付をまたぐ食も前後6時間まで含めて計算する）。
@@ -288,7 +310,7 @@ def solar_eclipse_series(date: Optional[str] = None, place: Optional[str] = None
     else:
         # 次の日食を自動検索（新月近傍のみ調べて高速化。約23秒かかるため
         # 緯度経度を丸めたキーで1日キャッシュし、戻り値は後段で書き換えるので deepcopy）
-        days_win = 800
+        days_win = _SEARCH_DAYS
         res = copy.deepcopy(_next_eclipse_search(
             round(ll[0], 2), round(ll[1], 2),
             datetime.datetime.now().date().isoformat(), days_win, round(float(tz), 2)))
@@ -296,9 +318,9 @@ def solar_eclipse_series(date: Optional[str] = None, place: Optional[str] = None
         dy, dmo, dd = day_found if day_found else (None, None, None)
         if not found:
             return CallToolResult(content=[TextContent(type="text",
-                text="今後約2年（{}日）にこの観測地で見える日食が見つかりませんでした。"
+                text="今後約{:.1f}年（{}日）にこの観測地で見える日食が見つかりませんでした。"
                  "特定の日付を調べるには date=\"2030-06-01\" のように指定してください".format(
-                     days_win))],
+                     days_win / 365.0, days_win))],
                 structuredContent={"error": "no eclipse found"})
         date_str = "{}年{}月{}日".format(dy, dmo, dd)
         date_disp = date_str
@@ -610,17 +632,22 @@ def _next_eclipse_date(eph, ts, site, start_date, days=800, jst_offset=9.0):
         if not is_new:
             continue
         jd = tt.tt
-        # 高速判定: 前後6時間 10分刻み
-        best = 9e9
-        for k in range(-36, 37):
-            tt2 = ts.tt_jd(jd + k * 10 / 1440.0)
+        # 高速判定: 前後6時間 15分刻み（最小離角の時刻 best_tt も記録する）。
+        # 15分刻みのサンプリング誤差は最大 7.5分 ≒ 離角 0.07°（月の相対運動 ~0.55°/h）
+        # なので、食の可能性の判定は touch に余裕（_SCREEN_MARGIN_DEG）を足して行う。
+        best, best_tt = 9e9, None
+        for k in range(-24, 25):
+            tt2 = ts.tt_jd(jd + k * 15 / 1440.0)
             rs, rm, sep, pa = _geom(site, tt2, sun, moon)
             if sep < best:
-                best = sep
-        if best < touch:
-            # 食の恐れ → 精密スキャン（新月の現地日付前後）
-            ud = tt.utc_datetime()
-            for off in (-1, 0, 1):
+                best, best_tt = sep, tt2
+        if best < touch + _SCREEN_MARGIN_DEG:
+            # 食の恐れ → 精密スキャン。新月時刻ではなく「最小離角（≒最大食）の現地日付」を
+            # 起点にすることで、食の無い日を無駄に精密計算しない（実測: 1400日探索で
+            # 3日→1日になり、既定呼び出しが短縮される）。日付境界の保険で ±1 日残す。
+            ud = (best_tt.utc_datetime() if best_tt is not None else tt.utc_datetime())
+            ud = ud + _dt.timedelta(hours=float(jst_offset or 9.0))
+            for off in (0, -1, 1):
                 dd = ud + _dt.timedelta(days=off)
                 ev = _scan_day(eph, ts, site, sun, moon,
                                dd.year, dd.month, dd.day, jst_offset)

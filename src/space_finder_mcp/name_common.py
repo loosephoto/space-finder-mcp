@@ -94,6 +94,25 @@ JA_ALIASES: dict = {
 }
 
 
+def split_names(value) -> list:
+    """カンマ・セミコロン・全角読点・改行で区切った天体名のリストを返す（重複除去・順序維持）。
+
+    名前に空白が入る（例 "C/2004 R2 (ASAS)"）ため空白では区切らない。
+    「・」も名前の一部（紫金山・アトラス彗星、チュリュモフ・ゲラシメンコ）なので区切らない。
+    複数天体を1回の呼び出しで受ける全ツール（彗星の複数パネル・周回機の複数地点など）で使う。
+    """
+    s = str(value or "")
+    # 「・」は名前の一部なので区切りにしない（実測: 分割すると JPL が 400 を返す）
+    for sep in ("、", "；", ",", ";", "\n", "，"):
+        s = s.replace(sep, ",")
+    out = []
+    for x in s.split(","):
+        x = x.strip()
+        if x and x not in out:
+            out.append(x)
+    return out
+
+
 def first_token(obj: str) -> str:
     """天体名の第1語（該当なしのときに候補を探す LIKE の起点に使う）。"""
     toks = [t for t in _NAME_SPLIT.split(" ".join(str(obj).split())) if t]

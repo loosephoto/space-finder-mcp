@@ -99,8 +99,14 @@ def figure_issues(tool: str, result) -> list:
     if not isinstance(cap, str) or not cap.strip():
         out.append("figure.caption がありません")
     ver = fig.get("verify")
-    if ver is not None and not (isinstance(ver, dict) and ver.get("ok")):
-        out.append("figure.verify.ok が真ではありません: {}".format(str(ver)[:120]))
+    if ver is not None:
+        if not (isinstance(ver, dict) and ver.get("ok")):
+            out.append("figure.verify.ok が真ではありません: {}".format(str(ver)[:120]))
+        elif ver.get("periapsis_resolvable") is False:
+            # 近点が画素から確認できないと申告した図は、その旨を注記に必ず書いていること
+            joined = "".join(fig.get("notes") or [])
+            if "内側" not in joined and "確認できない" not in joined:
+                out.append("verify.periapsis_resolvable が偽なのに、注記に説明がありません")
     return out
 
 
@@ -112,7 +118,36 @@ FIGURES_EXTRA_CALLS = (
      {"comet": "ハレー彗星", "view": "comet_orbit"}, {"conic_kind": "ellipse"}),
     ("solar_system_now[comet_orbit/hyperbola]", "solar_system_now",
      {"comet": "C/2023 A3", "view": "comet_orbit"}, {"conic_kind": "hyperbola"}),
+    # 超長距離の楕円（a≳10^4 AU）: 近日点が画面で数px以下になり、誇張した太陽円盤の
+    # 内側に入る。近点の等値検査はできず「注記で明示＋上界検査」になる経路を固定する。
+    ("solar_system_now[comet_orbit/超長距離楕円]", "solar_system_now",
+     {"comet": "C/2004 R2", "view": "comet_orbit"}, {"conic_kind": "ellipse"}),
+    # 複数パネル（1彗星=1パネル）: conic は panels[] 側に入るので kind だけ検査する
+    ("solar_system_now[comet_orbit/複数パネル]", "solar_system_now",
+     {"comet": "ハレー彗星,C/2004 R2", "view": "comet_orbit"}, {"figure_kind": "orbit_plane_set"}),
     # 日食は既定引数だと「その観測地で見える食」が無い場合があるため、可視の例で叩く
+    # 地点マーカー（落点マップ）: 過去機の公表落点を天体面地図に描く経路
+    ("planetary_orbiter_track[かぐや落点]", "planetary_orbiter_track",
+     {"body": "moon", "orbiter": "かぐや"}, {"figure_kind": "impact_site_map"}),
+    # 地点マーカーの複数描画（着陸地点6地点＝番号＋凡例、単独＝局所図）
+    ("planetary_orbiter_track[アポロ6地点]", "planetary_orbiter_track",
+     {"body": "moon", "sites": "apollo"}, {"figure_kind": "landing_site_map"}),
+    ("planetary_orbiter_track[アポロ11号]", "planetary_orbiter_track",
+     {"body": "moon", "sites": "apollo11"}, {"figure_kind": "landing_site_map"}),
+    # 全球地形画像が無い天体（木星）: 座標グリッドに衝突地点を描く経路
+    ("planetary_orbiter_track[木星SL9衝突地点]", "planetary_orbiter_track",
+     {"body": "jupiter", "sites": "all"}, {"figure_kind": "impact_site_map"}),
+    # 他惑星: 金星（座標グリッド・9地点）と火星（画像地図・12地点）
+    ("planetary_orbiter_track[金星着陸9地点]", "planetary_orbiter_track",
+     {"body": "venus", "sites": "all"}, {"figure_kind": "landing_site_map"}),
+    ("planetary_orbiter_track[火星着陸12地点]", "planetary_orbiter_track",
+     {"body": "mars", "sites": "all"}, {"figure_kind": "landing_site_map"}),
+    # 1枚全球画像ベースマップ（タイタン＝Cassini 全球図にホイヘンス着陸点）
+    ("planetary_orbiter_track[タイタン着陸点]", "planetary_orbiter_track",
+     {"body": "titan", "sites": "all"}, {"figure_kind": "landing_site_map"}),
+    # 地点なしの地図のみ（全球画像を表示するだけの経路）
+    ("planetary_orbiter_track[エウロパ全球図]", "planetary_orbiter_track",
+     {"body": "europa", "sites": "map"}, {"figure_kind": "body_map"}),
     ("solar_eclipse_series[可視の日食]", "solar_eclipse_series",
      {"place": "ロンドン"}, {"figure_kind": "eclipse_panels"}),
     ("solar_eclipse_series[深い部分食]", "solar_eclipse_series",
@@ -350,7 +385,10 @@ def main() -> int:
         else:
             print("=== 不正引数の注入テスト（数値引数 × 4種）===")
             for r in bad:
-                print("  EXC {tool} {arg}={value}  {detail}".format(**r))
+                # 行によっては detail が無い（TIMEOUT など）ので .get で埋める
+                print("  EXC {tool} {arg}={value}  {detail}".format(
+                    tool=r.get("tool"), arg=r.get("arg"), value=r.get("value"),
+                    detail=r.get("detail", "")))
             print("  検査した組み合わせ:", len(rows), "／ 例外漏れ:", len(bad))
         return 1 if bad else 0
 
