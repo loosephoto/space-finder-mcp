@@ -261,6 +261,7 @@ def _compute(when_iso=None, asteroids=None, probes=None, comets=None):
     # 日心黄道座標フレーム
     from skyfield.framelib import ecliptic_frame
     planets = {}
+    planet_errors = []
     for jname, key, col, sma in _PLANETS:
         try:
             v = eph[key].at(t) - sun.at(t)
@@ -269,8 +270,8 @@ def _compute(when_iso=None, asteroids=None, probes=None, comets=None):
             planets[jname] = {"name": jname, "au": au,
                               "eclLon": float(lon.degrees), "eclLat": float(lat.degrees),
                               "sma": sma}
-        except Exception:
-            pass
+        except Exception as ex:
+            planet_errors.append({"name": jname, "error": str(ex)[:120]})
 
     asts = {}
     for a in (asteroids or []):
@@ -320,8 +321,8 @@ def _compute(when_iso=None, asteroids=None, probes=None, comets=None):
         except Exception as ex:
             coms[name] = {"name": name, "color": _COMET_COLOR, "error": str(ex)[:120]}
 
-    return {"time_utc": tstr, "planets": planets, "asteroids": asts, "probes": prbs,
-            "comets": coms, "asteroid_belt": True}
+    return {"time_utc": tstr, "planets": planets, "planet_errors": planet_errors,
+            "asteroids": asts, "probes": prbs, "comets": coms, "asteroid_belt": True}
 
 
 # ---------- 描画ヘルパー ----------
@@ -1266,6 +1267,10 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
         "**惑星位置（太陽からの距離AU）**: " + ", ".join(
             "{} {:.2f}AU".format(n, p["au"]) for n, p in scene["planets"].items()),
     ]
+    if scene.get("planet_errors"):
+        lines.append("⚠️ 惑星位置の一部を計算できませんでした:")
+        for item in scene["planet_errors"]:
+            lines.append("- {}: {}".format(item["name"], item["error"]))
     if scene["asteroids"]:
         lines.append("**小惑星位置**（JPL SBDB 軌道要素 + ケプラー伝播）:")
         for n, d in scene["asteroids"].items():
@@ -1305,6 +1310,9 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
             "惑星軌道の円は" + ("対数縮尺の目安で、離心率（水星 e=0.206 など）は無視している"
                                if eng == "simple" else "公転長半径の円で、離心率は無視している"),
             "彗星・探査機のマーカーは黄道面への正射影位置。真の距離は structuredContent の au を参照",
+            (f"惑星位置 {len(scene['planet_errors'])} 件の計算に失敗しました"
+             "（structuredContent.planet_errors を参照）"
+             if scene.get("planet_errors") else ""),
             "彗星の尾は反太陽方向に描いており、進行方向ではない",
         ]),
         caption="太陽を中心とした日心俯瞰図。数値は structuredContent の各値を参照。",
@@ -1315,7 +1323,9 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
     return CallToolResult(
         content=[TextContent(type="text", text="\n".join(lines)), img],
         structuredContent={"time_utc": scene["time_utc"], "engine": eng_label,
-                           "planets": scene["planets"], "asteroids": scene["asteroids"],
+                           "planets": scene["planets"],
+                           "planet_errors": scene.get("planet_errors", []),
+                           "asteroids": scene["asteroids"],
                            "probes": scene["probes"], "comets": scene["comets"],
                            "figure": fig, "image_path": out_path,
                            "source": "JPL DE421+SBDB+Horizons / Skyfield"},

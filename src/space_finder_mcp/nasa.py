@@ -129,7 +129,7 @@ def neo_today(key: str) -> CallToolResult:
         status = getattr(getattr(e, "response", None), "status_code", None)
         return CallToolResult(
             content=[TextContent(type="text",
-                                 text=_rate_limit_text(e) or f"NASA NEO の取得に失敗しました: {e}")],
+                                 text=_rate_limit_text(e) or f"NASA NEO の取得に失敗しました: {nasa_budget.redact(e)}")],
             structuredContent={"error": nasa_budget.redact(e), "status": status, "source": "api.nasa.gov",
                                "budget": nasa_budget.status(key)},
         )

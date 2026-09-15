@@ -105,7 +105,7 @@ PAST = {
                "note": "2009年に月面へ制御落下（運用終了）", "impact": _KAGUYA_IMPACT},
 }
 _UNKNOWN_GUARD = {
-    "maven": "MAVEN（火星大気探査機）は2026年3月に運用終了し、JPL Horizons のエフェメリスがありません。",
+    "maven": "MAVEN（火星大気探査機）は2025年12月6日に火星の裏側で交信が途絶え、NASA が2026年6月3日に運用終了を宣言しました（NASA Science / プレスリリース）。JPL Horizons 側のエフェメリスも 2026年3月1日までで、現在位置は計算できません。",
     "akatsuki": "あかつき（金星探査機）は2026年に運用終了しており、現在位置を計算できるデータ源がありません。",
 }
 
@@ -1220,6 +1220,7 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
     n = max(3, int(minutes / step))
     jds = [jd_now + i * step / 1440.0 for i in range(-n, n + 1)]
     trail = []
+    trail_errors = []
     try:
         vecs = _horizons_states(cmd, body_cfg["center"], jds)
         for jd, (x, y, z, vx, vy, vz) in zip(jds, vecs):
@@ -1231,8 +1232,8 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
             try:
                 st = _state(body_cfg, cmd, jd_now + i * step / 1440.0)
                 trail.append((st["lon"], st["lat"]))
-            except Exception:
-                continue
+            except Exception as ex:
+                trail_errors.append({"offset_min": i * step, "error": str(ex)[:120]})
 
     try:
         # タイル取得・切り出し・投影は共通ルーチン（surface_map）。投影と検証が
@@ -1334,6 +1335,8 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
             f"マーカーは指定時刻の真下の点。高度 {alt0:.1f} km・{body_cfg['ja']}中心距離 "
             f"{cur['dist_km']:.1f} km・速度 {spd}",
             "過去の探査機（かぐや等）は運用終了済みで、位置は軌道要素からの外挿になる場合がある",
+            (f"トレイル {len(trail_errors)} 点の計算に失敗しました。該当部分は表示されていません。"
+             if trail_errors else ""),
             tile_failure_note(sv),
         ]),
         caption=f"{ja} の{body_cfg['ja']}面位置（{tstr}）。真下の点は {ns} {abs(lat0):.2f}° / "
@@ -1347,6 +1350,8 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
         f"📍 {body_cfg['ja']}面: {ns} {abs(lat0):.2f}° / {ew} {abs(lon0):.2f}°",
         f"🛰 高度 {alt0:.1f} km ・ {body_cfg['ja']}中心距離 {cur['dist_km']:.1f} km ・ 速度 {spd}",
         f"🛤 軌道トレイル: 前後 {minutes} 分（{step_disp} 刻み）。オレンジ線=軌道。表示: {view}",
+        (f"⚠️ トレイル {len(trail_errors)} 点の計算に失敗しました。該当部分は表示されていません。"
+         if trail_errors else ""),
         "",
         figure_text_block(fig),
         f"出典: JPL Horizons + IAU{body_cfg['ja']}自転モデル ／ 地図 {body_cfg['attrib']}",
@@ -1360,6 +1365,7 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
             "altitude_km": round(alt0, 2), "speed_kms": round(speed_kms, 4) if speed_kms else None,
             "dist_from_body_center_km": round(cur["dist_km"], 1),
             "trail_minutes": minutes, "step_min": round(step, 4), "trail_points": len(trail),
+            "trail_errors": trail_errors,
             "view": view, "span_deg": span_deg, "zoom": zoom,
             "figure": fig, "image_path": out_path,
             "source": f"JPL Horizons + IAU rotation + NASA Trek {body_cfg['attrib']}",

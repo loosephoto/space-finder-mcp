@@ -40,6 +40,7 @@ uv run python -m compileall -q src/space_finder_mcp   # 構文
 uv run python scripts/check-tools.py --dead-code      # 未参照定義・未使用import（0件を維持）
 uv run python scripts/check-tools.py --offline        # ネットワーク全断で例外漏れを検査
 uv run python scripts/check-tools.py --fuzz           # 数値引数へ不正値を注入（例外漏れ0を維持）
+uv run python -m unittest discover -s tests          # 回帰テスト（対応済みの実バグの再発防止）
 uv run python scripts/check-tools.py                  # 全46ツール実呼び出し（数分・終了コード1で失敗）
 ```
 

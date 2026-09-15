@@ -58,7 +58,7 @@ category: space
 | `alma_search` | ALMA（アルマ望遠鏡）科学アーカイブの観測データ検索（観測対象・座標・周波数帯・種別/分解能/QA・公開/要権限・実データ製品） | ALMA Science Archive (NAOJ, IVOA TAP) | 不要 |
 | `radio_sources_now` | TART オープン電波望遠鏡が「いま観測できる電波源」（GNSS・静止衛星等）を仰角順に表示 | TART source catalog (NZ) | 不要 |
 | `sky_map_with_satellites` | 指定地の空に太陽系の惑星と人工衛星を重ねた画像（matplotlib正確版=PNG/Pillow簡易版=JPEGを選択） | JPL de421+Skyfield / CelesTrak+SGP4 | 不要 |
-| `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示）。`view="comet_orbit"` で彗星の軌道面ビュー（太陽＝焦点の楕円／e≥1 は双曲線の枝）。`comet` にカンマ区切りで複数（または `comet2`、最大4天体）指定すると **1彗星=1パネルの1枚画像**（パネルごとに軌道面・縮尺が異なる＝`figure.notes` に自動生成、`figure.kind=orbit_plane_set`、パネル別は `figure.panels[]`） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
+| `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示）。`view="comet_orbit"` で彗星の軌道面ビュー（太陽＝焦点の楕円／e≥1 は双曲線の枝）。`comet` にカンマ区切りで複数（または `comet2`、最大4天体）指定すると **1彗星=1パネルの1枚画像**（パネルごとに軌道面・縮尺が異なる＝`figure.notes` に自動生成、`figure.kind=orbit_plane_set`、パネル別は `figure.panels[]`。一部の惑星の位置計算に失敗した場合は `structuredContent.planet_errors` に理由を記録し、`content` と `figure.notes` に失敗数を出します） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
 | `solar_eclipse_series` | 日食（太陽が月に欠ける過程）の時系列パネル画像（7枚・食分と太陽高度・次回日食の自動検索=約4年(1400日)先まで・max_magnitude対応。**地平線下で見えない食は返さない**） | JPL DE421+Skyfield | 不要 |
 | `eodashboard_collections` | EO Dashboard（NASA×ESA×JAXA共同）の173データセットをテーマ・機関・キーワードで検索 | EO Dashboard (GitHub catalog) | 不要 |
 | `eodashboard_detail` | EO Dashboardの1データセットの詳細（衛星・センサー・説明・画像・参照リンク） | EO Dashboard (GitHub catalog) | 不要 |
@@ -67,7 +67,7 @@ category: space
 | `stac_search` | Sentinel-2 / Landsat / NAIP / DEM をSTAC検索（場所・日時・雲量） | AWS Earth Search STAC | 不要 |
 | `iss_now` | ISS（国際宇宙ステーション）の現在位置を取得し Googleマップリンクで表示 | Open Notify | 不要 |
 | `sat_ground_track` | 任意の人工衛星（ISS・ひので・ハッブル等）の現在位置と地上軌道を地球地図にプロットした画像を返す。CelesTrak TLE + Skyfield(SGP4) で真下の点・高度・速度を計算し、NASA Blue Marble 地図に軌道トレイルを重ねる | CelesTrak + Skyfield + Blue Marble | 不要 |
-| `planetary_orbiter_track` | 任意の天体（月・火星・水星・タイタン等）を周回する探査機の現在位置と軌道トレイルを、その天体の地図にプロットした画像を返す。JPL Horizons の状態ベクトルを IAU 自転モデルで天体固定座標（緯度経度・高度）に変換し、NASA Trek の等角図法地図に重ねる。`span_deg=360`で天体全面表示にも対応 | JPL Horizons + NASA Trek | 不要 |
+| `planetary_orbiter_track` | 任意の天体（月・火星・水星・タイタン等）を周回する探査機の現在位置と軌道トレイルを、その天体の地図にプロットした画像を返す。JPL Horizons の状態ベクトルを IAU 自転モデルで天体固定座標（緯度経度・高度）に変換し、NASA Trek の等角図法地図に重ねる。`span_deg=360`で天体全面表示にも対応。トレイルの計算に失敗した点は `structuredContent.trail_errors` に記録し、`content` と `figure.notes` に失敗数を出します | JPL Horizons + NASA Trek | 不要 |
 | `planetary_rover_location_map` | 任意の天体面を移動する探査ローバーの現在地をその天体の地図中心に示した画像（走行経路・着陸点）。NASA MMGIS の位置データと NASA Trek の等角地図を合成。現状データは火星ローバー（Perseverance/Curiosity） | NASA MMGIS + Trek WMTS | 不要 |
 | `weather_satellite_now` | GEO/LEO気象衛星19機の公開画像（ひまわり9号・GOES-18/19・Meteosat-12/11/10/9・FY-4B/2H/2G・GK-2A・INSAT-3DR/3DS・NOAA-20/-21・SNPP・Metop-B/C・FY-3D）。GEO=最新フレーム/LEO=日次全球合成、取得不可は理由コード | JMA/NOAA STAR/EUMETSAT WMS/NSMC/KMA/IMD/NASA GIBS | 不要 |
 | `satellite_status` | 世界中の気象・地球観測衛星の運用ステータス・軌道・打ち上げ日（Roscosmos等） | WMO OSCAR | 不要 |
@@ -206,4 +206,4 @@ uv run python scripts/check-tools.py                  # 全46ツール実呼び�
 
 ## 更新履歴
 
-- v0.29.0 — **気象庁天気図を `astronomy_weather` に統合**: 日本国内の地点では実況天気図と24時間予想天気図（気象庁 bosai/weather_map の `list.json` + `data/png/`）を `content` に画像で添付し、URL・観測時刻(JST)・48時間予想URLを `structuredContent.weather_chart` に返す。`include_chart=false` で無効化、取得失敗時は予報のみで継続。観測時刻はファイル名の7番目（`..._C_010000_<解析時刻>_...`）から取得。**`weather_satellite_now` を19機へ拡張**: GEO 13機（ひまわり9号・GOES-18/19・Meteosat-12/11/10/9・FY-4B/2H/2G・GK-2A・INSAT-3DR/3DS）＋LEO 6機（NOAA-20/-21・SNPP・Metop-B/C・FY-3D）。GEO=10分スロットの後方探索、LEO=日次全球合成（NASA GIBS は約1日遅れ）と取得セマンティクスを区別。取得不可は理由コード（DoD=`restricted`、Roscosmos=`unavailable`、COSMIC-2/TRITON=`non_image_product`）。EUMETSAT の旧静的画像サーバ廃止（2026-02）に伴い GeoServer WMS の固定URL（`mtg_fd:`/`msg_iodc:`/`msg_fes:`/`eps:m0x_`）へ移行。検証: 全46ツール exit 0（DEMO_KEY の429のみ想定内）／--dead-code 0／--fuzz 252・例外漏れ0／--offline exit 0／19機の実取得確認。
+- v0.29.1 — **失敗を黙って落とさない修正**: Open Notify の `timestamp` 異常値で例外が漏れる問題（`iss_now`、`structuredContent.error="bad timestamp"` を返す）／`neo_today` の `content` 側で `api_key` が伏せ字化されていなかった漏れ／MAVEN を「2025-12-06 交信途絶・2026-06-03 運用終了宣言（NASA）」へ更新し、Horizons のエフェメリス終了日と区別／`solar_system_now.planet_errors` と `planetary_orbiter_track.trail_errors` で部分失敗を数値化（`figure.notes` の失敗注記も実数から生成）／`tests/test_regressions.py`（unittest 3件）と `AGENTS.md`・`CLAUDE.md` のゲートへ回帰テスト追加。検証: 全46ツール exit 0（DEMO_KEY の429のみ想定内）／--dead-code 0／--fuzz 252・例外漏れ0／--offline exit 0／--figures 描画系6・未対応0。

@@ -43,12 +43,20 @@ def iss_now() -> CallToolResult:
             content=[TextContent(type="text", text="ISS 位置データの形式が不正です。")],
             structuredContent={"error": "bad position", "raw": d},
         )
-    ts = d.get("timestamp")
+    ts_raw = d.get("timestamp")
     import datetime
+    # Open Notify の timestamp は UNIX秒。異常値でもツール外へ例外を漏らさない。
+    try:
+        ts = int(ts_raw) if ts_raw is not None else None
+    except (TypeError, ValueError):
+        return CallToolResult(
+            content=[TextContent(type="text", text="ISS 時刻データの形式が不正です。")],
+            structuredContent={"error": "bad timestamp", "raw": d},
+        )
     # utcfromtimestamp は Python 3.12 で非推奨（naive datetime を返す）。
     # タイムゾーンを明示した fromtimestamp を使う。
     tstr = (datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-            if ts else "?")
+            if ts is not None else "?")
 
     # Google マップ リンク（衛星ビュー）
     gm_url = f"https://www.google.com/maps?q={lat},{lon}&z=3"
