@@ -45,6 +45,7 @@ from . import solar_system as _solarsys
 from . import planetary_rover as _prover
 from . import planetary_map as _pmap
 from . import satellite_map as _satmap
+from . import weather_sat as _wsat
 
 mcp = FastMCP("Space Finder MCP")
 
@@ -161,6 +162,10 @@ mcp.tool()(_iss.iss_now)
 
 # ---- 任意衛星の地上軌道マップ（CelesTrak TLE + SGP4 + Blue Marble, 認証不要）----
 mcp.tool()(_satmap.sat_ground_track)
+
+
+# ---- 世界の気象観測衛星 リアルタイム実画像（ひまわり9号, NICT/Kochi ミラー, 認証不要）----
+mcp.tool(name="weather_satellite_now")(_wsat.weather_satellite_now_extended)
 
 
 # ---- 汎用・天体周回機マップ（JPL Horizons + IAU自転 + NASA Trek, 認証不要）----

@@ -70,26 +70,24 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 - URL 内の空白・括弧は `%20` / `%28` にエスケープします（NASA のアセットURLには空白入りの動画名があり、生のままだとリンクが途中で切れます）。
 - `content` の並びは常に「リンクを含むテキスト → `ImageContent`」なので、**画像を描けないクライアントでもリンクは必ず見えます**。
 
-## 🆕 直近の更新内容（v0.28.0）
+## 🆕 直近の更新内容（v0.29.0）
 
-**「天体面の地図を1か所に集約し、公表された地点を図で語れるようにした回」**（v0.28.0）。周回機とローバーが別々に持っていた投影・検証を共通基盤へ集約し、着陸地点・落下地点・衝突地点を天体面の地図に描けるようにしました。あわせて日食の既定探索を広げ、DEMO_KEY の枠の使い方を見直しました。
+**「気象を"予報"から"天気図"まで一続きで見られるようにした回」**（v0.29.0）。天体観測の可否を答える `astronomy_weather` に**気象庁の天気図**を組み込み、日本国内の地点では雲量の予報と実況天気図・予想天気図を同時に返すようにしました。あわせて `weather_satellite_now` をひまわり9号専用から **GEO 13機・LEO 6機の計19機**へ広げ、取得できない機体は理由コードで正直に返します。
 
-- **🗺 天体面地図の共通化（`surface_map.py` 新設）** — タイル合成・等角投影（`g2px` とその逆変換）・地点マーカー・画素検証を1か所に集約。同じ図を同じ投影で描く以上、投影と検証が2か所にあると必ず食い違うためです（実測: ローバー側は投影の逆変換まで検査していたのに、周回機側はラベルの被りしか見ていませんでした）。`planetary_map`・`planetary_rover` はこの共通ルーチンを使います。
-- **📍 地点マーカー図（`planetary_orbiter_track`）** — `sites=` で公表座標を天体面図に描きます: `apollo`（月の着陸6地点＝番号＋凡例、`apollo11`〜`apollo17` は局所図）、`all`（月＝ルナ/嫦娥/ルノホート、火星＝12地点、金星＝ベネラ9地点、木星＝SL9衝突23破片、タイタン＝ホイヘンス）、`map`（地点なし＝全球図のみ）。過去機は落点が公表されていれば `impact_site_map` として落点を描きます（かぐや＝南緯65.5°/東経80.4° Gill クレータ付近）。**全球等角図が無い天体（木星・金星など）は緯度経度グリッド上に**座標を描き、地形画像ではないことを注記で明示します。
-- **🪐 複数彗星の1枚パネル（`solar_system_now`）** — `comet` にカンマ区切りで複数（または `comet2`、最大4天体）指定すると **1彗星=1パネル**で1枚に並べます。軌道面も縮尺も天体ごとに違うため重ねず並べ、その旨と縮尺比を `figure.notes` に数値から自動生成します。
-- **🌘 近点が画面で分解できない図の自己検証** — 超長距離の楕円（a≳10⁴ AU）では近日点が誇張した太陽円盤の内側に入り、曲線の端の画素は近点ではなく円盤の縁になります。この場合は等値検査をやめて**上界検査**へ自動で切り替え（`periapsis_resolvable: false`）、主天体を楕円の中心に置く誤りは依然として検出します。曲線に重なるラベルは描かず注記に回します（`skipped_labels`）。
-- **☀️ 日食の既定探索を約4年（1400日）へ拡大＋2段走査で高速化** — 東京では800日（約2年）以内に可視の日食が無く、**既定引数では常に「見つかりません」しか返せませんでした**。窓を1400日に広げ（東京の次は 2030-06-01 の部分日食）、あわせて走査を「30分刻みで食の時間帯を特定 → その窓内だけ2分刻みで精密化」に変えて **62秒 → 28秒**（指定日は 0.4〜1.2秒）にしました。
-- **📡 `space_weather` の枠消費と案内** — DONKI は1回の呼び出しで4エンドポイントを叩くため DEMO_KEY（30 req/h/IP の共有枠）を4消費します。**カテゴリ単位でキャッシュ**して、種別を変えた呼び出しで同じカテゴリを取り直さないようにしました（実測: `all` の直後の `flare` は HTTP 0回）。429 時の「枠を使い切りました（直近1時間 1/30 回）」という**自己矛盾した案内**も、原因別（429後の待機／枠切れ）の文言に直しました。
-- **🧱 地図タイルの欠けを注記に** — タイルが取れないと図の該当領域は背景色のままですが、失敗を黙って捨てていたため「地図に無い＝何も無い」と誤読できました。欠け枚数を `figure.notes` に数値から生成して出します（実測: 32枚中1枚を故障注入すると注記が出る）。
-- **🛠 検証ゲートの修正** — `check-tools.py --fuzz` がタイムアウト発生時に `KeyError: 'detail'` で**ゲート自体が落ちる**不具合を修正（報告すべき条件で死ぬゲートは無いより悪い）。
-- **検証** — 全45ツール実呼び出し exit 0（`OK 42 / ERROR_RESULT 3`＝DEMO_KEY の429のみで全て想定内）／`--dead-code` 0件／`--fuzz` 252組合せ・例外漏れ0／`--offline` exit 0／`--figures` exit 0（描画系6・figure 未対応0・追加経路14）。
+- **🔭 気象庁天気図を `astronomy_weather` へ統合** — 日本国内（地名または緯度経度で判定）のとき、気象庁の**実況天気図**と**24時間予想天気図**を PNG で添付し、URL・観測時刻（JST）・48時間予想のURLを `structuredContent.weather_chart` に返します。観測時刻はファイル名（`..._C_010000_<解析時刻>_...` の7番目）から取り出して数値で明示します。`include_chart=false` で無効化でき、取得に失敗しても予報だけを返して**ツール全体は失敗させません**。画像を描けないハーネス向けに保存先リンクも添えます。
+- **🛰 `weather_satellite_now` を19機へ拡張** — ひまわり9号のみから **GEO 13機**（ひまわり9号・GOES-18/19・Meteosat-12/11/10/9・FY-4B/2H/2G・GK-2A・INSAT-3DR/3DS）と **LEO 6機**（NOAA-20/-21・SNPP・Metop-B/C・FY-3D）へ対応しました。配信元は JMA(himawari.asia) / NOAA STAR / EUMETSAT GeoServer WMS / CMA-NSMC / KMA / IMD / NASA GIBS の7系統です。
+- **🧭 GEO と LEO で「最新画像」の意味が違うことを明示** — GEO は10分刻みのスロットを後方探索して最新フレームを選び、LEO は**日次全球合成**（NASA GIBS は約1日遅れ）です。混同しないよう `observed_at_utc` と取得種別を返します。
+- **🚫 取得できない機体は理由コードで返す** — DoD運用の DMSP-F17/F18・WSF-M1・EWS-G2 は `restricted`、Roscosmos の Meteor-M/Electro-L は `unavailable`、**COSMIC-2・TRITON は `non_image_product`**（電波掩蔽衛星で画像という成果物が存在しない）として区別します。FY-4A と FY-3E/F/G も公開画像が無いことを明示します。
+- **🧪 EUMETSAT の配信元変更に追随** — 旧静的画像サーバ（`eumetview` の `static-images`）が 2026年2月に廃止され全パスが SPA の HTML を返すため、**GeoServer WMS の固定URL**（`mtg_fd:` / `msg_iodc:` / `msg_fes:` / `eps:m0x_`）へ切り替えました。
+- **検証** — 全46ツール実呼び出し exit 0（DEMO_KEY の429のみ想定内）／`--dead-code` 0件／`--fuzz` 252組合せ・例外漏れ0／`--offline` exit 0。`weather_satellite_now` は19機を実際に取得して確認し、GEO 13機・LEO 9機が取得成功、残りは理由コードを返すことを確認しました。
 
-登録ツールは **45本**（増減なし）。
+登録ツールは **46本**（+1: `weather_satellite_now`）。
 
 ### 以前の更新
 
+- **v0.28.0** — 天体面地図の描画を `surface_map.py` に集約（タイル合成・等角投影・地点マーカー・画素検証）。地点マーカー図 `planetary_orbiter_track(sites=...)`（アポロ6地点・月/火星/金星の着陸点・木星SL9・タイタン）。複数彗星の1枚パネル。近点が分解できない楕円は上界検査へ自動切替。日食の既定探索を1400日へ拡大し62→28秒。`space_weather` をカテゴリ単位キャッシュへ。
 - **v0.27.0** — メディア本体より前にアイコン付きリンク（CLI/Android 系ハーネス向け）。名前解決の共通基盤 `name_common.py`（和名→NORAD ID を 21/61 オフライン解決）。`alma_search` に製品種別・QA2・論文を追加。両エンジンの配色統一。CelesTrak の非リストJSONで例外が漏れる不具合とエラー文字列の api_key 露出を修正。
-- **v0.26.0** — 描画系6ツールに `structuredContent.figure`（`figure/1`: 視点・主天体の焦点/中心・縮尺・円錐曲線・注記・自己検証）を導入（注記は数値から生成）。彗星の軌道面ビュー `solar_system_now(view="comet_orbit")` を追加、`check-tools.py --figures` を新設。自己検証が実バグ3件（日食パネルのはみ出し・最大食分ラベルの固定・衛星ラベルのマーカー隠れ）と日食可視性の過小報告を検出。
+- **v0.26.0** — 描画系6ツールに `structuredContent.figure`（`figure/1`: 視点・主天体の焦点/中心・縮尺・円錐曲線・注記・自己検証）を導入（注記は数値から生成）。彗星の軌道面ビュー `solar_system_now(view="comet_orbit")` を追加、`check-tools.py --figures` を新設。自己検証が実バグ3件と日食可視性の過小報告を検出。
 - **v0.25.2** — `nasa_budget.py` で api.nasa.gov の呼び出し枠を事前管理（429 の `Retry-After` 尊重）、探査機・彗星の Horizons 取得を分単位キーでキャッシュ、CelesTrak 403 を案内文付きに正規化。
 
 ## 📦 インストール
@@ -187,7 +185,7 @@ codex mcp list
 |:--|:--|
 | [`CLAUDE.md`](CLAUDE.md) | Claude Code 用プロジェクトガイド（セットアップ・規約・検証・リリース手順） |
 | [`AGENTS.md`](AGENTS.md) | Codex など `AGENTS.md` を読むエージェント向けガイド |
-| [`SKILL.md`](SKILL.md) | エージェント向けスキル定義（45ツールの仕様・使用例・キャッシュ・注意事項） |
+| [`SKILL.md`](SKILL.md) | エージェント向けスキル定義（46ツールの仕様・使用例・キャッシュ・注意事項） |
 | [`.claude/rules/`](.claude/rules/) | 開発規約（コーディング・検証ゲート・データ出典） |
 
 ### Hermes Agent
@@ -202,7 +200,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 
 ## 🛠️ ツール一覧
 
-登録ツールは **45本**（他国の宇宙機関データ 15本＋火星探査ローバー状況 1本＋天文観測(ESO/CADC/ALMA) 3本＋電波望遠鏡(TART) 1本＋天文ニュース 1本＋天体観測用天気 1本＋天体位置・星座 1本＋星図合成 1本＋太陽系俯瞰 1本＋日食時系列 1本＋NASA POWER気候 1本＋EO Dashboard 2本＋宇宙天気 1本＋AWS STAC 2本＋ISS位置 1本＋衛星地上軌道 1本＋汎用天体周回機 1本＋汎用ローバー位置 1本＋WMO OSCAR 1本＋中国/ロシア打ち上げ・天宮 3本＋メディア/逆引き 4本）。全45ツールを実呼び出しで検証済みです（外部APIの障害・レート制限時は、例外ではなく CallToolResult のエラーとして返します）。
+登録ツールは **46本**（他国の宇宙機関データ 15本＋火星探査ローバー状況 1本＋天文観測(ESO/CADC/ALMA) 3本＋電波望遠鏡(TART) 1本＋天文ニュース 1本＋天体観測用天気 1本＋天体位置・星座 1本＋星図合成 1本＋太陽系俯瞰 1本＋日食時系列 1本＋NASA POWER気候 1本＋EO Dashboard 2本＋宇宙天気 1本＋AWS STAC 2本＋ISS位置 1本＋衛星地上軌道 1本＋汎用天体周回機 1本＋汎用ローバー位置 1本＋WMO OSCAR 1本＋気象衛星リアルタイム画像 1本＋中国/ロシア打ち上げ・天宮 3本＋メディア/逆引き 4本）。全46ツールを実呼び出しで検証済みです（外部APIの障害・レート制限時は、例外ではなく CallToolResult のエラーとして返します）。
 
 | ツール | できること | データ源 | 認証 |
 |--------|-----------|---------|------|
@@ -227,7 +225,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `uk_stac_collections` | 英国EO DataHubのコレクション一覧 | UK EO DataHub STAC | 不要 |
 | `uk_stac_search` | 英国EO DataHubの衛星・気候データをSTAC検索 | UK EO DataHub STAC | 不要 |
 | `cnes_status` | フランスCNESのポータル（THEIA/GEODES）到達状態・概要 | CNES THEIA/GEODES | 不要(ダウンロードは要登録) |
-| `astronomy_weather` | 天体観測に最適な夜間の時間帯を予報（雲量・視程・風速・降水・**月相・月明かり**から判断） | Open-Meteo | 不要 |
+| `astronomy_weather` | 天体観測に最適な夜間の時間帯を予報（雲量・視程・風速・降水・**月相・月明かり**から判断）。**日本国内の地点では気象庁の天気図（実況・24時間予想）を画像で同時に返す**（`include_chart=false` で無効化） | Open-Meteo + 気象庁天気図 | 不要 |
 | `constellation_now` | 指定地点・時刻で太陽・月・惑星の高度・方位・星座を計算（観測可否判断） | Skyfield + JPL de421 | 不要 |
 | `astronomy_news` | 最新の天文ニュース・「今週の星空ガイド」を取得（観測/ニュース絞込可）。取得不可時は他ソースへ自動フォールバック | Sky & Telescope / Universe Today / NASA / Phys.org RSS | 不要 |
 | `mars_rover_status` | 火星探査ローバー（キュリオシティ等）の現在の状況・天気・ソルを表示 | NASA Mars Weather | 不要 |
@@ -248,6 +246,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `sat_ground_track` | 任意の人工衛星（ISS・ひので・ハッブル等）の現在位置と地上軌道を地球地図にプロットした画像を返す。CelesTrak TLE + Skyfield(SGP4) で真下の点・高度・速度を計算し、NASA Blue Marble 地図に軌道トレイルを重ねる | CelesTrak + Skyfield + Blue Marble | 不要 |
 | `planetary_orbiter_track` | 任意の天体（月・火星・水星・タイタン等）を周回する探査機の現在位置と軌道トレイルを、その天体の地図にプロットした画像を返す。JPL Horizons の状態ベクトルを IAU 自転モデルで天体固定座標（緯度経度・高度）に変換し、NASA Trek の等角図法地図に重ねる。`span_deg=360`で天体全面表示にも対応。**過去機（かぐや等）は運用終了を案内し、落点が公表されている機体は落点を地点マーカーで描いた地図（`figure.kind="impact_site_map"`）を返す**。`sites="apollo"`（または `"apollo11"`〜`"apollo17"`, `"all"`）で **地点マーカー図**（`figure.kind="landing_site_map"`／木星は `impact_site_map`）も返す。**全球等角図がある天体（月・火星・水星・タイタン・ベスタ・ケレス）は地形画像の上に、無い天体（木星・土星・冥王星・金星・ガリレオ衛星など）は緯度経度グリッドの上に**公表座標を描く | JPL Horizons + NASA Trek / NASA NSSDC / PDS | 不要 |
 | `planetary_rover_location_map` | 任意の天体面を移動する探査ローバーの現在地をその天体の地図中心に示した画像（走行経路・着陸点）。NASA MMGIS の位置データと NASA Trek の等角地図を合成。現状データは火星ローバー（Perseverance/Curiosity） | NASA MMGIS + Trek WMTS | 不要 |
+| `weather_satellite_now` | GEO/LEO気象衛星19機（ひまわり9号・GOES-18/19・Meteosat・FY・GK-2A・INSAT・NOAA-20/-21・SNPP・Metop-B/C・FY-3D）の公開画像。GEOは最新フレーム、LEOは日次全球合成。取得不可は `restricted`/`unavailable`/`non_image_product` の理由コードで返す | JMA(himawari.asia)/NOAA STAR/EUMETSAT WMS/CMA-NSMC/KMA/IMD/NASA GIBS | 不要 |
 | `satellite_status` | 世界中の気象・地球観測衛星の運用ステータス・軌道・打ち上げ日（Roscosmos等） | WMO OSCAR | 不要 |
 | `cnsa_status` | 中国CNSA系衛星データポータル（風雲/NSMC・高分/CNSA-GEO・CBERS/CRESDA）の到達状態・概要＋認証不要の代替経路 | CNSA各公式ポータル | 不要(ダウンロードは要登録) |
 | `tiangong_now` | 天宮（Tiangong）中国宇宙ステーションの現在位置（SGP4伝播＋Googleマップ表示） | CelesTrak TLE + SGP4 | 不要 |
@@ -418,7 +417,7 @@ Q: フランスのCNES衛星データは?
 A: cnes_status() → THEIA / GEODES の状態と概要
 ```
 
-### 🔭 `astronomy_weather` — 天体観測用天気（Open-Meteo）
+### 🔭 `astronomy_weather` — 天体観測用天気（Open-Meteo ＋ 気象庁天気図）
 
 [Open-Meteo](https://open-meteo.com)（認証不要・無料・全世界対応）から、指定地点の今後数日間で**天体観測に適した夜間の時間帯**を自動抽出します。雲量・視程・風速・降水確率・昼夜判定を総合して判断し、AIからのアドバイスを返します。
 
@@ -431,7 +430,8 @@ A: cnes_status() → THEIA / GEODES の状態と概要
 Q: マウナケアで今夜天体観測できる?
 A: astronomy_weather(place="マウナケア") → 夜間の観測チャンス時間帯と雲量
 Q: 東京で明日の星空は?
-A: astronomy_weather(place="東京") → 雲が少ない夜間を抽出
+A: astronomy_weather(place="東京") → 雲が少ない夜間を抽出＋気象庁の実況/24時間予想天気図を画像で添付
+A: astronomy_weather(place="東京", include_chart=False) → 天気図なしで予報のみ
 ```
 
 出典: open-meteo.com（CC BY 4.0 データ）
@@ -706,7 +706,7 @@ ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカ�
 # 1. 構文チェック
 uv run python -m compileall -q src/space_finder_mcp
 
-# 2. 全45ツールを実呼び出し（例外漏れ・structuredContent欠落・タイムアウトを検出。数分）
+# 2. 全46ツールを実呼び出し（例外漏れ・structuredContent欠落・タイムアウトを検出。数分）
 uv run python scripts/check-tools.py
 
 # 3. ネットワーク全断を注入して「例外が外へ漏れないか」を検査
@@ -740,7 +740,7 @@ hermes mcp test space-finder-mcp
 src/space_finder_mcp/
 ├── __init__.py          # main() → mcp.run()
 ├── __main__.py          # python -m space_finder_mcp 用の入口
-├── server.py            # FastMCP サーバー定義・45ツール登録
+├── server.py            # FastMCP サーバー定義・46ツール登録
 ├── stac_common.py       # STAC系共通の入力検証ヘルパー（bbox/雲量。ツール定義なし）
 ├── input_utils.py       # 引数の防御的数値変換 as_int/as_float（不正値でも例外を漏らさない）
 ├── img_common.py        # 画像合成の共通ヘルパー（フォント探索/JPEG化/アンチメリジアン分割。ツール定義なし）
@@ -758,7 +758,8 @@ src/space_finder_mcp/
 ├── celestrak.py         # sat_tle（CelesTrak 全衛星軌道TLE）
 ├── uk_datahub.py        # uk_stac_collections / uk_stac_search（英国 EO DataHub）
 ├── cnes.py              # cnes_status（フランス CNES THEIA/GEODES）
-├── weather_astro.py     # astronomy_weather（天体観測用天気, Open-Meteo, 月相対応）
+├── weather_astro.py     # astronomy_weather（天体観測用天気, Open-Meteo, 月相＋気象庁天気図）
+├── weather_sat.py       # weather_satellite_now（GEO/LEO気象衛星の公開画像, 19機＋理由コード）
 ├── power.py             # power_climate（NASA POWER 気候・太陽エネルギー統計）
 ├── eodashboard.py       # eodashboard_collections / detail（EO Dashboard, NASA/ESA/JAXA）
 ├── donki.py             # space_weather（NASA 宇宙天気 DONKI）
@@ -788,7 +789,7 @@ src/space_finder_mcp/
 space-finder-mcp/
 ├── CLAUDE.md                # Claude Code 用プロジェクトガイド
 ├── AGENTS.md                # Codex など AGENTS.md を読むエージェント向け
-├── SKILL.md                 # エージェント向けスキル定義（45ツール仕様）
+├── SKILL.md                 # エージェント向けスキル定義（46ツール仕様）
 ├── mcp.json                 # MCPクライアント設定の例
 ├── .env.example             # 環境変数の例（NASA_API_KEY は任意）
 ├── .claude/rules/           # 開発規約（coding-conventions / testing-and-verification / data-and-sources）

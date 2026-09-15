@@ -1,6 +1,6 @@
 # Space Finder MCP Server — Claude Code 用プロジェクトガイド
 
-宇宙・天文・地球観測の公開データを **45ツール**で横断検索する MCP サーバー（Python / uv 管理）です。NASA・ESA Copernicus・JAXA・ISRO・CSA・INPE・UK EO DataHub・CNSA・CelesTrak・JPL（DE421/SBDB/Horizons）・Wikidata・Open-Meteo などを統合し、衛星画像・軌道マップ・日食パネルを**画像で返しつつ**、LLM向けに構造化JSONも同時に返します。
+宇宙・天文・地球観測の公開データを **46ツール**で横断検索する MCP サーバー（Python / uv 管理）です。NASA・ESA Copernicus・JAXA・ISRO・CSA・INPE・UK EO DataHub・CNSA・CelesTrak・JPL（DE421/SBDB/Horizons）・Wikidata・Open-Meteo などを統合し、衛星画像・軌道マップ・日食パネルを**画像で返しつつ**、LLM向けに構造化JSONも同時に返します。
 
 **開発規約は分割ルールにあります**: `.claude/rules/`（コーディング規約・検証ゲート・データ出典）を参照してください。
 
@@ -39,7 +39,7 @@ claude mcp list   # 確認
 
 - `-s project` はリポジトリ直下に `.mcp.json` を作ります（チーム共有向け）。個人利用だけで済ませるなら `-s user`（全プロジェクトで有効）を使います。
 
-検証済みの代替コマンド（いずれも 45ツールを返して起動します）:
+検証済みの代替コマンド（いずれも 46ツールを返して起動します）:
 
 ```bash
 uv --directory /abs/path/to/space-finder-mcp run space-finder-mcp
@@ -94,7 +94,7 @@ uv run python -m compileall -q src/space_finder_mcp   # 構文チェック
 uv run python scripts/check-tools.py --dead-code      # デッドコード走査（0件を維持）
 uv run python scripts/check-tools.py --offline        # ネットワーク全断で例外漏れを検査
 uv run python scripts/check-tools.py --fuzz           # 数値引数へ不正値を注入（例外漏れ0を維持）
-uv run python scripts/check-tools.py                  # 全45ツール実呼び出し（数分）
+uv run python scripts/check-tools.py                  # 全46ツール実呼び出し（数分）
 uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールのみ
 ```
 
@@ -114,7 +114,7 @@ uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールの�
 
 1. `README.md` のツール表・「直近の更新内容」と `SKILL.md` を**同一変更内で**更新（ツール追加/削除/仕様変更時）
 2. `pyproject.toml` の `version` を更新
-3. `uv run python scripts/check-tools.py` で全45ツールが正常なことを確認
+3. `uv run python scripts/check-tools.py` で全46ツールが正常なことを確認
 4. `uv build` でパッケージ作成を確認 → `dist/` `build/` を削除
 
 ## ライセンス・データ出典

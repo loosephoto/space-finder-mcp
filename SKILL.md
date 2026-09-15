@@ -1,6 +1,6 @@
 ---
 name: space-finder-mcp
-description: 宇宙・天文・地球観測データを横断検索するMCPサーバー。NASA/ESA/JAXA/ISRO/CSA/INPE/UK/CNSA/CelesTrak/JPL/Wikidata/Open-Meteo を統合した45ツール。衛星画像・軌道マップ・日食パネルを画像で返し、構造化JSONも同時に提供。
+description: 宇宙・天文・地球観測データを横断検索するMCPサーバー。NASA/ESA/JAXA/ISRO/CSA/INPE/UK/CNSA/CelesTrak/JPL/Wikidata/Open-Meteo を統合した46ツール。衛星画像・軌道マップ・日食パネルを画像で返し、構造化JSONも同時に提供。
 category: space
 ---
 
@@ -23,7 +23,7 @@ category: space
 - 打ち上げ: Launch Library 2
 - 図法・画像素材: NASA Blue Marble、NASA Trek WMTS（月・火星・水星・タイタン・ベスタ・ケレス）
 
-## ツール一覧（45種）
+## ツール一覧（46種）
 
 | ツール | できること | データ源 | 認証 |
 |:--|:--|:--|:--|
@@ -48,7 +48,7 @@ category: space
 | `uk_stac_collections` | 英国EO DataHubのコレクション一覧 | UK EO DataHub STAC | 不要 |
 | `uk_stac_search` | 英国EO DataHubの衛星・気候データをSTAC検索 | UK EO DataHub STAC | 不要 |
 | `cnes_status` | フランスCNESのポータル（THEIA/GEODES）到達状態・概要 | CNES THEIA/GEODES | 不要(ダウンロードは要登録) |
-| `astronomy_weather` | 天体観測に最適な夜間の時間帯を予報（雲量・視程・風速・降水・**月相・月明かり**から判断） | Open-Meteo | 不要 |
+| `astronomy_weather` | 天体観測に最適な夜間の時間帯を予報（雲量・視程・風速・降水・**月相・月明かり**）。日本国内は気象庁天気図（実況・24h予想）を画像添付 | Open-Meteo + JMA | 不要 |
 | `constellation_now` | 指定地点・時刻で太陽・月・惑星の高度・方位・星座を計算（観測可否判断） | Skyfield + JPL de421 | 不要 |
 | `astronomy_news` | 最新の天文ニュース・「今週の星空ガイド」を取得（観測/ニュース絞込可）。取得不可時は他ソースへ自動フォールバック | Sky & Telescope / Universe Today / NASA / Phys.org RSS | 不要 |
 | `mars_rover_status` | 火星探査ローバー（キュリオシティ等）の現在の状況・天気・ソルを表示 | NASA Mars Weather | 不要 |
@@ -69,6 +69,7 @@ category: space
 | `sat_ground_track` | 任意の人工衛星（ISS・ひので・ハッブル等）の現在位置と地上軌道を地球地図にプロットした画像を返す。CelesTrak TLE + Skyfield(SGP4) で真下の点・高度・速度を計算し、NASA Blue Marble 地図に軌道トレイルを重ねる | CelesTrak + Skyfield + Blue Marble | 不要 |
 | `planetary_orbiter_track` | 任意の天体（月・火星・水星・タイタン等）を周回する探査機の現在位置と軌道トレイルを、その天体の地図にプロットした画像を返す。JPL Horizons の状態ベクトルを IAU 自転モデルで天体固定座標（緯度経度・高度）に変換し、NASA Trek の等角図法地図に重ねる。`span_deg=360`で天体全面表示にも対応 | JPL Horizons + NASA Trek | 不要 |
 | `planetary_rover_location_map` | 任意の天体面を移動する探査ローバーの現在地をその天体の地図中心に示した画像（走行経路・着陸点）。NASA MMGIS の位置データと NASA Trek の等角地図を合成。現状データは火星ローバー（Perseverance/Curiosity） | NASA MMGIS + Trek WMTS | 不要 |
+| `weather_satellite_now` | GEO/LEO気象衛星19機の公開画像（ひまわり9号・GOES-18/19・Meteosat-12/11/10/9・FY-4B/2H/2G・GK-2A・INSAT-3DR/3DS・NOAA-20/-21・SNPP・Metop-B/C・FY-3D）。GEO=最新フレーム/LEO=日次全球合成、取得不可は理由コード | JMA/NOAA STAR/EUMETSAT WMS/NSMC/KMA/IMD/NASA GIBS | 不要 |
 | `satellite_status` | 世界中の気象・地球観測衛星の運用ステータス・軌道・打ち上げ日（Roscosmos等） | WMO OSCAR | 不要 |
 | `cnsa_status` | 中国CNSA系衛星データポータル（風雲/NSMC・高分/CNSA-GEO・CBERS/CRESDA）の到達状態・概要＋認証不要の代替経路 | CNSA各公式ポータル | 不要(ダウンロードは要登録) |
 | `tiangong_now` | 天宮（Tiangong）中国宇宙ステーションの現在位置（SGP4伝播＋Googleマップ表示） | CelesTrak TLE + SGP4 | 不要 |
@@ -114,6 +115,9 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 「ISSの現在位置を地球地図で」                → sat_ground_track(name="iss")
 「ハッブルの軌道」「ひのでの位置」            → sat_ground_track(name="hubble"/"hinode")
 「みちびきの8の字軌道」                      → sat_ground_track(norad_id=49336, minutes=720)
+「ひまわり9号の最新雲画像」                → weather_satellite_now(satellite="ひまわり9号", band="visible")
+「ひまわりの赤外線画像」                    → weather_satellite_now(band="infrared")  # 昼夜問わず雲頂
+「世界の気象衛星の画像」                    → weather_satellite_now(satellite="NOAA-20")  # GEO/LEOプロバイダを衛星名で選択
 「LROの現在位置を月面地図で」                → planetary_orbiter_track(body="moon", orbiter="lro")
 「MROは火星のどこ？」                        → planetary_orbiter_track(body="mars", orbiter="mro")
 「パーサヴィアランスの現在地を火星地図で」    → planetary_rover_location_map(body="mars", rover="perseverance")
@@ -130,7 +134,7 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 「イオの地図を見せて」                            → planetary_orbiter_track(body="io", sites="map")        # 地点なし＝全球図のみ（kind=body_map）
 「東京で見える次の日食を画像で」              → solar_eclipse_series(place="東京")  # 約4年先まで検索（東京の次は2030-06-01）。それでも無ければ date 案内
 「2030年の日食を東京で」                      → solar_eclipse_series(place="東京", date="2030-06-01")
-「今夜の観測に向く時間帯は？」                → astronomy_weather(place="東京")
+「今夜の観測に向く時間帯は？」                → astronomy_weather(place="東京")  # 日本国内は気象庁天気図も同時に返る
 「東京の今夜の空に何が見える？」              → sky_map_with_satellites(place="東京")
 「火星の画像を見せて」                        → search_space_images(query="mars")
 「米国初の宇宙望遠鏡は？」                    → reverse_lookup(category="宇宙望遠鏡", country="United States")
@@ -157,7 +161,7 @@ uv run python -m compileall -q src/space_finder_mcp   # 構文
 uv run python scripts/check-tools.py --dead-code      # デッドコード（0件を維持）
 uv run python scripts/check-tools.py --offline        # ネットワーク全断で例外漏れ検査
 uv run python scripts/check-tools.py --figures        # 描画系の図の注記(figure/1)を検査
-uv run python scripts/check-tools.py                  # 全45ツール実呼び出し（数分、exit 1 で失敗）
+uv run python scripts/check-tools.py                  # 全46ツール実呼び出し（数分、exit 1 で失敗）
 ```
 
 **MCPサーバーはホットリロードなし** — `src/` 変更後はクライアント再起動が必要です。
@@ -202,5 +206,4 @@ uv run python scripts/check-tools.py                  # 全45ツール実呼び�
 
 ## 更新履歴
 
-- v0.28.0 — **天体面地図の描画を `surface_map.py` に集約**（タイル合成・等角投影 `g2px`/逆変換・地点マーカー・画素検証を1か所に。周回機とローバーで投影/検証が別実装だった）。**地点マーカー図** `planetary_orbiter_track(sites=...)`: アポロ6地点（`apollo`/`apollo11`〜`apollo17`）、月・火星・金星の着陸地点（`all`）、木星 SL9 衝突23破片、タイタン＝ホイヘンス、全球図のみ（`map`）。過去機の公表落点は `impact_site_map`（かぐや＝65.5°S/80.4°E）。全球画像が無い天体は緯度経度グリッド図。**複数彗星の1枚パネル** `solar_system_now(comet="A,B")`（1彗星=1パネル、縮尺差は注記に自動生成）。**近点が画面で分解できない楕円**は `verify_curve(occluders=...)` で上界検査へ自動切替（`periapsis_resolvable: false`）、曲線に重なるラベルは描かず `skipped_labels` に。**日食の既定探索を1400日へ拡大**（東京は800日以内に可視の食が無く既定引数が常に空振りだった）し、走査を30分刻み→該当窓のみ2分刻みにして **62→28秒**（指定日 0.4〜1.2秒）。**`space_weather` をカテゴリ単位キャッシュ**（DEMO_KEY を1回4消費→種別変更で再取得しない）にし、429時の自己矛盾した案内を原因別文言へ。**地図タイルの欠けを `figure.notes` に数値から生成**（32枚中1枚の故障注入で検証）。`check-tools.py --fuzz` の `KeyError: 'detail'`（タイムアウト時にゲートが落ちる）を修正。検証: 全45ツール exit 0（OK 42 / ERROR_RESULT 3＝DEMO_KEY の429）／--dead-code 0／--fuzz 252・例外漏れ0／--offline exit 0／--figures exit 0（figure 未対応 0）。
-
+- v0.29.0 — **気象庁天気図を `astronomy_weather` に統合**: 日本国内の地点では実況天気図と24時間予想天気図（気象庁 bosai/weather_map の `list.json` + `data/png/`）を `content` に画像で添付し、URL・観測時刻(JST)・48時間予想URLを `structuredContent.weather_chart` に返す。`include_chart=false` で無効化、取得失敗時は予報のみで継続。観測時刻はファイル名の7番目（`..._C_010000_<解析時刻>_...`）から取得。**`weather_satellite_now` を19機へ拡張**: GEO 13機（ひまわり9号・GOES-18/19・Meteosat-12/11/10/9・FY-4B/2H/2G・GK-2A・INSAT-3DR/3DS）＋LEO 6機（NOAA-20/-21・SNPP・Metop-B/C・FY-3D）。GEO=10分スロットの後方探索、LEO=日次全球合成（NASA GIBS は約1日遅れ）と取得セマンティクスを区別。取得不可は理由コード（DoD=`restricted`、Roscosmos=`unavailable`、COSMIC-2/TRITON=`non_image_product`）。EUMETSAT の旧静的画像サーバ廃止（2026-02）に伴い GeoServer WMS の固定URL（`mtg_fd:`/`msg_iodc:`/`msg_fes:`/`eps:m0x_`）へ移行。検証: 全46ツール exit 0（DEMO_KEY の429のみ想定内）／--dead-code 0／--fuzz 252・例外漏れ0／--offline exit 0／19機の実取得確認。
