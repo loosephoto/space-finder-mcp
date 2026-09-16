@@ -1,6 +1,6 @@
 ---
 name: space-finder-mcp
-description: 宇宙・天文・地球観測データを横断検索するMCPサーバー。NASA/ESA/JAXA/ISRO/CSA/INPE/UK/CNSA/CelesTrak/JPL/Wikidata/Open-Meteo を統合した46ツール。衛星画像・軌道マップ・日食パネルを画像で返し、構造化JSONも同時に提供。
+description: 宇宙・天文・地球観測データを横断検索するMCPサーバー。NASA/ESA/JAXA/ISRO/CSA/INPE/UK/CNSA/CelesTrak/JPL/Wikidata/Open-Meteo を統合した47ツール。衛星画像・軌道マップ・日食パネル・月齢マップを画像で返し、構造化JSONも同時に提供。
 category: space
 ---
 
@@ -23,7 +23,7 @@ category: space
 - 打ち上げ: Launch Library 2
 - 図法・画像素材: NASA Blue Marble、NASA Trek WMTS（月・火星・水星・タイタン・ベスタ・ケレス）
 
-## ツール一覧（46種）
+## ツール一覧（47種）
 
 | ツール | できること | データ源 | 認証 |
 |:--|:--|:--|:--|
@@ -48,7 +48,7 @@ category: space
 | `uk_stac_collections` | 英国EO DataHubのコレクション一覧 | UK EO DataHub STAC | 不要 |
 | `uk_stac_search` | 英国EO DataHubの衛星・気候データをSTAC検索 | UK EO DataHub STAC | 不要 |
 | `cnes_status` | フランスCNESのポータル（THEIA/GEODES）到達状態・概要 | CNES THEIA/GEODES | 不要(ダウンロードは要登録) |
-| `astronomy_weather` | 天体観測に最適な夜間の時間帯を予報（雲量・視程・風速・降水・**月相・月明かり**）。日本国内は気象庁天気図（実況・24h予想）を画像添付 | Open-Meteo + JMA | 不要 |
+| `astronomy_weather` | 天体観測に最適な夜間の時間帯を予報（雲量・視程・風速・降水・**月相・月明かり**）。日本国内は気象庁の**雨雲・降水画像**（解析雨量＋降水予報パネル＋ナウキャスト、雷の有無も確認）を添付（figure/1 対応） | Open-Meteo + JMA | 不要 |
 | `constellation_now` | 指定地点・時刻で太陽・月・惑星の高度・方位・星座を計算（観測可否判断） | Skyfield + JPL de421 | 不要 |
 | `astronomy_news` | 最新の天文ニュース・「今週の星空ガイド」を取得（観測/ニュース絞込可）。取得不可時は他ソースへ自動フォールバック | Sky & Telescope / Universe Today / NASA / Phys.org RSS | 不要 |
 | `mars_rover_status` | 火星探査ローバー（キュリオシティ等）の現在の状況・天気・ソルを表示 | NASA Mars Weather | 不要 |
@@ -60,6 +60,7 @@ category: space
 | `sky_map_with_satellites` | 指定地の空に太陽系の惑星と人工衛星を重ねた画像（matplotlib正確版=PNG/Pillow簡易版=JPEGを選択） | JPL de421+Skyfield / CelesTrak+SGP4 | 不要 |
 | `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示）。`view="comet_orbit"` で彗星の軌道面ビュー（太陽＝焦点の楕円／e≥1 は双曲線の枝）。`comet` にカンマ区切りで複数（または `comet2`、最大4天体）指定すると **1彗星=1パネルの1枚画像**（パネルごとに軌道面・縮尺が異なる＝`figure.notes` に自動生成、`figure.kind=orbit_plane_set`、パネル別は `figure.panels[]`。一部の惑星の位置計算に失敗した場合は `structuredContent.planet_errors` に理由を記録し、`content` と `figure.notes` に失敗数を出します） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
 | `solar_eclipse_series` | 日食（太陽が月に欠ける過程）の時系列パネル画像（7枚・食分と太陽高度・次回日食の自動検索=約4年(1400日)先まで・max_magnitude対応。**地平線下で見えない食は返さない**） | JPL DE421+Skyfield | 不要 |
+| `moon_phase_map` | **月齢マップ**。`layout="calendar"`（既定）=1か月の日別格子、`layout="lunation"`=1朔望月（朔→朔）の時系列パネル（`days` 3〜12枚）。輝面の向きは太陽の位置角から計算（月齢からの決め打ちをしない）。朔・望・上弦・下弦の時刻を現地時間で併記 | JPL DE421+Skyfield | 不要 |
 | `eodashboard_collections` | EO Dashboard（NASA×ESA×JAXA共同）の173データセットをテーマ・機関・キーワードで検索 | EO Dashboard (GitHub catalog) | 不要 |
 | `eodashboard_detail` | EO Dashboardの1データセットの詳細（衛星・センサー・説明・画像・参照リンク） | EO Dashboard (GitHub catalog) | 不要 |
 | `space_weather` | NASA宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象） | NASA DONKI | キー(任意/DEMO_KEY可) |
@@ -134,7 +135,11 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 「イオの地図を見せて」                            → planetary_orbiter_track(body="io", sites="map")        # 地点なし＝全球図のみ（kind=body_map）
 「東京で見える次の日食を画像で」              → solar_eclipse_series(place="東京")  # 約4年先まで検索（東京の次は2030-06-01）。それでも無ければ date 案内
 「2030年の日食を東京で」                      → solar_eclipse_series(place="東京", date="2030-06-01")
-「今夜の観測に向く時間帯は？」                → astronomy_weather(place="東京")  # 日本国内は気象庁天気図も同時に返る
+「今月の月齢マップを見せて」              → moon_phase_map(place="東京")  # 1か月の月齢カレンダー（既定・layout="calendar"）
+「次の朔望月の満ち欠けを画像で」          → moon_phase_map(layout="lunation", days=8)  # 朔→朔の8枚パネル
+「2026年9月の満月はいつ？」              → moon_phase_map(date="2026-09")  # 朔・望・上弦・下弦の時刻を現地時間で返す
+「9年前のあの日の月齢は？」              → moon_phase_map(date="2017-08-06")  # 日付だけで過去も可（暦はローカル計算）
+「今夜の観測に向く時間帯は？」                → astronomy_weather(place="東京")  # 日本国内は気象庁の雨雲・降水画像も同時に返る（figure.notes を要約せず引用）
 「東京の今夜の空に何が見える？」              → sky_map_with_satellites(place="東京")
 「火星の画像を見せて」                        → search_space_images(query="mars")
 「米国初の宇宙望遠鏡は？」                    → reverse_lookup(category="宇宙望遠鏡", country="United States")
@@ -143,14 +148,15 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 
 ## 図の注記 figure/1（描画系ツールの応答）
 
-描画系ツール（`solar_system_now` / `sat_ground_track` / `planetary_orbiter_track` / `planetary_rover_location_map` / `sky_map_with_satellites` / `solar_eclipse_series`）は、`structuredContent.figure` に **視点(view)・主天体の置き方(primary: 楕円は焦点であって中心ではない)・縮尺(scale)・円錐曲線(conic)・注記(notes)・自己検証(verify)・説明(caption)** を返します。`content` にも同じ注記が `### ⚠️ 図の注記` として入ります。
+描画系ツール（`solar_system_now` / `sat_ground_track` / `planetary_orbiter_track` / `planetary_rover_location_map` / `sky_map_with_satellites` / `solar_eclipse_series` / `moon_phase_map` / `astronomy_weather`〔雨雲・降水画像を返すとき〕）は、`structuredContent.figure` に **視点(view)・主天体の置き方(primary: 楕円は焦点であって中心ではない)・縮尺(scale)・円錐曲線(conic)・注記(notes)・自己検証(verify)・説明(caption)** を返します。`content` にも同じ注記が `### ⚠️ 図の注記` として入ります。
 
 - **回答に図を説明するときは `figure.notes` を要約・言い換えせず、そのまま引用する**（「主天体は焦点」「対数縮尺」「地上軌道は投影」等の但し書きを落とすと図の誤読を招く）。
 - **`conic.kind` が `hyperbola`/`parabola` のとき、その軌道は閉じていない**（遠日点なし）。「周回軌道」と説明しないこと。
 - `verify.ok` が真なら、描いた画素から測った近点/遠点距離が数値と一致し、ラベルが線に被っていないことを意味します。
 - 地図タイルが取れなかった場合は `figure.notes` に「地図タイル N/M 枚を取得できませんでした（図の該当領域は背景色のまま）」が**数値から生成**されます（欠けを黙って捨てると「地図に無い＝何も無い」と誤読されるため）。
-- `figure.kind` は描画の種類を示します（`heliocentric_overview` / `orbit_plane` / `orbit_plane_set` / `ground_track_map` / `sky_view` / `eclipse_panels` / **`impact_site_map`**（落点などの地点マーカーを天体面地図に描いた図） / **`landing_site_map`**（着陸地点。複数地点は番号＋凡例、`verify.markers[]` に地点ごとの検証））。
+- `figure.kind` は描画の種類を示します（`heliocentric_overview` / `orbit_plane` / `orbit_plane_set` / `ground_track_map` / `sky_view` / `eclipse_panels` / **`moon_phase_calendar`** / **`moon_phase_lunation`** / **`impact_site_map`**（落点などの地点マーカーを天体面地図に描いた図） / **`landing_site_map`**（着陸地点。複数地点は番号＋凡例、`verify.markers[]` に地点ごとの検証））。
 - `verify.periapsis_check` は `equality`（近点距離を等値で検査）か `upper_bound`（**近点が画面上で分解できない**ため上界だけを検査）です。**超長距離の楕円では近日点が「誇張した主天体の円盤」の内側に入り、曲線の端の画素は近点ではなく円盤の縁になる**ので、`upper_bound` に切り替わります（`periapsis_resolvable: false` ＋ `periapsis_unresolved_reason`）。この場合も主天体を楕円の中心に置く誤りは検出できます（上界＋遠点側の等値検査）。**`periapsis_resolvable` が偽の図を説明するときは、注記にある「この縮尺では図から確認できない」旨を落とさないこと。**
+- `moon_phase_map` は**月齢・照度・満ち欠けの向きを自称する図**です。`verify` は**位置角（PA）軸上で明暗境界線の位置を測り直した照度**との一致（許容 0.05。細い三日月は境界線が1〜2画素幅になり丸め誤差が残る）で、走査軸が申告した PA 方向なので**向きが違えば一致しません**。図の月は模式図（実写ではなく、月の海は乱数・クレーターや秤動・地球照は描かない）で、**天の北を上・東を左に置いた見え方**（地平線からの見え方ではない）です。「朔・望の日は正午時点では前後になる」等の食い違いは `figure.notes` に**数値から生成**してあります。
 - `solar_eclipse_series` は**その観測地で太陽が地平線より上にある時間帯だけ**を描きます。全日食が地平線下なら図を返さず「見えません（最大高度 −67°）」と明示します（見えない食を図にすると誤解させるため）。
 - 検査: `scripts/check-tools.py --figures`（注記が空・`verify.ok` が偽なら exit 1）。既定引数では通らない経路（`view="comet_orbit"`、可視の日食）も明示的に叩きます。
 
@@ -161,7 +167,7 @@ uv run python -m compileall -q src/space_finder_mcp   # 構文
 uv run python scripts/check-tools.py --dead-code      # デッドコード（0件を維持）
 uv run python scripts/check-tools.py --offline        # ネットワーク全断で例外漏れ検査
 uv run python scripts/check-tools.py --figures        # 描画系の図の注記(figure/1)を検査
-uv run python scripts/check-tools.py                  # 全46ツール実呼び出し（数分、exit 1 で失敗）
+uv run python scripts/check-tools.py                  # 全47ツール実呼び出し（数分、exit 1 で失敗）
 ```
 
 **MCPサーバーはホットリロードなし** — `src/` 変更後はクライアント再起動が必要です。
@@ -206,4 +212,4 @@ uv run python scripts/check-tools.py                  # 全46ツール実呼び�
 
 ## 更新履歴
 
-- v0.29.1 — **失敗を黙って落とさない修正**: Open Notify の `timestamp` 異常値で例外が漏れる問題（`iss_now`、`structuredContent.error="bad timestamp"` を返す）／`neo_today` の `content` 側で `api_key` が伏せ字化されていなかった漏れ／MAVEN を「2025-12-06 交信途絶・2026-06-03 運用終了宣言（NASA）」へ更新し、Horizons のエフェメリス終了日と区別／`solar_system_now.planet_errors` と `planetary_orbiter_track.trail_errors` で部分失敗を数値化（`figure.notes` の失敗注記も実数から生成）／`tests/test_regressions.py`（unittest 3件）と `AGENTS.md`・`CLAUDE.md` のゲートへ回帰テスト追加。検証: 全46ツール exit 0（DEMO_KEY の429のみ想定内）／--dead-code 0／--fuzz 252・例外漏れ0／--offline exit 0／--figures 描画系6・未対応0。
+- v0.30.0 — **雨雲・降水画像と月齢マップ**: `astronomy_weather` の日本国内向け添付画像を気象庁の天気図から**解析雨量・降水短時間予報**（実況＋最大3時刻・+15時間先まで・`rasrf` と同一の画像ファイル）＋**ナウキャスト**（雨雲の動き・5分更新・+60分、雷活動度 `thns` 検出時は `figure.notes` で警告）へ差し替え、描画は `jma_rain.py` に集約（タイルは偶数ズームのみ／`time.json` はUTC表記の数字をファイル名に使う／マーカーは気象庁と同一の緯度経度→画素換算＋画素検証）。あわせて日食の描画ルーチンを応用した **`moon_phase_map`** を追加（`layout="calendar"`＝1か月の日別格子／`layout="lunation"`＝朔望月の時系列パネル。月齢＝直前の朔からの経過日数・照度＝円盤の輝面の割合で、**輝面の向きは月齢から決め打ちせず**太陽の位置角から計算。明暗境界線の位置を画素から測り直して照度と突き合わせ、朔・望の日は正午時点との食い違いを注記に数値で明示）。検証: 全47ツール exit 0（429のみ想定内）／--dead-code 0／--fuzz 例外漏れ0／--offline exit 0／--figures 描画系8／unittest 11件 OK。

@@ -2,7 +2,7 @@
 """全ツールの回帰検証スクリプト（依存追加なし・標準ライブラリのみ）。
 
 使い方（リポジトリ直下で実行）:
-    uv run python scripts/check-tools.py              # 全45ツールを実呼び出し
+    uv run python scripts/check-tools.py              # 全47ツールを実呼び出し
     uv run python scripts/check-tools.py --offline    # ネットワーク全断を注入して例外漏れを検査
     uv run python scripts/check-tools.py --dead-code  # 未参照定義・未使用importの走査
     uv run python scripts/check-tools.py --only sat_tle,apod
@@ -71,6 +71,7 @@ def _is_error(result) -> bool:
 DRAWN_FIGURE_TOOLS = (
     "solar_system_now", "sat_ground_track", "planetary_orbiter_track",
     "planetary_rover_location_map", "sky_map_with_satellites", "solar_eclipse_series",
+    "astronomy_weather", "moon_phase_map",
 )
 
 
@@ -152,6 +153,17 @@ FIGURES_EXTRA_CALLS = (
      {"place": "ロンドン"}, {"figure_kind": "eclipse_panels"}),
     ("solar_eclipse_series[深い部分食]", "solar_eclipse_series",
      {"place": "東京", "date": "2035-09-02"}, {"figure_kind": "eclipse_panels"}),
+    # 雨雲・降水画像（日本国内のみ添付される）: figure.kind を検査
+    ("astronomy_weather[雨雲・降水画像]", "astronomy_weather",
+     {"place": "東京"}, {"figure_kind": "weather_rain_panels"}),
+    # 月齢マップ: 月齢カレンダー・朔の日（照度0で輝面を描かない経路）・朔望月パネル。
+    ("moon_phase_map[月齢カレンダー]", "moon_phase_map",
+     {"date": "2026-09", "place": "東京"}, {"figure_kind": "moon_phase_calendar"}),
+    ("moon_phase_map[朔の日]", "moon_phase_map",
+     {"date": "2026-09-11", "place": "東京"}, {"figure_kind": "moon_phase_calendar"}),
+    ("moon_phase_map[朔望月パネル]", "moon_phase_map",
+     {"layout": "lunation", "place": "東京", "days": 8},
+     {"figure_kind": "moon_phase_lunation"}),
 )
 
 

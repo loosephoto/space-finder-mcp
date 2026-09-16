@@ -7,10 +7,12 @@ Open-Meteo (api.open-meteo.com) は認証不要・無料(非商用1日10,000回)
 本ツールは「今夜・今後3日で天体観測に適した時間帯」を自動抽出し、
 AIからのアドバイス形式で返す。
 
-日本国内の地点では、加えて気象庁の天気図（日本付近の実況・24時間予想）を
-画像として content に添付し、URLと観測時刻を structuredContent.weather_chart に返す
-（include_chart=False で無効化。取得失敗時は画像なしで予報のみを返す）。
-出典: open-meteo.com (CC BY 4.0) ／ 気象庁 天気図 (jma.go.jp/bosai/weather_map)
+日本国内の地点では、加えて気象庁の雨雲・降水画像（解析雨量・降水短時間予報の
+パネルと、ナウキャスト＝雨雲の動き）を content に添付し、時刻や凡例・雷の有無を
+structuredContent.weather_rain と structuredContent.figure（図の注記）に返す
+（include_rain=False で無効化。取得失敗時は画像なしで予報のみを返す）。
+図の描画は jma_rain.py（降水は雲量そのものではない旨の注記を必ず付ける）。
+出典: open-meteo.com (CC BY 4.0) ／ 気象庁 ナウキャスト・解析雨量 (jma.go.jp)
 """
 from __future__ import annotations
 
@@ -21,8 +23,9 @@ import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import TTL_DAILY, TTL_FORECAST, ttl_cache, is_error_result
-from .img_common import media_link_line, save_output
+from .img_common import figure_text_block, media_link_line, save_output
 from .input_utils import as_float, as_int
+from .jma_rain import rain_images
 
 API = "https://api.open-meteo.com/v1/forecast"
 UA = {"User-Agent": "space-finder-mcp/0.4 (MCP; Open-Meteo astronomy)"}
@@ -104,76 +107,10 @@ def _night_obs_windows(h: dict, daily: dict, max_cloud: float = 40.0,
 
 
 
-_JMA_LIST = "https://www.jma.go.jp/bosai/weather_map/data/list.json"
-_JMA_PNG = "https://www.jma.go.jp/bosai/weather_map/data/png/"
-_JMA_UA = {"User-Agent": "space-finder-mcp/0.30 (MCP; JMA weather chart)"}
-
-@ttl_cache(TTL_DAILY, maxsize=8, skip_if=lambda v: v is None)
-def _jma_chart_list():
-    try:
-        r = requests.get(_JMA_LIST, headers=_JMA_UA, timeout=30)
-        r.raise_for_status()
-        return r.json()
-    except (requests.RequestException, ValueError):
-        return None
-
-def _fetch_jma_png(url):
-    if not url:
-        return None
-    try:
-        r = requests.get(url, headers=_JMA_UA, timeout=60)
-        if r.status_code == 200 and "image" in r.headers.get("Content-Type", "") and r.content:
-            return r.content
-    except requests.RequestException:
-        pass
-    return None
-
-def _is_japan_region(lat, lon, name):
-    txt = str(name or "").lower()
-    if any(k in txt for k in ("japan", "日本", "tokyo", "osaka", "nagoya", "sapporo", "fukuoka", "okinawa", "kyoto", "kobe", "sendai", "naha", "hiroshima", "kawasaki", "saitama", "yokohama")):
-        return True
-    try:
-        return (20 <= float(lat) <= 46) and (122 <= float(lon) <= 154)
-    except (TypeError, ValueError):
-        return False
-
-def _jma_charts_for(lat, lon, name):
-    if not _is_japan_region(lat, lon, name):
-        return None
-    lst = _jma_chart_list()
-    if not lst:
-        return None
-    near = lst.get("near") or {}
-    def pick(key):
-        arr = near.get(key) or []
-        return _JMA_PNG + arr[-1] if arr else None
-    now = pick("now")
-    ft24 = pick("ft24")
-    ft48 = pick("ft48")
-    if not now:
-        return None
-    now_b = _fetch_jma_png(now)
-    ft24_b = _fetch_jma_png(ft24) if ft24 else None
-    parts = now.rsplit("/", 1)[-1].split("_")
-    published = parts[0] if parts and len(parts[0]) >= 12 else ""
-    obs = ""
-    if len(parts) > 6 and len(parts[6]) >= 12:
-        o = parts[6]
-        obs = o[0:4] + "-" + o[4:6] + "-" + o[6:8] + " " + o[8:10] + ":" + o[10:12] + " JST"
-    return {
-        "now_bytes": now_b, "ft24_bytes": ft24_b,
-        "now_url": now, "ft24_url": ft24, "ft48_url": ft48,
-        "observed": obs, "published_utc": published,
-        "payload": {"now_url": now, "ft24_url": ft24, "ft48_url": ft48,
-                    "observed_jst": obs, "published_utc": published,
-                    "source": "JMA weather chart (jma.go.jp/bosai/weather_map)", "region": "Japan"},
-        "text": "🗺 気象庁 天気図（日本付近・実況） 観測: " + (obs or "最新"),
-    }
-
 @ttl_cache(TTL_FORECAST, maxsize=64, skip_if=is_error_result)
 def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[float] = None,
                       place: Optional[str] = None, days: int = 3,
-                      max_cloud: float = 40.0, include_chart: bool = True) -> CallToolResult:
+                      max_cloud: float = 40.0, include_rain: bool = True) -> CallToolResult:
     """天体観測に最適な時間帯を予報する（Open-Meteo, 認証不要・全世界対応）。
 
     指定した地点の今後数日間で「夜間かつ雲が少なく・視程が良い」時間帯を抽出し、
@@ -188,8 +125,10 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
         place: 地名（緯度経度より優先）。Open-Meteo のジオコーディングで解決。
         days: 予報日数（1〜7、既定 3）。
         max_cloud: 「観測可」とみなす雲量の上限%（既定 40）。
-        include_chart: 日本国内の地点に限り、気象庁の天気図（実況・24時間予想）を
-            画像として添付する（既定 True。取得失敗時は添付なしで続行）。
+        include_rain: 日本国内の地点に限り、気象庁の雨雲・降水画像
+            （解析雨量・降水短時間予報のパネル＋ナウキャスト＝雨雲の動き）を
+            添付する（既定 True。取得失敗時は添付なしで続行）。
+            ⚠️ structuredContent.figure.notes は要約せずそのまま引用すること。
     """
     days = as_int(days, 3, 1, 7)
     max_cloud = as_float(max_cloud, 40.0, 0.0, 100.0)
@@ -238,29 +177,26 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
     name = place or f"({lat},{lon})"
     times = h["time"]
 
-    # 気象庁天気図（日本国内のみ・取得失敗時は省略）
-    chart_blocks = []
-    chart_sc = {}
-    if include_chart:
-        _jc = _jma_charts_for(lat, lon, name)
-        if _jc:
-            chart_sc = {"weather_chart": _jc["payload"]}
-            if _jc["now_bytes"]:
-                cap = _jc["text"]
-                p_now = save_output(_jc["now_bytes"], "astronomy_weather_jma", "png")
-                link = media_link_line("気象庁 天気図を開く（実況・日本付近）", url=_jc["now_url"], path=p_now, kind="image")
-                if link:
-                    cap = cap + chr(10) + link
-                chart_blocks.append(TextContent(type="text", text=cap))
-                chart_blocks.append(ImageContent(type="image", data=base64.b64encode(_jc["now_bytes"]).decode("ascii"), mimeType="image/png", altText="気象庁 実況天気図（日本付近）"))
-                _jc["payload"]["image_path"] = p_now
-            if _jc["ft24_bytes"]:
-                p_ft = save_output(_jc["ft24_bytes"], "astronomy_weather_jma_ft24", "png")
-                if p_ft:
-                    chart_blocks.append(TextContent(type="text", text=media_link_line("気象庁 24時間予想天気図を開く（日本付近）", url=_jc["ft24_url"], path=p_ft, kind="image")))
-                chart_blocks.append(ImageContent(type="image", data=base64.b64encode(_jc["ft24_bytes"]).decode("ascii"), mimeType="image/png", altText="気象庁 24時間予想天気図（日本付近）"))
-                _jc["payload"]["ft24_image_path"] = p_ft
-
+    # 気象庁の雨雲・降水画像（日本国内のみ・取得失敗時は省略）
+    image_blocks = []
+    image_sc = {}
+    if include_rain:
+        _obs = [w["start"] for w in windows[:6]] if windows else []
+        _ri = rain_images(lat, lon, name, _obs)
+        if _ri:
+            image_sc = {"weather_rain": _ri["payload"], "figure": _ri["figure"]}
+            image_blocks.append(TextContent(type="text", text=figure_text_block(_ri["figure"])))
+            for _img in _ri["images"]:
+                _p = save_output(_img["bytes"], "astronomy_weather_jma", "jpg")
+                _link = media_link_line(_img["label"] + "を開く",
+                                        url=_img["page_url"], path=_p, kind="image")
+                _cap = "🌧 " + _img["label"] + (chr(10) + _link if _link else "")
+                _img["path"] = _p
+                image_blocks.append(TextContent(type="text", text=_cap))
+                image_blocks.append(ImageContent(
+                    type="image",
+                    data=base64.b64encode(_img["bytes"]).decode("ascii"),
+                    mimeType="image/jpeg", altText=_img["alt"]))
 
     # 月相・日月出没（観測可否の月明かり判断に使用）
     moon = None
@@ -288,9 +224,9 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
             lines.append(f"🌙 今夜の月: {moon['phase_ja']}（照度 {moon['illumination_pct']}） 月の出 {moon['moonrise']} / 月の入り {moon['moonset']}")
         lines.append("🤖 【AIからのインテリジェントアドバイス】今夜は観測に厳しい条件です。雲の少ない日を改めて確認するか、プラネタリウムや月面観察など曇天でも楽しめる対象を検討してください。")
         return CallToolResult(
-            content=[TextContent(type="text", text="\n".join(lines))] + chart_blocks,
+            content=[TextContent(type="text", text="\n".join(lines))] + image_blocks,
             structuredContent={"place": name, "lat": lat, "lon": lon, "days": days,
-                               "max_cloud": max_cloud, "moon": moon, "windows": [], "note": "no suitable window", **chart_sc},
+                               "max_cloud": max_cloud, "moon": moon, "windows": [], "note": "no suitable window", **image_sc},
         )
 
     lines = [f"🔭 **{name}** 今後{days}日間の天体観測チャンス:"]
@@ -318,12 +254,12 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
                 "weather_code": h.get("weather_code", [None]*len(times))[i],
             })
     return CallToolResult(
-        content=[TextContent(type="text", text="\n".join(lines))] + chart_blocks,
+        content=[TextContent(type="text", text="\n".join(lines))] + image_blocks,
         structuredContent={"place": name, "lat": lat, "lon": lon, "days": days,
                            "max_cloud": max_cloud, "moon": moon, "windows_count": len(windows),
                            "windows": [{"start": w["start"], "end": w["end"], "hours": len(w["hours"]),
                                         "min_cloud": w["min_cloud"], "max_cloud": w["max_cloud"]} for w in windows[:10]],
-                           "hourly": details, **chart_sc},
+                           "hourly": details, **image_sc},
     )
 
 

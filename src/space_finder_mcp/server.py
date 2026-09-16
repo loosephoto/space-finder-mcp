@@ -41,6 +41,7 @@ from . import sky_overlay as _skyover
 from . import alma as _alma
 from . import tart as _tart
 from . import solar_eclipse as _eclipse
+from . import moon_phase as _moon_phase
 from . import solar_system as _solarsys
 from . import planetary_rover as _prover
 from . import planetary_map as _pmap
@@ -82,6 +83,10 @@ mcp.tool()(_solarsys.solar_system_now)
 
 # ---- 日食時系列パネル（太陽を月が欠く過程, JPL DE421+Skyfield, 認証不要） ----
 mcp.tool()(_eclipse.solar_eclipse_series)
+
+
+# ---- 月齢マップ（月の満ち欠けを格子/朔望月パネルで描く, JPL DE421+Skyfield, 認証不要） ----
+mcp.tool()(_moon_phase.moon_phase_map)
 
 
 # ---- 天体位置・星座 (Skyfield, 認証不要・ローカル計算) ----

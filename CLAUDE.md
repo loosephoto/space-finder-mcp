@@ -1,6 +1,6 @@
 # Space Finder MCP Server — Claude Code 用プロジェクトガイド
 
-宇宙・天文・地球観測の公開データを **46ツール**で横断検索する MCP サーバー（Python / uv 管理）です。NASA・ESA Copernicus・JAXA・ISRO・CSA・INPE・UK EO DataHub・CNSA・CelesTrak・JPL（DE421/SBDB/Horizons）・Wikidata・Open-Meteo などを統合し、衛星画像・軌道マップ・日食パネルを**画像で返しつつ**、LLM向けに構造化JSONも同時に返します。
+宇宙・天文・地球観測の公開データを **47ツール**で横断検索する MCP サーバー（Python / uv 管理）です。NASA・ESA Copernicus・JAXA・ISRO・CSA・INPE・UK EO DataHub・CNSA・CelesTrak・JPL（DE421/SBDB/Horizons）・Wikidata・Open-Meteo などを統合し、衛星画像・軌道マップ・日食パネル・月齢マップを**画像で返しつつ**、LLM向けに構造化JSONも同時に返します。
 
 **開発規約は分割ルールにあります**: `.claude/rules/`（コーディング規約・検証ゲート・データ出典）を参照してください。
 
@@ -39,7 +39,7 @@ claude mcp list   # 確認
 
 - `-s project` はリポジトリ直下に `.mcp.json` を作ります（チーム共有向け）。個人利用だけで済ませるなら `-s user`（全プロジェクトで有効）を使います。
 
-検証済みの代替コマンド（いずれも 46ツールを返して起動します）:
+検証済みの代替コマンド（いずれも 47ツールを返して起動します）:
 
 ```bash
 uv --directory /abs/path/to/space-finder-mcp run space-finder-mcp
@@ -56,6 +56,7 @@ python -m space_finder_mcp                                                      
 ```
 ISSの現在位置を地球地図で →  mcp__space-finder__sat_ground_track
 東京で見える次の日食を画像で →  mcp__space-finder__solar_eclipse_series
+今月の月齢マップを見せて →  mcp__space-finder__moon_phase_map
 今夜の天体観測に向く時間帯は？ →  mcp__space-finder__astronomy_weather
 ```
 
@@ -70,7 +71,7 @@ ISSの現在位置を地球地図で →  mcp__space-finder__sat_ground_track
 | メディア（画像/音声/動画） | 3 | `search_space_images` `search_space_audio` `search_space_videos` |
 | 各国宇宙機関・地球観測 | 16 | `isro_data` `copernicus_collections` `copernicus_search` `jaxa_datasets` `jaxa_dataset_search` `csa_dataset_search` `inpe_collections` `inpe_search` `uk_stac_collections` `uk_stac_search` `cnes_status` `cnsa_status` `stac_collections` `stac_search` `eodashboard_collections` `eodashboard_detail` |
 | 衛星・軌道 | 5 | `sat_tle` `satellite_status` `sat_ground_track` `iss_now` `tiangong_now` |
-| 天体位置・画像合成 | 6 | `constellation_now` `sky_map_with_satellites` `solar_system_now` `solar_eclipse_series` `planetary_orbiter_track` `planetary_rover_location_map` |
+| 天体位置・画像合成 | 7 | `constellation_now` `sky_map_with_satellites` `solar_system_now` `solar_eclipse_series` `moon_phase_map` `planetary_orbiter_track` `planetary_rover_location_map` |
 | 観測支援・天文データ | 8 | `astronomy_weather` `astronomy_news` `eso_seeing` `cadc_observations` `alma_search` `radio_sources_now` `power_climate` `mars_rover_status` |
 
 各ツールの引数・データ源の詳細は `README.md` のツール一覧、エージェント向け仕様は `SKILL.md` を参照。
@@ -95,7 +96,7 @@ uv run python scripts/check-tools.py --dead-code      # デッドコード走査
 uv run python scripts/check-tools.py --offline        # ネットワーク全断で例外漏れを検査
 uv run python scripts/check-tools.py --fuzz           # 数値引数へ不正値を注入（例外漏れ0を維持）
 uv run python -m unittest discover -s tests          # 回帰テスト（対応済みの実バグの再発防止）
-uv run python scripts/check-tools.py                  # 全46ツール実呼び出し（数分）
+uv run python scripts/check-tools.py                  # 全47ツール実呼び出し（数分）
 uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールのみ
 ```
 
@@ -115,7 +116,7 @@ uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールの�
 
 1. `README.md` のツール表・「直近の更新内容」と `SKILL.md` を**同一変更内で**更新（ツール追加/削除/仕様変更時）
 2. `pyproject.toml` の `version` を更新
-3. `uv run python scripts/check-tools.py` で全46ツールが正常なことを確認
+3. `uv run python scripts/check-tools.py` で全47ツールが正常なことを確認
 4. `uv build` でパッケージ作成を確認 → `dist/` `build/` を削除
 
 ## ライセンス・データ出典
