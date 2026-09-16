@@ -70,26 +70,26 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 - URL 内の空白・括弧は `%20` / `%28` にエスケープします（NASA のアセットURLには空白入りの動画名があり、生のままだとリンクが途中で切れます）。
 - `content` の並びは常に「リンクを含むテキスト → `ImageContent`」なので、**画像を描けないクライアントでもリンクは必ず見えます**。
 
-## 🆕 直近の更新内容（v0.30.0）
+## 🆕 直近の更新内容（v0.30.1）
 
-**「雨雲の見える化」＋「月齢マップ」**（v0.30.0）。`astronomy_weather` の日本国内向け添付画像を、気象庁の天気図から**雨雲・降水画像**へ差し替え（雲量の予報本文は従来どおり）。あわせて日食の描画ルーチンを応用した**月齢マップ `moon_phase_map`** を追加し、ツールは 47 本になりました。
+**「見つかった2つの読み違いを直す」**（v0.30.1）。衛星カタログの**走査範囲と並び順**、そして NASA が使えないときの**宇宙天気の代替手段**を修正しました。どちらも「機械的に数えると嘘の答えが出る」タイプの不具合です。
 
-- **🌧 解析雨量・降水短時間予報パネル** — 気象庁 `rasrf` ページと**同一の画像ファイル**（実況＋観測時間帯に合わせた最大3時刻の予報・+15時間先まで）を地方画像（20分割、地点を含む範囲中心が最近傍のもの）で取得し、観測地点に十字マーカーを重ねた1枚に合成します。降水強度の凡例は気象庁公式の色・値（mm/h）。
-- **⛈ ナウキャスト（雨雲の動き）** — 地点まわりの高解像度降水ナウキャスト（5分更新・+60分）を地理院タイル（気象庁プロキシ）の背景に合成した1枚を追加。**雷活動度（雷ナウキャスト）も取得し、検出時は `figure.notes` で警告**します。
-- **📊 figure/1 対応** — 合成図は `structuredContent.figure`（schema="figure/1"）を返し、地点マーカーの換算誤差（地方画像で十数km）・**「降水は雲量そのものではない」**・予報対象時刻等の注記を**数値から生成**。マーカー描画は合成後の画素で自己検証（`verify.ok`）します。
-- **🧩 実装** — 描画を `jma_rain.py` に集約。気象庁の仕様（タイルは**偶数ズームのみ**、`time.json` は**UTC表記でファイル名にその数字を使う**、雷タイルは**10分刻みbasetime**）に対応し、URL単位のキャッシュ（エラーはキャッシュしない）で繰り返し呼び出しを0リクエスト化。
-- **🌙 月齢マップ（新ツール）** — 日食の描画ルーチン（`solar_eclipse.py`）を応用した `moon_phase_map` を追加。**1か月の格子（月齢カレンダー）**または**1朔望月の時系列パネル**で月の満ち欠けを描きます。月齢=直前の朔（新月）からの経過日数、照度=円盤の輝面の割合で、**満ち欠けの向きは月齢から決め打ちせず**、観測地から見た太陽と月の実位置（輝面の位置角 PA）から求めます。朔・望・上弦・下弦の時刻は現地時間で併記し、図の月は明暗境界線（半楕円）の位置を画素から測り直して照度と突き合わせます（`figure.verify`）。
-- **検証** — 全47ツール実呼び出し exit 0／`--dead-code` 0件／`--fuzz` 例外漏れ0／`--offline` exit 0／`--figures` 描画系8（`astronomy_weather`・`moon_phase_map` 追加）／`unittest` 11件 OK。
+- **🛰 `satellite_status` — 全件走査と一致度順** — 以前は先頭10ページ（300件）だけを見ていたため、カタログ後半に固まる国の衛星を取りこぼしていました（実測: 「ロシアの気象衛星」で Meteor-M が出てこない）。**カタログ全件（1,044件・35ページ）を並列取得**し、`query` は**一致度順**（acronym 完全/前方一致 → 名称の語境界一致 → 部分一致のみ）に並べます。`query="meteor"` が「**Meteor**ological（気象）」を含む DMSP・COSMIC を92件も拾って Meteor-M を埋もれさせていた問題も、**弱い一致を低順位にして件数を分けて表示**することで解消（実測: 上位は Meteor-M 2-4 → 2-3）。
+- **🧭 欠けを隠さない** — 取得に失敗したページは `structuredContent.failed_pages` と本文に明示し、**不完全なカタログはディスクに固定しません**。全件走査は初回38.5秒かかりますが、カタログを**ディスクにも保存**するため MCPサーバーを再起動しても0.07秒で返ります（24時間で更新）。
+- **☀️ `space_weather` — NOAA SWPC フォールバック** — `DEMO_KEY` は1時間30リクエスト/IPの共有枠で、他クライアントと取り合うと**1時間まるごと宇宙天気が返せなく**なっていました（実測）。NASA が 429・障害のときは**認証不要の NOAA SWPC** に自動切替し、Kp・NOAAスケール（R/S/G 現在値と1〜3日予測）・GOES X線クラス・太陽風（速度/密度/Bt/Bz）・陽子フラックス・警報・黒点相対数を返します。
+- **🔍 出典の取り違え防止** — どちらのデータを返したかを `content` と `structuredContent.source`（`NOAA SWPC`／`fallback: true`／NASA 側の理由 `nasa_reason`）に明記。SWPC 側で取れなかった項目も `failed` に残し、**「データが無い＝静穏」と誤読させません**。
+- **🧪 回帰テスト** — 「meteor で Meteor-M が上位に来る」「全ページを走査し失敗ページを報告する」「NASA 断で SWPC に切り替わり出典が変わる」「X線クラス表記と失敗項目の記録」の4件を追加（計15件）。
+- **検証** — 全47ツール実呼び出し exit 0／`--dead-code` 0件／`--fuzz` 例外漏れ0／`--offline` exit 0／`--figures` 描画系8／`unittest` 15件 OK。
 
-登録ツールは **47本**（v0.30.0 で月齢マップを1本追加）。
+登録ツールは **47本**（増減なし）。
 
 ### 以前の更新
 
+- **v0.30.0** — 気象庁の**雨雲・降水画像**（解析雨量・降水短時間予報＋ナウキャスト、雷活動度で警告）を `astronomy_weather` に統合し、日食ルーチンを応用した**月齢マップ `moon_phase_map`** を追加（47ツール）。
 - **v0.29.1** — 外部データの部分失敗・異常値を黙って落とさない修正と回帰テスト（ISS時刻の防御的変換、`neo_today` の content 側 redact、部分失敗の数値化）。
 - **v0.29.0** — 気象庁の天気図（実況＋24時間予想）を `astronomy_weather` に統合し、日本国内では雲量の予報と天気図を同時に返す。`weather_satellite_now` をひまわり9号専用から **GEO 13機＋LEO 6機の19機**へ拡張（取得不可機は理由コード）。EUMETSAT の旧静的画像サーバ廃止（2026-02）に伴い GeoServer WMS へ移行。
 - **v0.28.0** — 天体面地図の描画を `surface_map.py` に集約（タイル合成・等角投影・地点マーカー・画素検証）。地点マーカー図 `planetary_orbiter_track(sites=...)`（アポロ6地点・月/火星/金星の着陸点・木星SL9・タイタン）。複数彗星の1枚パネル。近点が分解できない楕円は上界検査へ自動切替。日食の既定探索を1400日へ拡大し62→28秒。`space_weather` をカテゴリ単位キャッシュへ。
 - **v0.27.0** — メディア本体より前にアイコン付きリンク（CLI/Android 系ハーネス向け）。名前解決の共通基盤 `name_common.py`（和名→NORAD ID を 21/61 オフライン解決）。`alma_search` に製品種別・QA2・論文を追加。両エンジンの配色統一。CelesTrak の非リストJSONで例外が漏れる不具合とエラー文字列の api_key 露出を修正。
-- **v0.26.0** — 描画系6ツールに `structuredContent.figure`（`figure/1`: 視点・主天体の焦点/中心・縮尺・円錐曲線・注記・自己検証）を導入（注記は数値から生成）。彗星の軌道面ビュー `solar_system_now(view="comet_orbit")` を追加、`check-tools.py --figures` を新設。自己検証が実バグ3件と日食可視性の過小報告を検出。
 
 ## 📦 インストール
 
@@ -241,7 +241,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `moon_phase_map` | **月齢マップ**（月の満ち欠け）。`layout="calendar"`（既定）で1か月の日別格子（日月火水木金土・月齢・照度・月相）、`layout="lunation"` で1朔望月（朔→朔）の時系列パネル。輝面の向きは太陽の位置角から計算（月齢からの決め打ちをしない）。朔・望・上弦・下弦の時刻を現地時間で併記 | JPL DE421+Skyfield | 不要 |
 | `eodashboard_collections` | EO Dashboard（NASA×ESA×JAXA共同）の173データセットをテーマ・機関・キーワードで検索 | EO Dashboard (GitHub catalog) | 不要 |
 | `eodashboard_detail` | EO Dashboardの1データセットの詳細（衛星・センサー・説明・画像・参照リンク） | EO Dashboard (GitHub catalog) | 不要 |
-| `space_weather` | NASA宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象） | NASA DONKI | キー(任意/DEMO_KEY可) |
+| `space_weather` | 宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象）。**NASA が枠切れ・障害のときは認証不要の NOAA SWPC（Kp・NOAAスケール・GOES X線・太陽風・陽子・警報・黒点）へ自動切替**（出典を明記） | NASA DONKI → **NOAA SWPC（フォールバック）** | 不要（SWPC）/キー任意（DONKI） |
 | `stac_collections` | AWS Earth Searchの衛星データコレクション一覧 | AWS Earth Search STAC | 不要 |
 | `stac_search` | Sentinel-2 / Landsat / NAIP / DEM をSTAC検索（場所・日時・雲量） | AWS Earth Search STAC | 不要 |
 | `iss_now` | ISS（国際宇宙ステーション）の現在位置を取得し Googleマップリンクで表示 | Open Notify | 不要 |
@@ -249,7 +249,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `planetary_orbiter_track` | 任意の天体（月・火星・水星・タイタン等）を周回する探査機の現在位置と軌道トレイルを、その天体の地図にプロットした画像を返す。JPL Horizons の状態ベクトルを IAU 自転モデルで天体固定座標（緯度経度・高度）に変換し、NASA Trek の等角図法地図に重ねる。`span_deg=360`で天体全面表示にも対応。**過去機（かぐや等）は運用終了を案内し、落点が公表されている機体は落点を地点マーカーで描いた地図（`figure.kind="impact_site_map"`）を返す**。`sites="apollo"`（または `"apollo11"`〜`"apollo17"`, `"all"`）で **地点マーカー図**（`figure.kind="landing_site_map"`／木星は `impact_site_map`）も返す。**全球等角図がある天体（月・火星・水星・タイタン・ベスタ・ケレス）は地形画像の上に、無い天体（木星・土星・冥王星・金星・ガリレオ衛星など）は緯度経度グリッドの上に**公表座標を描く | JPL Horizons + NASA Trek / NASA NSSDC / PDS | 不要 |
 | `planetary_rover_location_map` | 任意の天体面を移動する探査ローバーの現在地をその天体の地図中心に示した画像（走行経路・着陸点）。NASA MMGIS の位置データと NASA Trek の等角地図を合成。現状データは火星ローバー（Perseverance/Curiosity） | NASA MMGIS + Trek WMTS | 不要 |
 | `weather_satellite_now` | GEO/LEO気象衛星19機（ひまわり9号・GOES-18/19・Meteosat・FY・GK-2A・INSAT・NOAA-20/-21・SNPP・Metop-B/C・FY-3D）の公開画像。GEOは最新フレーム、LEOは日次全球合成。取得不可は `restricted`/`unavailable`/`non_image_product` の理由コードで返す | JMA(himawari.asia)/NOAA STAR/EUMETSAT WMS/CMA-NSMC/KMA/IMD/NASA GIBS | 不要 |
-| `satellite_status` | 世界中の気象・地球観測衛星の運用ステータス・軌道・打ち上げ日（Roscosmos等） | WMO OSCAR | 不要 |
+| `satellite_status` | 世界中の気象・地球観測衛星の運用ステータス・軌道・打ち上げ日（Roscosmos等）。**カタログ全1,000件超を走査**し、query は一致度順（acronym 完全/前方一致 → 名称の語境界 → 部分一致のみ）で提示 | WMO OSCAR | 不要 |
 | `cnsa_status` | 中国CNSA系衛星データポータル（風雲/NSMC・高分/CNSA-GEO・CBERS/CRESDA）の到達状態・概要＋認証不要の代替経路 | CNSA各公式ポータル | 不要(ダウンロードは要登録) |
 | `tiangong_now` | 天宮（Tiangong）中国宇宙ステーションの現在位置（SGP4伝播＋Googleマップ表示） | CelesTrak TLE + SGP4 | 不要 |
 
@@ -465,6 +465,7 @@ A: eodashboard_detail("N1_NO2") → 詳細+サムネイル画像
 - `kind` で取得対象を選択: `all`（既定）/ `flare`（太陽フレア）/ `cme`（コロナ質量放出）/ `gst`（地磁気嵐）/ `sep`（太陽粒子現象）
 - 期間は `start_date` / `end_date`（YYYY-MM-DD）で指定
 - 認証: 環境変数 `NASA_API_KEY`（`apod` と同じキーを使用）。未設定時は `DEMO_KEY`（低レート）
+- **フォールバック**: NASA が枠切れ（429）や障害のときは、**認証不要の NOAA SWPC**（`services.swpc.noaa.gov`）へ自動で切り替えます。Kp・NOAAスケール（R/S/G の現在値と1〜3日予測）・GOES X線クラス・太陽風（速度／密度／Bt／Bz）・陽子フラックス・警報・黒点相対数を返し、**どちらの出典で答えたか**を `content` と `structuredContent.source`（`NOAA SWPC` ＋ `fallback: true` ＋ NASA 側の理由 `nasa_reason`）に明記します。SWPC 側でも取得できなかった項目は `failed` に残します
 - **枠の使い方**: 1回の呼び出しで4エンドポイント（FLR/CME/GST/SEP）を叩くため `DEMO_KEY` を4消費します。**カテゴリ単位でキャッシュ**するので、`kind` を変えた呼び出しで同じカテゴリを取り直しません（実測: `all` の直後の `flare` は HTTP 0回）。429 時は「429 後の待機」か「枠切れ」かを区別した案内を返します（自分の使用数だけを出すと、IP を共有する DEMO_KEY では数字と矛盾して見えるため）
 
 ```text
@@ -524,7 +525,8 @@ Q: 世界の気象衛星一覧
 A: satellite_status()
 ```
 
-- `query`: 衛星名の部分一致（meteor, resurs, goes, kanopus, himawari 等）
+- `query`: 衛星名（meteor, resurs, goes, kanopus, himawari 等）。**一致度順に並べ替えて返します** — acronym の完全/前方一致を最優先し、名称は語境界で照合、名称の途中に含まれるだけの一致（例: "meteor" が "Meteorological" に含まれる DMSP/COSMIC）は**低順位**に置き、件数を分けて表示します（以前は 92件の誤ヒットに Meteor-M が埋もれていました）
+- **カタログ全件（約1,044件・35ページ）を走査**します。1ページ30件固定の API なので初回は40秒ほどかかりますが、取得結果を**ディスクにも保存**するため以後はプロセスを再起動しても即時です（24時間で更新）。取得できなかったページがある場合は `structuredContent.failed_pages` と本文に明示します（欠けを黙って捨てません）
 - `agency`: 機関名（Roscosmos, NOAA, EUMETSAT, JAXA 等）
 - 運用中🟢 / 計画中🔵 / 延長🟡 / 退役🔴 を色付きで表示
 - Roscosmos の気象衛星（Meteor-M・Resurs-P・Kanopus等）も詳細に収録
@@ -701,6 +703,7 @@ ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカ�
 - `planetary_orbiter_track`(LRO): **4.46s / 73リクエスト → 1.07s / 1リクエスト**（タイル72枚を再取得しない）
 - `solar_eclipse_series`(東京): **28.4s → 0.7s**（探索窓を1400日に拡大しても初回のみ）／ 指定日 0.4〜1.2s → 0.7s
 - `satellite_status`: 50.28s → 0.00s ／ `astronomy_weather` 2.56s → 0.00s
+- `satellite_status`（全1,044件の走査）: **初回 38.5s → 以後 0.07s**（カタログをディスクにも保存し、プロセス再起動後も即時）
 - `sky_map_with_satellites`(simple) の画像: **992KB → 188KB**（JPEG化）
 - `search_space_images`: インライン画像を3枚 → 1枚（`inline_max` で増やせる）
 
@@ -788,6 +791,7 @@ src/space_finder_mcp/
 ├── power.py             # power_climate（NASA POWER 気候・太陽エネルギー統計）
 ├── eodashboard.py       # eodashboard_collections / detail（EO Dashboard, NASA/ESA/JAXA）
 ├── donki.py             # space_weather（NASA 宇宙天気 DONKI）
+├── swpc.py              # NOAA SWPC（宇宙天気のフォールバック・認証不要）
 ├── stac_search.py       # stac_collections / stac_search（AWS Earth Search STAC）
 ├── iss.py               # iss_now（ISS 現在位置, Open Notify）
 ├── oscar.py             # satellite_status（WMO OSCAR 衛星カタログ）

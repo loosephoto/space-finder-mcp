@@ -77,6 +77,7 @@ src/space_finder_mcp/
 ├── *_map.py         # 画像生成系（satellite_map / planetary_map / planetary_rover / sky_overlay）
 ├── solar_eclipse.py # solar_eclipse_series（日食の時系列パネル）
 ├── moon_phase.py    # moon_phase_map（月齢マップ: 月齢カレンダー/朔望月パネル）
+├── swpc.py          # NOAA SWPC（宇宙天気のフォールバック・認証不要）
 └── <データ源>.py     # 各APIツール（nasa / launch / media / celestrak / jaxa / ...）
 scripts/check-tools.py   # 回帰検証ゲート
 ```

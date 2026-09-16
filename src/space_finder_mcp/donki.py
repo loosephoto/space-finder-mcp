@@ -86,6 +86,12 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
     """NASA DONKI の宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象）を返す。
 
     天体観測や通信・衛星運用に影響する太陽活動を確認できる。
+
+    **NASA 側がレート制限・障害のときは、認証不要の NOAA SWPC（Kp・NOAA スケール・
+
+    GOES X線・太陽風・陽子・警報・黒点相対数）に自動で切り替えて返す**（どちらの出典かを
+
+    content と structuredContent.source に明記する）。
     例:「最近の太陽フレア」「CME(コロナ質量放出)の情報」「地磁気嵐は起きてる?」
     content に表示用サマリ、structuredContent に JSON を返す。
 
@@ -212,10 +218,23 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
                             or f"{nasa_budget.human_wait(wait)}後に回復します。")
         # advice 側に「NASA_API_KEY で緩和」が入っているので、二重に書かない
         tail = "" if advice else " NASA_API_KEY を設定すると制限が緩和されます。"
+        # NASA が使えない（枠切れ・障害）ときは**認証不要の NOAA SWPC にフォールバック**する。
+        # DEMO_KEY は共有枠なので、他クライアントの利用で1時間まるごと返せなくなる。
+        # どちらのデータを返したかは content / structuredContent の両方に明記する（出所の取り違え防止）。
+        nasa_reason = "{} {}".format("NASA API のレート制限" if not ok_budget else "NASA API の一時的障害",
+                                    "; ".join(errors) if errors else "").strip()[:300]
+        swpc_error = ""
+        try:
+            from . import swpc
+            fallback = swpc.space_weather_now(kind, nasa_reason=nasa_reason)
+        except Exception as e:                      # SWPC 側も例外を漏らさない
+            fallback, swpc_error = None, str(e)[:150]
+        if fallback is not None:
+            return fallback
         return CallToolResult(
             content=[TextContent(type="text", text="宇宙天気データを取得できませんでした（NASA API のレート制限や一時的障害の可能性）。" + advice + tail)],
             structuredContent={"error": "fetch failed", "kind": kind, "detail": errors,
-                               "budget": budget},
+                               "budget": budget, "swpc_error": swpc_error},
         )
 
     lines = ["☀️ **NASA 宇宙天気（DONKI）** 出典: api.nasa.gov（NASA Space Weather）"]

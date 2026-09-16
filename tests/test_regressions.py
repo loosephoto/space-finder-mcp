@@ -252,3 +252,163 @@ class RegressionTests(unittest.TestCase):
         self.assertLess(first["moon_age"], 0.05)
         self.assertLess(last["moon_age"], 0.05)        # 次の朔で 0 に戻る
         self.assertEqual(sc["days"][0]["illumination"] < 0.01, True)
+
+    def test_satellite_status_ranks_acronym_matches_first(self):
+        """query の一致度順に並べること（"meteor" が "Meteorological" に埋もれない）。
+
+        fullname の単純な部分一致では、DMSP 等の「Meteorological（気象）」を
+        Meteor-M として拾ってしまい、本来の Meteor-M が上位20件から消える（実測）。
+        acronym 一致を優先し、名称の途中一致は件数を分けて報告することを固定する。
+        """
+        from space_finder_mcp import oscar
+
+        catalogue = [
+            {"acronym": "DMSP-F01", "fullname": "Defense Meteorological Satellite Program - F01",
+             "slug": "dmsp_f01", "space_agency": "DoD,NOAA", "status": "inactive",
+             "launch_date": "11 Sep 1976"},
+            {"acronym": "COSMIC-1", "fullname": "Constellation Observing System for Meteorology - 1",
+             "slug": "cosmic_1", "space_agency": "NSPO,NOAA", "status": "inactive",
+             "launch_date": "14 Apr 2006"},
+            {"acronym": "Meteor-M N2-3", "fullname": "Meteor-M Number 2-3",
+             "slug": "meteor_m_n2_3", "space_agency": "Roscosmos", "status": "operational",
+             "launch_date": "27 Jun 2023"},
+            {"acronym": "Meteor-M N2-4", "fullname": "Meteor-M Number 2-4",
+             "slug": "meteor_m_n2_4", "space_agency": "Roscosmos", "status": "operational",
+             "launch_date": "29 Feb 2024"},
+            {"acronym": "FY-3D", "fullname": "Feng-Yun 3D", "slug": "fy_3d",
+             "space_agency": "CMA", "status": "operational", "launch_date": "14 Nov 2017"},
+        ]
+        old = oscar._catalogue
+        oscar._catalogue = lambda: {"satellites": catalogue, "total": len(catalogue),
+                                    "pages": 1, "failed_pages": []}
+        oscar.satellite_status.cache_clear()
+        try:
+            result = oscar.satellite_status(query="meteor", limit=5)
+        finally:
+            oscar._catalogue = old
+            oscar.satellite_status.cache_clear()
+        sc = result.structuredContent
+        self.assertEqual(sc["results"][0]["acronym"], "Meteor-M N2-4")   # 運用中・新しい順
+        self.assertEqual(sc["results"][1]["acronym"], "Meteor-M N2-3")
+        self.assertEqual(sc["strong_matches"], 2)          # acronym 一致の2件
+        self.assertEqual(sc["weak_only_matches"], 2)       # Meteorological の2件
+        self.assertTrue(all(r["match_score"] >= 50 for r in sc["results"][:2]))
+        self.assertIn("部分一致のみ 2 件", result.content[0].text)
+
+    def test_satellite_status_scans_every_page_and_reports_failures(self):
+        """全ページを走査し、取得できなかったページは黙って落とさず報告すること。"""
+        from space_finder_mcp import oscar
+
+        calls = []
+
+        def fake_page(page):
+            calls.append(page)
+            if page == 2:
+                raise RuntimeError("page 2 failed")
+            if page == 1:
+                return {"page": {"totalElements": 90, "totalPages": 3, "number": 1},
+                        "_embedded": {"satellites": [{"acronym": "A-1"}]}}
+            return {"page": {"totalElements": 90, "totalPages": 3, "number": page},
+                    "_embedded": {"satellites": [{"acronym": "A-%d" % page}]}}
+
+        old = oscar._fetch_page
+        old_disk = oscar._disk_read
+        oscar._fetch_page = fake_page
+        oscar._disk_read = lambda ttl: None            # ディスクキャッシュを使わない
+        try:
+            cat = oscar._catalogue.__wrapped__()       # キャッシュ層を迂回して直接検証
+        finally:
+            oscar._fetch_page = old
+            oscar._disk_read = old_disk
+        self.assertEqual(sorted(calls), [1, 2, 3])     # 全ページを要求している
+        self.assertEqual(cat["total"], 90)
+        self.assertEqual(cat["failed_pages"], [2])     # 失敗ページを記録
+        self.assertEqual(len(cat["satellites"]), 2)    # 取れた分だけ返す（欠けを隠さない）
+
+    def test_space_weather_falls_back_to_noaa_swpc(self):
+        """NASA が使えないときは NOAA SWPC（認証不要）に切り替え、出典を明記すること。"""
+        import requests
+        from space_finder_mcp import donki, swpc
+
+        def nasa_down(*args, **kwargs):
+            raise requests.ConnectionError("simulated NASA failure")
+
+        old_get_cached = donki._get_cached
+        old_fetch_all = swpc.fetch_all
+        donki._get_cached = nasa_down
+        swpc.fetch_all = lambda: {"sections": {"kp": {"time_tag": "2026-09-16T07:45:00",
+                                                     "current": 1, "max_3h": 3, "max_24h": 4},
+                                             "scales": {"current": {"G": {"scale": "0"}},
+                                                        "forecast": {"1": {"G": {"scale": "1"}}}}},
+                                  "failed": ["proton: simulated failure"],
+                                  "fetched_utc": "2026-09-16T07:46:00Z"}
+        donki.space_weather.cache_clear()
+        try:
+            result = donki.space_weather(kind="all")
+        finally:
+            donki._get_cached = old_get_cached
+            swpc.fetch_all = old_fetch_all
+            donki.space_weather.cache_clear()
+
+        sc = result.structuredContent
+        self.assertEqual(sc["source"], "NOAA SWPC")
+        self.assertTrue(sc["fallback"])
+        self.assertNotEqual(sc.get("error"), "fetch failed")      # エラーで終わらせない
+        self.assertIn("NOAA SWPC", result.content[0].text)
+        self.assertIn("Kp", result.content[0].text)
+        self.assertIn("proton", result.content[0].text)           # 欠けは隠さない
+        self.assertEqual(sc["failed"], ["proton: simulated failure"])
+
+    def test_swpc_xray_class_and_failed_sections(self):
+        """X線クラス表記と、取得できなかった項目の記録（黙って落とさない）。"""
+        from space_finder_mcp import swpc
+
+        self.assertEqual(swpc._xray_class(2.37e-7), "B2.4")
+        self.assertEqual(swpc._xray_class(1.0e-6), "C1.0")
+        self.assertEqual(swpc._xray_class(3.5e-5), "M3.5")
+        self.assertEqual(swpc._xray_class("?"), "?")
+        self.assertEqual(swpc._xray_class(None), "?")
+
+        def fake_json(path):
+            if "xrays" in path:
+                return [{"energy": "0.1-0.8nm", "flux": 2.37e-7, "time_tag": "2026-09-16T07:00:00Z"}]
+            raise RuntimeError("simulated SWPC failure")
+
+        old = swpc._get_json
+        swpc._get_json = fake_json
+        try:
+            data = swpc.fetch_all.__wrapped__()        # キャッシュ層を迂回
+        finally:
+            swpc._get_json = old
+        self.assertIn("xray", data["sections"])
+        self.assertEqual(data["sections"]["xray"]["latest_class"], "B2.4")
+        # 失敗した6項目は failed に残る（静かに欠けさせない）
+        self.assertEqual(len(data["failed"]), 6)
+        self.assertTrue(all("simulated SWPC failure" in f for f in data["failed"]))
+
+    def test_swpc_all_items_failed_returns_error_not_calm(self):
+        """SWPC も全項目失敗したら「静穏」ではなくエラーとして返すこと。
+
+        空のサマリを返すと、ホストLLM が「宇宙天気は静穏」と読み違える（障害を
+        静穏と誤読させる）。1項目も取れない場合はエラー結果にする。
+        """
+        from space_finder_mcp import swpc
+
+        def all_fail(path):
+            raise RuntimeError("simulated total failure")
+
+        old = swpc._get_json
+        old_fetch = swpc.fetch_all
+        swpc._get_json = all_fail
+        swpc.fetch_all.cache_clear() if hasattr(swpc.fetch_all, "cache_clear") else None
+        try:
+            data = swpc.fetch_all.__wrapped__()
+            swpc.fetch_all = lambda: data
+            result = swpc.space_weather_now("all", nasa_reason="NASA 429")
+        finally:
+            swpc._get_json = old
+            swpc.fetch_all = old_fetch
+        self.assertEqual(result.structuredContent["error"], "no space weather data")
+        self.assertNotIn("静穏", result.content[0].text)
+        self.assertIn("取得できませんでした", result.content[0].text)
+        self.assertEqual(len(result.structuredContent["failed"]), 7)
