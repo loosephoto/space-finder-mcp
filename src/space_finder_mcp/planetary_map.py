@@ -10,8 +10,8 @@ import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .surface_map import (add_legend_band, draw_marker, draw_markers, fit_font_for_width,
-                         graticule_view, image_view, marker_scan_radius, surface_view,
-                         tile_failure_note, verify_marker, verify_markers)
+                         graticule_view, image_view, marker_scan_radius, panel_placement,
+                         surface_view, tile_failure_note, verify_marker, verify_markers)
 from .name_common import split_names
 from .img_common import (encode_jpeg, figure_notes, figure_payload,
                          figure_text_block, load_font, media_link_line,
@@ -1278,14 +1278,23 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
     line1 = f"🛰 {ja}（{en}）"
     line2 = f"{body_cfg['ja']}面: {ns} {abs(lat0):.2f}° / {ew} {abs(lon0):.2f}°  高度 {alt0:.1f} km"
     line3 = f"速度 {spd} ・ 時刻 {tstr} UTC"
-    y1 = 20
+    # 情報パネルは現在位置マーカーを隠さない位置へ（隠れると画素検査が落ちる）
+    panel_w = int(iw * 0.72)
+    panel_h = (_fh(f_big, line1) + pad) + (_fh(f_mid, line2) + pad) + _fh(f_sm, line3) + 28
+    px0, py0, panel_hidden = panel_placement(iw, ih, panel_w, panel_h,
+                                             avoid=[(cx, cy)], margin=12, gap=r + 6)
+    y1 = py0 + 8
     y2 = y1 + _fh(f_big, line1) + pad
     y3 = y2 + _fh(f_mid, line2) + pad
     panel_bottom = y3 + _fh(f_sm, line3) + 16
-    d.rounded_rectangle([12, 12, int(iw * 0.72), panel_bottom], radius=12, fill=(0, 0, 0, 210))
-    d.text((24, y1), line1, font=f_big, fill=(255, 255, 255))
-    d.text((24, y2), line2, font=f_mid, fill=(225, 228, 248))
-    d.text((24, y3), line3, font=f_sm, fill=(200, 210, 240))
+    d.rounded_rectangle([px0, py0, px0 + panel_w, panel_bottom], radius=12, fill=(0, 0, 0, 210))
+    d.text((px0 + 12, y1), line1, font=f_big, fill=(255, 255, 255))
+    d.text((px0 + 12, y2), line2, font=f_mid, fill=(225, 228, 248))
+    d.text((px0 + 12, y3), line3, font=f_sm, fill=(200, 210, 240))
+    if panel_hidden:
+        # どの隅でも重なる小さな図では、隠れるマーカーをパネルの上に描き直す
+        draw_marker(d, (cx, cy), r, fill=(255, 60, 30),
+                    outline_w=max(4, img.size[0] // 200), inner_ratio=0.5)
     lab_w = int(iw * 0.32); lab_h = ih // 16
     margin = r * 5
     if cx + margin + lab_w < iw - 10:
@@ -1312,6 +1321,7 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
     mv = verify_marker(img, (cx, cy), lon0, lat0, sv["inv"],
                        r=marker_scan_radius(r))
     mv["marker_visible"] = bool(marker_visible)
+    mv["panel_overlaps_marker"] = bool(panel_hidden)
     mv["ok"] = bool(marker_visible and mv["ok"])
     fig = figure_payload(
         kind="ground_track_map",
@@ -1337,6 +1347,10 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
             "過去の探査機（かぐや等）は運用終了済みで、位置は軌道要素からの外挿になる場合がある",
             (f"トレイル {len(trail_errors)} 点の計算に失敗しました。該当部分は表示されていません。"
              if trail_errors else ""),
+            ("" if (px0, py0) == (12, 12) and not panel_hidden else
+             "情報パネルは現在位置マーカー（cx={:.0f}, cy={:.0f}px）と重ならない隅に配置した".format(cx, cy)),
+            ("" if not panel_hidden else
+             "図が小さくパネルと重なるため、現在位置マーカーはパネルの上に描き直した"),
             tile_failure_note(sv),
         ]),
         caption=f"{ja} の{body_cfg['ja']}面位置（{tstr}）。真下の点は {ns} {abs(lat0):.2f}° / "

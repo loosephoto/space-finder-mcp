@@ -17,9 +17,11 @@
 - **引用元を明示** — 科学的な内容には必ずデータソースへのリンクを併記
 - **図の注記を機械可読で返す（figure/1）** — 描画系ツールは「どの面を・どの縮尺で・主天体を焦点に置いたか」と注記・自己検証を JSON で返し、LLM が図を誤読しないようにする
 
+> ⚠️ **注（出力のどこまでが保証か）** — ツールが返す**`structuredContent` の JSON・数値・画像・リンクは、同じ引数で同じ時刻に呼べばどのモデルからでも同じ**内容です（データ取得と計算はサーバー側で完結し、モデルには依存しません）。一方、それを**読みやすい文章に組み立てる工程はホスト側の AI モデルに委ねられます**。説明の順序・語り口・要約の粒度・強調する点はモデルや設定によって変わるため、同じツール結果でも書き上がりは同一にはなりません。**数値や出典の最終的な根拠は `structuredContent` に置いてください**（表示文と食い違って見える場合は JSON 側が正で、その差は「モデルの文章化」のばらつきです）。
+
 ## 🧭 図の注記（figure/1）— 描画系ツールの自己申告
 
-描画系ツール（`solar_system_now` / `sat_ground_track` / `planetary_orbiter_track` / `planetary_rover_location_map` / `sky_map_with_satellites` / `solar_eclipse_series` / `moon_phase_map`）は、画像を返すだけでなく **`structuredContent.figure`（`schema: "figure/1"`）** に「その図をどう描いたか」を自己申告します。LLM はピクセルから描画規約を推測できないため（高離心率の軌道を「主天体の周りを回る円」と説明してしまう等）、注記をデータとして渡す設計です。
+描画系ツール（`solar_system_now` / `sat_ground_track` / `planetary_orbiter_track` / `planetary_rover_location_map` / `sky_map_with_satellites` / `solar_eclipse_series` / `moon_phase_map` / `astronomy_weather`〔雨雲・降水画像を返すとき〕）は、画像を返すだけでなく **`structuredContent.figure`（`schema: "figure/1"`）** に「その図をどう描いたか」を自己申告します。LLM はピクセルから描画規約を推測できないため（高離心率の軌道を「主天体の周りを回る円」と説明してしまう等）、注記をデータとして渡す設計です。
 
 - **`view`** — どの面を（`frame`）どの投影で（`projection`）見た図か、なぜその視点なのか（`why`）
 - **`primary`** — 主天体を**焦点**（`at: "focus"`）に置いたか**中心**（`"center"`）に置いたか、焦点と中心のズレ（`center_offset`）
@@ -29,13 +31,29 @@
   - 地図タイルが取れなかった場合は「地図タイル N/M 枚を取得できませんでした（図の該当領域は背景色のまま）」も**数値から生成**します（欠けを黙って捨てると「地図に無い＝何も無い」と誤読されるため）
 - **`verify`** — 図の自己検証（描いた画素から測った近点／遠点距離、ラベルの線被り画素数、`periapsis_check`: `equality` / `upper_bound`）
   - **近点が画面上で分解できない図**（超長距離の楕円では近日点が「誇張した主天体の円盤」の内側に入る）は、画素から近点距離を測っても意味がないため等値検査をせず、`periapsis_resolvable: false` ＋ 理由 ＋ **上界検査**（曲線が焦点から円盤半径以上に近点側へ伸びていないこと＝主天体を楕円の中心に置く誤りは依然として検出）に切り替えます。この場合の注記には「この縮尺では図から確認できない」旨が**数値から生成**されて入ります
+- **`verify.panel_overlaps_marker`** — 地図の上に置く情報パネルが現在位置マーカーを隠していないか。パネルは `surface_map.panel_placement()` が**マーカーを隠さない隅**へ置き、どの隅でも重なる小さい図ではマーカーをパネルの上に描き直します（描いた後にパネルを重ねるとマーカーが消えるため。実測: 月面の LRO が図の上端に来ると左上のパネルの下に入り、画素検査 `marker_pixels` が 0 になりました）
 - **`caption`** — そのまま使える1〜2文の説明
 
 `content`（人間向け表示）にも同じ注記を `### ⚠️ 図の注記` として出すので、`structuredContent` を使わないクライアントでも注記は失われません。
 
 ```bash
 uv run python scripts/check-tools.py --figures   # 描画系の figure/1 を検査（注記が空・verify.ok が偽なら exit 1）
+uv run python scripts/check-tools.py --media-links # 画像/音声/動画のリンク先行を検査（画像より前にリンクが無い等で exit 1）
+uv run python scripts/check-tools.py --concurrency # 並列ツール呼び出し（single-flight／スレッド逃がし／例外漏れ）を検査
+uv run python scripts/check-tools.py --stdio       # 実クライアント経路（stdio）で代表ツールが無応答にならないか検査
 ```
+
+## 🔀 並行ツール呼び出し（LLM が複数ツールを同時に投げる）
+
+LLM は1ターンで複数のツールを並行に呼びます。**サーバー側がそれに応えられるかは別問題**で、FastMCP は同期関数をイベントループ上でそのまま呼ぶため、素のままだと1つのツールが API 待ちをしている間、他のツール呼び出しは1つも動き出しません（実測: 同一ツール4並列で wall = 各呼び出しの合計 2.55s）。
+
+- **同期ツールは `anyio` のワーカースレッドで実行**（`server.py` の `_threaded` / `_reg`）。同じ4並列が **wall 2.47s・4.0×** になりました。実ネットワークでも、別々の地名の `astronomy_weather` 3並列が **3.93s**（逐次合計 11.72s・3.0×）です。
+- **同じ引数の並行呼び出しは1回に集約**（`cache.ttl_cache` の single-flight）。8並列の同一呼び出しでも実行は1回・結果は共有なので、NASA の DEMO_KEY のような共有枠を N 倍消費しません。
+- **matplotlib で描く経路は `img_common.RENDER_LOCK` で直列化**。pyplot はプロセス全体の状態（rcParams・現在の figure）を持つため、並列に描くと図が混ざります。
+- **共有状態はロックで保護**（`cache` / `nasa_budget`）。キャッシュされた戻り値は呼び出し側で書き換えません（並行時に他人の結果を壊すため。書き換えるなら `deepcopy`）。
+- **CPU 律速の計算は GIL で並列化しません**（Skyfield・Pillow の計算）。並列化が効くのは I/O 待ち（API 呼び出し）で、それが並列ツール呼び出しの主目的です。
+- 検査: `uv run python scripts/check-tools.py --concurrency`（single-flight／ワーカースレッドへの逃がし／混在4ツールの並列呼び出しで例外漏れ・`structuredContent` 欠落が無いこと）。
+- ⚠️ **遅延 import するネイティブ拡張は起動前に import 済みにしておきます**（`server.py` 冒頭の `import numpy`）。stdio サーバーが動き出した後に numpy / matplotlib / skyfield を import すると、**import が返らずツール呼び出しが無応答**になります（実測: numpy・matplotlib.pyplot・skyfield.api が HANG。PIL.Image・sgp4・requests は問題なし）。`scripts/check-tools.py --stdio` が実際に子プロセスを起動して代表ツールの応答を確認します。
 
 ## 🧭 名前解決のフォールバック（表記ゆれ・和名・名前→座標）
 
@@ -64,32 +82,38 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 | **検索した画像**（`search_space_images`） | 各項目の説明の直後 | `🖼️ [画像を開く: タイトル](URL)` |
 | **検索した音声**（`search_space_audio`） | 各項目の直後 | `🎧 [音声を開く: タイトル](URL)` |
 | **検索した動画**（`search_space_videos`） | 各項目の直後 | `🎬 [動画を再生: タイトル](URL)` ＋ `🖼️ [ポスター画像を開く: …](URL)` |
+| **気象衛星の実画像**（`weather_satellite_now`） | `content` の**先頭行** | `🖼️ [生成した画像を開く](画像URL)` ＋ `file://` の保存先 |
+| **気象庁の雨雲・降水画像**（`astronomy_weather`） | 各画像の直前行 | `🖼️ [◯◯を開く: ラベル](気象庁のページURL)` |
+| **EO Dashboard のサムネイル**（`eodashboard_detail`） | 説明の直後・画像の直前 | `🖼️ [サムネイル画像を開く: タイトル](URL)` |
+| **APOD の画像URL**（`apod`） | タイトルの直後 | `🖼️ [画像を開く: タイトル](URL)`（動画の日は `🎬`） |
 
 - 生成画像は `%LOCALAPPDATA%\Temp\space_finder_mcp\out\<tool>_<日時>_<乱数>.<ext>` に**生バイトのまま保存**し、`file://` URI と実パスの両方を出します（最新200件を残して自動整理）。
 - 同じパスを `structuredContent.image_path` にも入れるので、LLM はファイルを再参照できます。
 - URL 内の空白・括弧は `%20` / `%28` にエスケープします（NASA のアセットURLには空白入りの動画名があり、生のままだとリンクが途中で切れます）。
 - `content` の並びは常に「リンクを含むテキスト → `ImageContent`」なので、**画像を描けないクライアントでもリンクは必ず見えます**。
+- **機械的に検査します** — `scripts/check-tools.py --media-links`（画像ブロックより前にアイコン付きリンクが無い／`structuredContent` にURL・保存パスが無い／`image_path` のファイルが存在しない場合は exit 1。実測: 画像を返す12ツールすべて OK）。生成系の docstring には「回答時はこのリンクをそのまま提示してください」と明記しています。
 
-## 🆕 直近の更新内容（v0.30.1）
+### 🆕 直近の更新内容（v0.30.2）
 
-**「見つかった2つの読み違いを直す」**（v0.30.1）。衛星カタログの**走査範囲と並び順**、そして NASA が使えないときの**宇宙天気の代替手段**を修正しました。どちらも「機械的に数えると嘘の答えが出る」タイプの不具合です。
+**「LLM の並列ツール呼び出しに応えるサーバーへ」**（v0.30.2）。同期ツールをワーカースレッドで実行して**並列呼び出しを本当に並行化**し、同じ引数の並行呼び出しは1回に集約しました。あわせて、**stdio 経由でツールが無応答になる不具合**と、**外部APIの遮断で呼び出しが分単位で固まる不具合**を修正しています。
 
-- **🛰 `satellite_status` — 全件走査と一致度順** — 以前は先頭10ページ（300件）だけを見ていたため、カタログ後半に固まる国の衛星を取りこぼしていました（実測: 「ロシアの気象衛星」で Meteor-M が出てこない）。**カタログ全件（1,044件・35ページ）を並列取得**し、`query` は**一致度順**（acronym 完全/前方一致 → 名称の語境界一致 → 部分一致のみ）に並べます。`query="meteor"` が「**Meteor**ological（気象）」を含む DMSP・COSMIC を92件も拾って Meteor-M を埋もれさせていた問題も、**弱い一致を低順位にして件数を分けて表示**することで解消（実測: 上位は Meteor-M 2-4 → 2-3）。
-- **🧭 欠けを隠さない** — 取得に失敗したページは `structuredContent.failed_pages` と本文に明示し、**不完全なカタログはディスクに固定しません**。全件走査は初回38.5秒かかりますが、カタログを**ディスクにも保存**するため MCPサーバーを再起動しても0.07秒で返ります（24時間で更新）。
-- **☀️ `space_weather` — NOAA SWPC フォールバック** — `DEMO_KEY` は1時間30リクエスト/IPの共有枠で、他クライアントと取り合うと**1時間まるごと宇宙天気が返せなく**なっていました（実測）。NASA が 429・障害のときは**認証不要の NOAA SWPC** に自動切替し、Kp・NOAAスケール（R/S/G 現在値と1〜3日予測）・GOES X線クラス・太陽風（速度/密度/Bt/Bz）・陽子フラックス・警報・黒点相対数を返します。
-- **🔍 出典の取り違え防止** — どちらのデータを返したかを `content` と `structuredContent.source`（`NOAA SWPC`／`fallback: true`／NASA 側の理由 `nasa_reason`）に明記。SWPC 側で取れなかった項目も `failed` に残し、**「データが無い＝静穏」と誤読させません**。
-- **🧪 回帰テスト** — 「meteor で Meteor-M が上位に来る」「全ページを走査し失敗ページを報告する」「NASA 断で SWPC に切り替わり出典が変わる」「X線クラス表記と失敗項目の記録」の4件を追加（計15件）。
-- **検証** — 全47ツール実呼び出し exit 0／`--dead-code` 0件／`--fuzz` 例外漏れ0／`--offline` exit 0／`--figures` 描画系8／`unittest` 15件 OK。
+- **🔀 並列ツール呼び出し** — 全47ツールを `anyio` のワーカースレッド実行に変更（FastMCP は同期関数をイベントループ上で呼ぶため、これが無いと1つの API 待ちが他の呼び出しを全部止めます）。実測: 同一ツール4並列が wall 2.55s → **2.47s（4.0×）**、`astronomy_weather` を3都市同時で 11.72s → **3.93s（3.0×）**。同一引数の並行呼び出しは **single-flight** で1回に集約（8並列でも実行1回＝共有レート枠を無駄にしない）、matplotlib の描画は `img_common.RENDER_LOCK` で直列化。
+- **⚠️ 無応答（stdio）の修正** — サーバー起動後に numpy / matplotlib / skyfield を import すると **ツール呼び出しが応答を返さない**状態になっていました（`constellation_now` / `moon_phase_map` / `accurate` エンジンの描画。関数を直接呼ぶ既存ゲートでは検出できない種類の不具合）。numpy を起動時に import して解消し、`--stdio` ゲート（実クライアント経路で子プロセスを起動）を追加。
+- **⏱️ 外部API遮断で固まらない** — CelesTrak が TCP を blackhole すると**1回の呼び出しが120秒以上無応答**（並列で走る他ツールも待たされる）。接続を (connect 10秒, read 25秒) で打ち切り、遮断を記憶して以降は **fail fast**（初回 10.0s → 以降 0.0s）。
+- **🖼️ メディアのリンクを全ツールで徹底** — 画像を返す12ツールを全数チェックしたところ4ツールに抜け（`eodashboard_detail` は画像リンク無し、`apod` は生URLのみ、`astronomy_weather` は `structuredContent` に保存パス無し）。メディア本体より前のアイコン付きリンクを全ツールに揃え、**`--media-links`** ゲートで機械的に検査。
+- **🗺️ 図の検証で見つかった描画バグ** — 情報パネルを現在位置マーカーの後に描いていたため、マーカーが暗幕に隠れる場合がありました（月面 LRO が北緯82°で `marker_pixels: 0`）。`surface_map.panel_placement()` で**マーカーを隠さない隅**へ置き、`verify.panel_overlaps_marker` を追加（同型の潜在バグを3ツールで修正）。
+- **🧪 回帰テスト** — 並列（single-flight・スレッド逃がし）、起動時の import、遮断時の fail fast を追加（計26件）。
+- **検証** — 全47ツール exit 0（39 OK／8 error はいずれも外部の一時制限）／`--dead-code` 0／`--fuzz` 264組合せ 例外漏れ0／`--offline` exit 0／`--figures` 描画系8＋追加経路18／`--media-links` 問題0／`--concurrency` 3/3／`--stdio` 6/6／`unittest` 26件 OK。
 
 登録ツールは **47本**（増減なし）。
 
 ### 以前の更新
 
+- **v0.30.1** — 衛星カタログの**全件走査と一致度順**、NASA 断時の**宇宙天気 SWPC フォールバック**（`source` で出典明示）。
 - **v0.30.0** — 気象庁の**雨雲・降水画像**（解析雨量・降水短時間予報＋ナウキャスト、雷活動度で警告）を `astronomy_weather` に統合し、日食ルーチンを応用した**月齢マップ `moon_phase_map`** を追加（47ツール）。
 - **v0.29.1** — 外部データの部分失敗・異常値を黙って落とさない修正と回帰テスト（ISS時刻の防御的変換、`neo_today` の content 側 redact、部分失敗の数値化）。
 - **v0.29.0** — 気象庁の天気図（実況＋24時間予想）を `astronomy_weather` に統合し、日本国内では雲量の予報と天気図を同時に返す。`weather_satellite_now` をひまわり9号専用から **GEO 13機＋LEO 6機の19機**へ拡張（取得不可機は理由コード）。EUMETSAT の旧静的画像サーバ廃止（2026-02）に伴い GeoServer WMS へ移行。
 - **v0.28.0** — 天体面地図の描画を `surface_map.py` に集約（タイル合成・等角投影・地点マーカー・画素検証）。地点マーカー図 `planetary_orbiter_track(sites=...)`（アポロ6地点・月/火星/金星の着陸点・木星SL9・タイタン）。複数彗星の1枚パネル。近点が分解できない楕円は上界検査へ自動切替。日食の既定探索を1400日へ拡大し62→28秒。`space_weather` をカテゴリ単位キャッシュへ。
-- **v0.27.0** — メディア本体より前にアイコン付きリンク（CLI/Android 系ハーネス向け）。名前解決の共通基盤 `name_common.py`（和名→NORAD ID を 21/61 オフライン解決）。`alma_search` に製品種別・QA2・論文を追加。両エンジンの配色統一。CelesTrak の非リストJSONで例外が漏れる不具合とエラー文字列の api_key 露出を修正。
 
 ## 📦 インストール
 
@@ -118,7 +142,7 @@ uv run space-finder-mcp
 
 `apod`・`neo_today` は [api.nasa.gov](https://api.nasa.gov) の無料キーを使います。未設定でも `DEMO_KEY` で動作しますが、**レート制限 30 req/hr/IP** と低く、`space_weather`(DONKI) も同じ枠を共有するため、キー未設定だと3ツールが枠を取り合います。実用にはキーを推奨します。
 
-**呼び出し回数はサーバー側で管理しています**（`nasa_budget.py`）— 直近1時間の使用数を数え、枠を使い切っていたら**HTTP を投げずに**回復までの目安（例:「約30分後に自動的に回復します」）を返します。実際に 429 を受けた場合は `Retry-After` を尊重し、その間は再試行しません（同じ 429 を繰り返し踏みに行かない）。
+**呼び出し回数はサーバー側で管理しています**（`nasa_budget.py`）— 直近1時間の使用数を数え、枠を使い切っていたら**HTTP を投げずに**回復までの目安（例:「約30分後に自動的に回復します」）を返します。実際に 429 を受けた場合は `Retry-After` を尊重し、その間は再試行しません（同じ 429 を繰り返し踏みに行かない）。**CelesTrak** も短時間の連続リクエストで IP 単位に遮断され（403、または TCP が返らない blackhole）、その間は 1 回の呼び出しが分単位で固まります。接続は (connect 10 秒, read 25 秒) で打ち切り、遮断を受けたら**セッション内で記憶して以降は HTTP を出さずに即座に案内**を返します（`sat_tle` / `sat_ground_track` / `tiangong_now` / `sky_map_with_satellites` が該当）。
 
 **キーの取得方法（無料・即時発行）**: [api.nasa.gov](https://api.nasa.gov) にアクセスし、**メールアドレスを登録するだけで** 無料の API キーが即時発行されます。無料開発者キーのレート制限は **1時間あたり 1,000 リクエスト** です（実用に十分な容量）。登録時に入力したメール宛てに確認が来ます。
 
@@ -708,6 +732,7 @@ ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカ�
 - `search_space_images`: インライン画像を3枚 → 1枚（`inline_max` で増やせる）
 
 **設計上の約束**
+- **同じ引数の並行呼び出しは1回の実行にまとめます**（single-flight）。8並列で投げても実行は1回で、結果は全員に同じものが返ります（共有レート枠を N 倍消費しない）
 - エラー応答はキャッシュしません（一時的な障害やレート制限(429)が固定化しない）
 - 取得失敗時は期限切れでもディスクの古い内容を返します（stale-if-error）
 - 現在位置系（`iss_now` / `tiangong_now` / 各位置計算）は**リアルタイム性を優先しキャッシュ対象外**です（TLEは従来どおり6時間キャッシュ）
@@ -745,12 +770,24 @@ uv run python scripts/check-tools.py --dead-code
 # 5. 数値引数へ不正値（"abc" など）を注入して例外漏れを検査
 uv run python scripts/check-tools.py --fuzz
 
+# 5a. 並列ツール呼び出し（LLM が同時に複数ツールを投げる前提）を検査
+uv run python scripts/check-tools.py --concurrency
+
+# 5a2. 実クライアント経路（stdio）で代表ツールが応答するか検査
+uv run python scripts/check-tools.py --stdio
+
+# 5b. 画像/音声/動画を返すツールが「リンク先行」を守っているか検査（0件を維持）
+uv run python scripts/check-tools.py --media-links
+
+# 5c. 描画系ツールの figure/1（図の注記・自己検証）を検査
+uv run python scripts/check-tools.py --figures
+
 # 6. 変更したツールだけ先に確認 / CI向けJSON出力
 uv run python scripts/check-tools.py --only sat_tle,apod
 uv run python scripts/check-tools.py --json
 ```
 
-終了コードは 0=正常 / 1=異常です。MCPサーバーは**ホットリロードがない**ため、`src/` を変更したらクライアントを再起動してください。
+終了コードは 0=正常 / 1=異常です（例外漏れ・`structuredContent` 欠落・タイムアウト・デッドコード・figure/1 の検証失敗 `--figures`・メディアのリンク先行違反 `--media-links`）。MCPサーバーは**ホットリロードがない**ため、`src/` を変更したらクライアントを再起動してください。
 
 ### エージェントから使う場合
 
@@ -823,7 +860,9 @@ space-finder-mcp/
 ├── mcp.json                 # MCPクライアント設定の例
 ├── .env.example             # 環境変数の例（NASA_API_KEY は任意）
 ├── .claude/rules/           # 開発規約（coding-conventions / testing-and-verification / data-and-sources）
-├── scripts/check-tools.py   # 回帰検証ゲート（全ツール実行 / --offline / --dead-code）
+├── scripts/check-tools.py   # 回帰検証ゲート（全ツール実行 / --offline / --dead-code / --fuzz
+│                            #   / --figures / --media-links / --concurrency / --stdio）
+├── tests/                   # 回帰テスト（unittest discover -s tests。並列・起動import・遮断時の挙動）
 ├── pyproject.toml           # 依存・バージョン（uv 管理）
 └── README.md / LICENSE
 ```

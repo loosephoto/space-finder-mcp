@@ -24,8 +24,8 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 # planetary_map の汎用コアと画像共通ヘルパーを再利用
 from .planetary_map import BODIES
-from .surface_map import (draw_marker, marker_scan_radius, surface_view,
-                         tile_failure_note, verify_marker)
+from .surface_map import (draw_marker, marker_scan_radius, panel_placement,
+                         surface_view, tile_failure_note, verify_marker)
 from .img_common import (figure_notes, figure_payload, figure_text_block,
                          load_font, media_link_line, primary_spec,
                          save_output, scale_spec, view_spec)
@@ -193,12 +193,20 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
     h_title = d.textbbox((0, 0), title, font=f_big)[3] - d.textbbox((0, 0), title, font=f_big)[1]
     h_row1 = d.textbbox((0, 0), row1, font=f_mid)[3] - d.textbbox((0, 0), row1, font=f_mid)[1]
     h_row2 = d.textbbox((0, 0), row2, font=f_sm)[3] - d.textbbox((0, 0), row2, font=f_sm)[1]
-    panel_bottom = 12 + h_title + pad + h_row1 + pad + h_row2 + 20
-    d.rounded_rectangle([8, 8, min(720, iw - 8), panel_bottom], radius=12, fill=(0, 0, 0, 215))
-    y = 20
-    d.text((22, y), title, font=f_big, fill=(255, 255, 255)); y += h_title + pad
-    d.text((22, y), row1, font=f_mid, fill=(225, 228, 248)); y += h_row1 + pad
-    d.text((22, y), row2, font=f_sm, fill=(200, 205, 235))
+    panel_w = min(720, iw - 16)
+    panel_h = 12 + h_title + pad + h_row1 + pad + h_row2 + 20
+    # 情報パネルは現在地マーカーを隠さない位置へ（隠れると画素検査が落ちる）
+    px0, py0, panel_hidden = panel_placement(iw, ih, panel_w, panel_h,
+                                             avoid=[(cx, cy)], margin=8, gap=20)
+    d.rounded_rectangle([px0, py0, px0 + panel_w, py0 + panel_h], radius=12,
+                        fill=(0, 0, 0, 215))
+    y = py0 + 12
+    d.text((px0 + 14, y), title, font=f_big, fill=(255, 255, 255)); y += h_title + pad
+    d.text((px0 + 14, y), row1, font=f_mid, fill=(225, 228, 248)); y += h_row1 + pad
+    d.text((px0 + 14, y), row2, font=f_sm, fill=(200, 205, 235))
+    if panel_hidden:
+        # どの隅でも重なる場合は、隠れるマーカーをパネルの上に描き直す
+        draw_marker(d, (cx, cy), 13, fill=(255, 40, 30), outline_w=4)
     # 凡例バー(下部)
     ly = ih - 44
     d.rounded_rectangle([8, ly, iw - 8, ih - 8], radius=10, fill=(0, 0, 0, 200))
@@ -231,13 +239,18 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
             "青●は着陸地点、赤●は現在地。走行距離は着陸地点からの累積 km",
             "地図は NASA Trek の等角図法のため、高緯度ほど東西方向が圧縮されて見える",
             "座標・sol・RMC は NASA MMGIS (mars.nasa.gov) の公開 waypoint データ",
+            ("" if (px0, py0) == (8, 8) and not panel_hidden else
+             "情報パネルは現在地マーカー（cx={:.0f}, cy={:.0f}px）と重ならない隅に配置した".format(cx, cy)),
+            ("" if not panel_hidden else
+             "図が小さくパネルと重なるため、現在地マーカーはパネルの上に描き直した"),
             tile_failure_note(sv),
         ]),
         caption=f"{rover_ja}（{rv}）の{body_cfg['ja']}現在地。"
                 f"座標 {clat:.4f}°{'N' if clat >= 0 else 'S'} / {clon:.4f}°E、sol {wp.get('sol')}、"
                 f"着陸地点から {wp.get('dist_km')} km。",
-        verify=verify_marker(img, (cx, cy), clon, clat, sv["inv"],
-                             r=marker_scan_radius(13)),
+        verify=dict(verify_marker(img, (cx, cy), clon, clat, sv["inv"],
+                                  r=marker_scan_radius(13)),
+                    panel_overlaps_marker=bool(panel_hidden)),
     )
     lines = [
         media_link_line(f"生成した画像を開く（{rover_ja} の{body_cfg['ja']}現在地マップ）",

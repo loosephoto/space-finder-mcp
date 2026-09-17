@@ -11,7 +11,7 @@
 | ソース | 注意点 |
 |:--|:--|
 | NASA Open API (api.nasa.gov) | `DEMO_KEY` は **30req/時/IP** の共有枠（`apod`・`neo_today`・`space_weather` で共有）。`nasa_budget.check()` を投げる前に通し（枠切れなら HTTP を出さない）、429 は `note_429()` で `Retry-After` を記録する。APOD は `date` 省略で 500 を返す事象があるため**日付を明示**し、当日未公開(404)なら前日へフォールバックする |
-| CelesTrak (gp.php) | `FORMAT=JSON` は**軌道要素のみで TLE行を返さない**。SGP4 に渡す生 TLE は `FORMAT=TLE` で取得する（JSON由来だと `SGP4 error code 2` で常時失敗する）。404 は「該当なし」 |
+| CelesTrak (gp.php) | `FORMAT=JSON` は**軌道要素のみで TLE行を返さない**。SGP4 に渡す生 TLE は `FORMAT=TLE` で取得する（JSON由来だと `SGP4 error code 2` で常時失敗する）。404 は「該当なし」。**短時間の連続リクエストで IP 単位に遮断（403／TCP blackhole）**され、素の呼び出しは分単位で固まるため、接続は (connect 10s, read 25s) で打ち切り、遮断を記憶して以降は fail fast する（`celestrak.blocked_status`） |
 | JPL Horizons / SBDB / DE421 | Horizons の宇宙機は**負のID**（例: はやぶさ2 = -37）。SBDB は小惑星のみ（探査機は不可） |
 | NASA MMGIS / NASA Trek / Blue Marble | 位置データは火星ローバーのみ公開。天体地図は Trek WMTS（等角図法、`cols=2^(z+1)`, `rows=2^z`）。タイルはディスクキャッシュ対象 |
 | Sky & Telescope ほかRSS | Cloudflare がブラウザ偽装UAを弾く（curl/Wget系UAは許可）。`astronomy_news` は**複数フィードのフォールバック連鎖** |
@@ -24,3 +24,4 @@
 
 - 画像は base64 で `content` にインライン表示（JPEG/PNG）。**クライアントへ送る量**に注意: 実写合成は JPEG、座標図は PNG が適切。インライン枚数は既定で絞る（`inline_max`）。
 - 画像の著作権・クレジット表記は各ソースの指示に従う（NASA素材は NASA Media Usage Guidelines）。
+- **メディア本体より前にアイコン付きリンク**を出す（生成画像は `save_output()` で保存し `file:///` リンク＋`structuredContent.image_path`、検索系は各項目の直後に `🖼️/🎧/🎬 [◯を開く](URL)`）。検査は `--media-links`。

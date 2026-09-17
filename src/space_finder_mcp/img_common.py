@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import math
 import os
+import threading
 import time
 import urllib.parse
 import uuid
@@ -22,6 +23,11 @@ from functools import lru_cache
 from typing import Iterable, List, Optional, Tuple
 
 from .cache import CACHE_ROOT
+
+# matplotlib はプロセス全体の状態（rcParams・現在の figure・フォントキャッシュ）を共有するため
+# スレッド安全ではない。並列ツール呼び出しで図が混ざらないよう、matplotlib で描く経路だけを
+# このロックで直列化する（Pillow 合成だけの経路はロック不要なので触らない）。
+RENDER_LOCK = threading.RLock()
 
 # フォント探索順（先頭ほど優先）。bold はメイリオ Bold を最優先にする。
 _FONT_CANDIDATES = {

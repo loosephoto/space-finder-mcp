@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from typing import Optional
 
+import threading
+import time
+
 import requests
 from functools import lru_cache
 from mcp.types import CallToolResult, TextContent
@@ -34,19 +37,63 @@ WELL_KNOWN: dict[str, int] = {
 }
 
 
-def _get(params: dict, timeout: int = 30) -> requests.Response:
-    """CelesTrak へ GET する。403 は「一時的な遮断」として案内文付きに正規化する。
+# CelesTrak が IP 単位で遮断している間（403）や、接続が blackhole された（TCP が
+# 返ってこない）間は、**毎回 HTTP を投げに行かず**その場で失敗させる。遮断中に投げると
+# 1回の呼び出しが分単位で固まり、LLM のツール呼び出し（並列に走っている他のツールも
+# 含む）が待たされる（実測: CelesTrak が blackhole のとき connect が返らず 120 秒以上
+# 無応答。nasa_budget と同じ「投げる前に止める」方針）。
+_COOLDOWN_LOCK = threading.Lock()
+_COOLDOWN_UNTIL = 0.0
+_COOLDOWN_LAST = ""
+_COOLDOWN_SECONDS_BLOCKED = 300.0     # 403（IP 単位の遮断）: 数分待つ
+_COOLDOWN_SECONDS_NET = 60.0          # 接続不可・タイムアウト: 短めに再試行
+CONNECT_TIMEOUT = (10, 25)            # (connect, read) 秒。connect を短くして固まりを防ぐ
+
+
+def blocked_status() -> tuple:
+    """遮断中なら (残り秒, 理由)、そうでなければ (0.0, "")。"""
+    with _COOLDOWN_LOCK:
+        return (max(0.0, _COOLDOWN_UNTIL - time.time()), _COOLDOWN_LAST)
+
+
+def _note_blocked(seconds: float, reason: str) -> None:
+    global _COOLDOWN_UNTIL, _COOLDOWN_LAST
+    with _COOLDOWN_LOCK:
+        _COOLDOWN_UNTIL = max(_COOLDOWN_UNTIL, time.time() + seconds)
+        _COOLDOWN_LAST = reason
+
+
+def _blocked_message(remaining: float, reason: str) -> str:
+    return ("CelesTrak へのアクセスが一時的に遮断されています（{}）。"
+            "約 {:.0f} 分後に再試行してください（短時間に多数のリクエストを送ると"
+            " IP 単位で遮断されます）。".format(reason or "接続不可", max(1.0, remaining) / 60.0))
+
+
+def _get(params: dict, timeout=None) -> requests.Response:
+    """CelesTrak へ GET する。403・接続不可は「一時的な遮断」として案内文付きに正規化する。
 
     短時間に多数のリクエストを送ると CelesTrak は **IP 単位で 403 Forbidden** を返す
-    （UA を変えても解除されない。実測 2026-09: curl/Mozilla UA でも 403）。
-    生の "403 Client Error" では原因が分からないため、待てば直ることを明示する。
+    （UA を変えても解除されない。実測 2026-09: curl/Mozilla UA でも 403）。生の
+    "403 Client Error" では原因が分からないため、待てば直ることを明示する。
+    遮断中は HTTP を投げずに即座に同じ案内を返す（fail fast）。
     """
-    r = requests.get(BASE, headers=UA, params=params, timeout=timeout)
+    remaining, reason = blocked_status()
+    if remaining > 0:
+        raise requests.ConnectionError(_blocked_message(remaining, reason))
+    try:
+        r = requests.get(BASE, headers=UA, params=params,
+                         timeout=timeout or CONNECT_TIMEOUT)
+    except (requests.ConnectionError, requests.Timeout) as e:
+        _note_blocked(_COOLDOWN_SECONDS_NET, "接続できません（遮断またはネットワーク断）")
+        raise requests.ConnectionError(
+            "CelesTrak に接続できませんでした（一時的な遮断またはネットワーク断）。"
+            "約 {:.0f} 分後に再試行してください。".format(_COOLDOWN_SECONDS_NET / 60.0)) from e
     try:
         r.raise_for_status()
     except requests.HTTPError as e:
         status = getattr(getattr(e, "response", None), "status_code", None)
         if status == 403:
+            _note_blocked(_COOLDOWN_SECONDS_BLOCKED, "403 Forbidden（IP 単位の遮断）")
             raise requests.HTTPError(
                 "アクセスが一時的に拒否されました（403 Forbidden）。"
                 "短時間に多数のリクエストを送ると CelesTrak 側で IP 単位に遮断されます"

@@ -24,9 +24,10 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .celestrak import WELL_KNOWN, fetch_tle
 from .img_common import (encode_jpeg, figure_notes, figure_payload,
-                         figure_text_block, load_font, media_link_line,
+                         figure_text_block, load_font, media_link_line, pixel_near,
                          primary_spec, save_output, scale_spec,
                          split_at_antimeridian, view_spec)
+from .surface_map import panel_placement, marker_scan_radius
 from .input_utils import as_float, as_int
 
 # ---- NASA Blue Marble 用 UA（TLE 取得は celestrak.fetch_tle に共通化）----
@@ -257,8 +258,13 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
     f_mid = load_font(int(out_px / 55), bold=True)
     f_sm = load_font(int(out_px / 62), bold=True)
     # 情報パネル
+    # 情報パネルは現在位置マーカーを隠さない位置へ（隠れると画素検査が落ちる）
     panel_w = int(out_px * 0.52)
-    d.rounded_rectangle([14, 14, panel_w, int(HH * 0.22)], radius=14, fill=(0, 0, 0, 210))
+    panel_h = int(HH * 0.22)
+    px0, py0, panel_hidden = panel_placement(W, HH, panel_w, panel_h,
+                                             avoid=[(cx, cy)], margin=14, gap=r + 8)
+    d.rounded_rectangle([px0, py0, px0 + panel_w, py0 + panel_h], radius=14,
+                        fill=(0, 0, 0, 210))
     ns = "北緯" if lat0 >= 0 else "南緯"
     ew = "東経" if lon0 >= 0 else "西経"
     lines_txt = [
@@ -266,9 +272,14 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
         f"現在地: {ns} {abs(lat0):.2f}度 / {ew} {abs(lon0):.2f}度（高度 {alt0:.0f} km）",
         f"速度 約{speed0*3600:.0f} km/h ・ 観測時刻 {tstr} UTC",
     ]
-    d.text((28, 22), lines_txt[0], font=f_big, fill=(255, 255, 255))
-    d.text((28, 22 + int(out_px / 26)), lines_txt[1], font=f_mid, fill=(225, 228, 248))
-    d.text((28, 22 + int(out_px / 19)), lines_txt[2], font=f_sm, fill=(200, 210, 240))
+    d.text((px0 + 14, py0 + 8), lines_txt[0], font=f_big, fill=(255, 255, 255))
+    d.text((px0 + 14, py0 + 8 + int(out_px / 26)), lines_txt[1], font=f_mid, fill=(225, 228, 248))
+    d.text((px0 + 14, py0 + 8 + int(out_px / 19)), lines_txt[2], font=f_sm, fill=(200, 210, 240))
+    if panel_hidden:
+        # どの隅でも重なる場合は、隠れるマーカーをパネルの上に描き直す
+        d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(255, 40, 30),
+                  outline=(255, 255, 255), width=max(4, out_px // 300))
+        d.ellipse([cx - r // 2, cy - r // 2, cx + r // 2, cy + r // 2], fill=(255, 255, 255))
     # 現在地ラベル（マーカーと重ならない位置に配置）
     # マーカーから十分離す：右側に余白がなければ左側に置く
     lab_w = int(out_px * 0.24)
@@ -299,6 +310,9 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
     inv_lat = 90.0 - cy / max(HH, 1) * 180.0
     proj_err = max(abs(inv_lon - lon0), abs(inv_lat - lat0))
     marker_visible = not (lx <= cx <= lx + lab_w and ly <= cy <= ly + lab_h)
+    # パネルに隠れていないことまで画素で数える（マーカー色が実在するか）
+    painted = max(pixel_near(img, (cx, cy), c, tol=120, r=marker_scan_radius(r))
+                  for c in ((255, 40, 30), (255, 60, 30)))
     fig = figure_payload(
         kind="ground_track_map",
         title=f"{sat_name} の地上軌道（世界地図・等角図法）",
@@ -320,13 +334,19 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
             "経度±180°をまたぐ部分は線を分割して描いている（地図の端を横切らせない）",
             f"マーカー（赤●＋白中心）は指定時刻の真下の点。高度 {alt0:.0f} km・速度 約{speed0*3600:.0f} km/h",
             "位置は CelesTrak の最新TLEを Skyfield(SGP4) で伝播したその時刻の値（予報ではない）",
+            ("" if (px0, py0) == (14, 14) and not panel_hidden else
+             "情報パネルは現在位置マーカー（cx={:.0f}, cy={:.0f}px）と重ならない隅に配置した".format(cx, cy)),
+            ("" if not panel_hidden else
+             "図が小さくパネルと重なるため、現在位置マーカーはパネルの上に描き直した"),
         ]),
         caption=f"{sat_name} の地上軌道（{tstr}）。真下の点は {ns} {abs(lat0):.2f}度 / "
                 f"{ew} {abs(lon0):.2f}度、高度 {alt0:.0f} km。",
-        verify={"ok": bool(proj_err <= 0.05 and marker_visible),
+        verify={"ok": bool(proj_err <= 0.05 and marker_visible and painted > 0),
                 "latlon_from_px_deg": [round(inv_lon, 4), round(inv_lat, 4)],
                 "latlon_from_px_error_deg": round(proj_err, 4),
-                "marker_visible": bool(marker_visible)},
+                "marker_pixels": int(painted),
+                "marker_visible": bool(marker_visible),
+                "panel_overlaps_marker": bool(panel_hidden)},
     )
     text_lines = [
         media_link_line(f"生成した画像を開く（{sat_name} の地上軌道マップ）",

@@ -7,20 +7,28 @@ uv run python -m compileall -q src/space_finder_mcp   # 1. 構文
 uv run python scripts/check-tools.py --dead-code      # 2. デッドコード走査（0件を維持）
 uv run python scripts/check-tools.py --offline        # 3. ネットワーク全断で例外漏れ0
 uv run python scripts/check-tools.py --fuzz           # 3'. 数値引数へ不正値（"abc" 等）を注入して例外漏れ0
-uv run python scripts/check-tools.py                  # 4. 全45ツール実呼び出し（数分）
+uv run python scripts/check-tools.py                  # 4. 全47ツール実呼び出し（数分）
+uv run python scripts/check-tools.py --figures        # 5. 描画系の figure/1（注記・caption・verify.ok）
+uv run python scripts/check-tools.py --media-links    # 6. 画像/音声/動画の「リンク先行」0件
+uv run python scripts/check-tools.py --concurrency    # 7. 並列実行（single-flight・スレッド逃がし）
+uv run python scripts/check-tools.py --stdio          # 8. 実クライアント経路(stdio)で無応答なし
+uv run python -m unittest discover -s tests           # 9. 回帰テスト
 uv run python scripts/check-tools.py --only sat_tle,apod   # 変更したツールだけ先に確認
 ```
 
-`check-tools.py` の終了コードは 0=正常 / 1=異常（例外漏れ・structuredContent欠落・タイムアウト・デッドコード）。CI では `--json` を使う。
+`check-tools.py` の終了コードは 0=正常 / 1=異常（例外漏れ・structuredContent欠落・タイムアウト・デッドコード・figure/1 の検証失敗・メディアのリンク先行違反・並列検査失敗）。CI では `--json` を使う。
 
 ## 変更内容ごとの追加確認
-- **描画系を変更したとき**: `uv run python scripts/check-tools.py --figures` で figure/1（注記・caption・verify.ok）を検査する。
+- **描画系を変更したとき**: `uv run python scripts/check-tools.py --figures` で figure/1（注記・caption・`verify.ok`）を検査する。`verify.marker_pixels` / `panel_overlaps_marker` も見る（情報パネルが現在位置マーカーをしていないか＝`surface_map.panel_placement`）。
+- **並列・起動に関わる変更をしたとき**: `--concurrency`（single-flight・ワーカースレッド逃がし・混在並列）と `--stdio`（実クライアント経路の無応答）を必ず実行する。関数を直接呼ぶ他のゲートでは**検出できない**種類の不具合がここで出る（実測: 起動後の numpy import で無応答）。
 
 | 変更 | 追加で確認すること |
 |:--|:--|
 | ツール追加/削除 | 全件実行（`check-tools.py`）／`README.md` ツール表・`SKILL.md`・`server.py` の登録を同期 |
 | 画像生成の変更 | 画像が出ること（`blocks` に `image` がある）＋デコード可能・非単色。**リファクタなら旧実装とバイト比較**して等価性を確認 |
-| キャッシュの変更 | 2回目がキャッシュヒットすること（リクエスト数0）／**エラーが固定化しないこと**／キャッシュ値の書き換えが他呼び出しへ漏れないこと |
+| キャッシュの変更 | 2回目がキャッシュヒットすること（リクエスト数0）／**エラーが固定化しないこと**／キャッシュ値の書き換えが他呼び出しへ漏れないこと／**同じ引数の並行呼び出しが1回にまとまる（single-flight）こと** |
+| 延 import の追加 | **ネイティブ拡張（numpy 等）は起動前に import** する（stdio 起動後の import は無応答）。`server.py` 冒頭に追加し `--stdio` で確認 |
+| 外部APIの遮断 | 遮断（403・接続不可）を記憶して以降 fail fast する（`celestrak` 参照）。connect タイムアウト必須（blackhole で分単位に固まる） |
 | 外部API仕様の変更 | 実際に叩いて確認（例: CelesTrak の `FORMAT=JSON` は TLE行を返さない → `FORMAT=TLE`） |
 | リリース | `pyproject.toml` の version、`uv build`、`dist/`・`build/` の削除 |
 

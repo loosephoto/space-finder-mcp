@@ -10,6 +10,8 @@ category: space
 
 宇宙・天文・地球観測の**公開API（大半は認証不要）**を1つの MCP サーバーで横断検索するツール群です。画像生成（地球地図上の衛星軌道、天体地図上の周回機・ローバー、太陽系俯瞰、日食時系列パネル、星空マップ）を含み、各ツールは人間向け表示（`content`）と LLM向け純粋JSON（`structuredContent`）を同時に返します。
 
+> ⚠️ **出力のうち「保証される部分」と「モデル次第の部分」** — `structuredContent`（JSON の数値・座標・出典・`figure.notes`）と `content` の画像・リンクは**サーバー側で決まり、モデルには依存しません**（同じ引数・同じ時刻ならどのモデルから呼んでも同じ）。それを**読みやすい回答文に組み立てる工程はあなた（ホスト側モデル）の裁量**で、構成・語り口・要約の粒度はモデルや設定で変わります。回答を書くときは常に JSON を根拠にしてください（詳細は「注意事項 10」）。
+
 ## 前提条件
 
 - **Python 3.11+** / **uv**（`uv sync` で依存解決。Node.js 不要）
@@ -149,6 +151,51 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 「天宮は今どこ？」                            → tiangong_now()
 ```
 
+## 並列ツール呼び出し（LLM が複数ツールを同時に投げる）
+
+**独立した複数ツールは、1ターンでまとめて投げて構いません。** サーバー側が同期ツールを
+ワーカースレッドで実行するため、並行に呼んだ分だけ実際に速くなります（直列のラウンドトリップを
+繰り返す必要はありません）。実測:
+
+| 例 | 逐次（合計） | 並列（wall） | 倍率 |
+|:--|--:|--:|--:|
+| `moon_phase_map(place=東京)` を4並列（同一引数） | 2.55s | **2.47s** | 4.0× |
+| `astronomy_weather` を3都市（東京/大阪/札幌）同時 | 11.72s | **3.93s** | 3.0× |
+
+投げ方の例: 「ISSの今の位置」「東京の今夜の天気」「最新の宇宙天気」を別々に聞かれたら、
+`sat_ground_track(name="iss")` ＋ `astronomy_weather(place="東京")` ＋ `space_weather()` を
+**同時に呼ぶ**のが正解です（1つずつ待つと待ち時間がそのまま積み上がります）。
+
+並列で投げるときの前提（サーバー側の保証）:
+
+- **同じ引数の並行呼び出しは1回の実行にまとまります**（single-flight）。8並列で投げても
+  実行は1回で、結果は全員に同じものが返ります。`DEMO_KEY` のような共有レート枠を
+  N倍消費しません。
+- **1つが失敗しても他は落ちません**。失敗は例外ではなく `CallToolResult` の
+  `structuredContent.error` として返るので、並列呼び出しのうち1本がレート制限や
+  一時遮断でも、残りの結果はそのまま使えます。
+- **レート制限のあるソースは同時に呼んでも枠は共有**です（NASA `DEMO_KEY` 30 req/h/IP・
+  Launch Library 2 の per-IP 制限・CelesTrak の IP 遮断）。CelesTrak は遮断を検知すると
+  **以降 fail fast**（HTTP を出さず即エラー）なので、遮断中でも呼び出しが固まりません
+  （`sat_tle` / `sat_ground_track` / `tiangong_now` / `sky_map_with_satellites` が該当）。
+- **CPU 律速の計算は並列化しません**（GIL）。Skyfield の計算や Pillow/matplotlib の描画は
+  1枚ずつ処理されます（matplotlib はプロセス全体の状態を持つため、サーバー側で
+  `RENDER_LOCK` により直列化）。重い図を何枚も同時に投げても、速くはなりません
+  （速いのは API 待ち＝I/O の部分です）。
+- 応答の`content`には、インライン画像を描画できないクライアント向けに
+  `🖼️ [生成した画像を開く](file:///…)` のリンクが先頭に入ります（回答時はそのまま提示）。
+
+実装メモ（このサーバーを改修する場合）: 全47ツールは `server.py` の `_reg()` で登録し、
+本体は `anyio.to_thread` のワーカースレッドで実行します（元の同期関数は
+`tool.fn.sync_fn` に残るので、検証スクリプトは同期呼び出しのまま使えます）。検査は
+`scripts/check-tools.py --concurrency`（single-flight・スレッド逃がし・混在並列）と
+`scripts/check-tools.py --stdio`（実クライアント経路で無応答にならないか）です。
+同時実行の上限は anyio のワーカースレッドプール（既定 40 本）で、それを超える並列呼び出しは
+順番待ちになります（通常の使い方では問題になりません）。
+**遅延 import するネイティブ拡張は起動前にまとめて import しておくこと**（`server.py` 冒頭の
+`import numpy`）。stdio サーバーが動き出した後に numpy / matplotlib / skyfield を import すると、
+この環境では import が返らず**ツールが無応答**になります（実測。PIL.Image・sgp4・requests は問題なし）。
+
 ## 図の注記 figure/1（描画系ツールの応答）
 
 描画系ツール（`solar_system_now` / `sat_ground_track` / `planetary_orbiter_track` / `planetary_rover_location_map` / `sky_map_with_satellites` / `solar_eclipse_series` / `moon_phase_map` / `astronomy_weather`〔雨雲・降水画像を返すとき〕）は、`structuredContent.figure` に **視点(view)・主天体の置き方(primary: 楕円は焦点であって中心ではない)・縮尺(scale)・円錐曲線(conic)・注記(notes)・自己検証(verify)・説明(caption)** を返します。`content` にも同じ注記が `### ⚠️ 図の注記` として入ります。
@@ -161,6 +208,7 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 - `verify.periapsis_check` は `equality`（近点距離を等値で検査）か `upper_bound`（**近点が画面上で分解できない**ため上界だけを検査）です。**超長距離の楕円では近日点が「誇張した主天体の円盤」の内側に入り、曲線の端の画素は近点ではなく円盤の縁になる**ので、`upper_bound` に切り替わります（`periapsis_resolvable: false` ＋ `periapsis_unresolved_reason`）。この場合も主天体を楕円の中心に置く誤りは検出できます（上界＋遠点側の等値検査）。**`periapsis_resolvable` が偽の図を説明するときは、注記にある「この縮尺では図から確認できない」旨を落とさないこと。**
 - `moon_phase_map` は**月齢・照度・満ち欠けの向きを自称する図**です。`verify` は**位置角（PA）軸上で明暗境界線の位置を測り直した照度**との一致（許容 0.05。細い三日月は境界線が1〜2画素幅になり丸め誤差が残る）で、走査軸が申告した PA 方向なので**向きが違えば一致しません**。図の月は模式図（実写ではなく、月の海は乱数・クレーターや秤動・地球照は描かない）で、**天の北を上・東を左に置いた見え方**（地平線からの見え方ではない）です。「朔・望の日は正午時点では前後になる」等の食い違いは `figure.notes` に**数値から生成**してあります。
 - `solar_eclipse_series` は**その観測地で太陽が地平線より上にある時間帯だけ**を描きます。全日食が地平線下なら図を返さず「見えません（最大高度 −67°）」と明示します（見えない食を図にすると誤解させるため）。
+- **情報パネルは現在位置マーカーを隠さない隅に置きます**（`surface_map.panel_placement()`）。パネルを後から描くと地図の暗幕がマーカーを覆い、画素検査（`verify.marker_pixels`）が 0 になって落ちます（実測: 月面の LRO が北緯82°＝図の上端に来たケース）。`verify.panel_overlaps_marker` に結果が入り、隅で避けられない小さい図ではマーカーをパネルの上に描き直して注記にその旨を出します。
 - 検査: `scripts/check-tools.py --figures`（注記が空・`verify.ok` が偽なら exit 1）。既定引数では通らない経路（`view="comet_orbit"`、可視の日食）も明示的に叩きます。
 
 ## 開発ワークフロー（検証ゲート）
@@ -169,7 +217,11 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 uv run python -m compileall -q src/space_finder_mcp   # 構文
 uv run python scripts/check-tools.py --dead-code      # デッドコード（0件を維持）
 uv run python scripts/check-tools.py --offline        # ネットワーク全断で例外漏れ検査
+uv run python scripts/check-tools.py --fuzz           # 数値引数へ不正値を注入（例外漏れ0を維持）
 uv run python scripts/check-tools.py --figures        # 描画系の図の注記(figure/1)を検査
+uv run python scripts/check-tools.py --media-links    # 画像/音声/動画の「リンク先行」を検査
+uv run python scripts/check-tools.py --concurrency    # 並列ツール呼び出し（single-flight・スレッド逃がし）を検査
+uv run python scripts/check-tools.py --stdio          # 実クライアント経路(stdio)で代表ツールが応答するか検査
 uv run python scripts/check-tools.py                  # 全47ツール実呼び出し（数分、exit 1 で失敗）
 ```
 
@@ -191,19 +243,21 @@ uv run python scripts/check-tools.py                  # 全47ツール実呼び�
 
 実測効果（1回目→2回目）: `planetary_orbiter_track`(LRO) 4.46s/73req → 1.07s/1req、`solar_eclipse_series` 28.4s → 0.7s、`satellite_status` 50.28s → 0.00s、`sky_map` 画像 992KB → 188KB（JPEG化）。
 
-**エラー応答はキャッシュしません**（レート制限429等が固定化しない）。**現在位置系はキャッシュ対象外**です。
+**同じ引数の並行呼び出しは1回の実行にまとめます**（single-flight）。**エラー応答はキャッシュしません**（レート制限429等が固定化しない）。**現在位置系はキャッシュ対象外**です。
 
 ## 注意事項
 
 1. **出典表示**: 結果には出典URLが含まれます。回答時は必ず引用元を表示してください（NASA / ESA / JAXA / ISRO / CSA / INPE / UK / CNSA / Wikidata など）。
-2. **レート制限**: `DEMO_KEY` は 30リクエスト/時/IP の共有枠（`apod`・`neo_today`・`space_weather` で共有）。`space_weather` は枠切れ時に**認証不要の NOAA SWPC へ自動切替**するので、宇宙天気だけは 429 中でも返ります（`space_weather` 以外の NASA 系は待機が必要）。サーバー側で使用数を数えており、枠を使い切ると HTTP を出さずに回復目安を返し、429 を受けた場合は `Retry-After` を尊重します（`structuredContent.budget` に上限・使用数・残りを添付）。
+2. **レート制限**: `DEMO_KEY` は 30リクエスト/時/IP の共有枠（`apod`・`neo_today`・`space_weather` で共有）。`space_weather` は枠切れ時に**認証不要の NOAA SWPC へ自動切替**するので、宇宙天気だけは 429 中でも返ります（`space_weather` 以外の NASA 系は待機が必要）。サーバー側で使用数を数えており、枠を使い切ると HTTP を出さずに回復目安を返し、429 を受けた場合は `Retry-After` を尊重します（`structuredContent.budget` に上限・使用数・残りを添付）。**CelesTrak** も短時間の連続リクエストで IP 単位に遮断され（403、または TCP が返らない blackhole）、その間は 1 回の呼び出しが分単位で固まります。接続は (connect 10 秒, read 25 秒) で打ち切り、遮断を受けたら**セッション内で記憶して以降は HTTP を出さずに即座に案内**を返します（`sat_tle` / `sat_ground_track` / `tiangong_now` / `sky_map_with_satellites` が該当）。
 3. **曖昧入力**: 衛星名などで候補が複数ある場合は推測せず、NORAD ID 付きの候補を提示して停止します。
 4. **過去ミッション**: かぐや（SELENE）・あかつき等は「現在位置を表示できない」と正直に返します。落点が公表されている機体（かぐや＝南緯65.5°／東経80.4° Gill クレータ付近、2009-06-10 18:25 UTC）は落点を `structuredContent.impact_site` に出典つきで返します（「落点は判明しているか」に MCP だけで答えられます）。和名（かぐや/あかつき）も英語キーへ展開してから判定します。
 5. **描画エンジン**: `simple`（Pillow合成・学生向け視認性重視・JPEG・既定）と `accurate`（matplotlib・正確座標・PNG）。天体・記号の色は `img_common.BODY_COLORS`（惑星・月・太陽の実物色）/ `SYMBOL_COLORS`（環・縞・極冠・小惑星・彗星）が単一の出典で、`sky_map_with_satellites` と `solar_system_now` の両エンジンが同じ値を参照し、`accurate` の凡例は実際に描いたマーカーだけを色コード付きで出します。遠方探査機・彗星は線形縮尺では枠外のため自動的に `simple` を使用します。
 6. **名前解決のフォールバック**: 天体名・衛星名は `name_common.py` の共通段階で解決します（内蔵テーブル → 表記ゆれ → 和名→英語名 → Sesame/CDS で名前→座標 → 候補提示して停止）。`cadc_observations` は内蔵テーブルに無い名前（M104/Sombrero/HL Tau/和名）を SIMBAD で解決、`satellite_status` と `sat_tle` は和名（ひまわり/ひので/だいち/宇宙ステーション等、`JA_ALIASES` 103キー）を英語名・NORAD ID に展開します（現役機は `celestrak.WELL_KNOWN` に実測 NORAD ID 登録済み＝オフライン解決、番号なしファミリー名は候補提示）。解決できないときは推測せず候補を提示します。
 7. **応答にキーを載せない**: `apod`/`neo_today`/`space_weather` のエラー文字列は requests 由来で `api_key=<値>` を含むため、外向けテキストは `nasa_budget.redact()` を通して伏せ字化します（`budget.key` は `DEMO_KEY`/`custom` のみ）。
-8. **メディアのリンク**: 生成画像は `%LOCALAPPDATA%\Temp\space_finder_mcp\out` に保存し、`content` の**先頭行**に `🖼️ [生成した画像を開く（…）](file:///…)` を出します（`structuredContent.image_path` に実パス）。検索系は各項目の直後に `🖼️/🎧/🎬 [◯◯を開く: タイトル](URL)` を出します。CLI系・Android系ハーネス（codex / opencode）はインライン画像を描画しないため、回答時はこのリンクを必ず提示してください（アイコン: 🖼️画像 / 🎧音声 / 🎬動画）。
-7. **認証付きダウンロード非対応**: ESA Copernicus は検索とプレビューURLのみ（OAuth2 ダウンロードは行いません）。
+8. **メディアのリンク**: （違反は `scripts/check-tools.py --media-links` が exit 1 で検出します）生成画像は `%LOCALAPPDATA%\Temp\space_finder_mcp\out` に保存し、`content` の**先頭行**に `🖼️ [生成した画像を開く（…）](file:///…)` を出します（`structuredContent.image_path` に実パス）。検索系は各項目の直後に `🖼️/🎧/🎬 [◯◯を開く: タイトル](URL)` を出します。CLI系・Android系ハーネス（codex / opencode）はインライン画像を描画しないため、回答時はこのリンクを必ず提示してください（アイコン: 🖼️画像 / 🎧音声 / 🎬動画）。
+9. **認証付きダウンロード非対応**: ESA Copernicus は検索とプレビューURLのみ（OAuth2 ダウンロードは行いません）。
+
+10. **ツール出力と回答文の関係（どこまでが保証か）**: ツールが返す `structuredContent`（数値・座標・出典・`figure.notes`・`verify`）と `content` の画像・リンクは、**同じ引数・同じ時刻に呼べばどのモデルからでも同じ**内容です（データ取得と計算はサーバー側で完結し、ホスト側モデルには依存しません）。一方、**それを回答文に組み立てる工程はホスト側モデルの裁量**で、説明の順序・語り口・要約の粒度・強調点はモデルや設定によって変わり、同じツール結果でも書き上がりは同一にはなりません。したがって (a) **数値・出典・割合の根拠は常に `structuredContent` に置く**、(b) 自分の文章が JSON と食い違って見えるときは **JSON を正として書き直す**、(c) JSON に無い数値を補ったり、丸め・単位換算で意味を変えたりしない、こと。表示文（`content`）は「人間向けの要約」であり、`figure.notes` のような注記は**要約せずそのまま引用**してください。
 
 ## 参考リンク
 
@@ -216,4 +270,4 @@ uv run python scripts/check-tools.py                  # 全47ツール実呼び�
 
 ## 更新履歴
 
-- v0.30.1 — **衛星カタログの全件走査・一致度順と宇宙天気のフォールバック**: `satellite_status` は先頭300件しか見ておらず、`query="meteor"` が「Meteorological（気象）」を含む DMSP/COSMIC 等を92件拾って Meteor-M が埋もれていた。**全1,044件（35ページ）を並列取得**してacronym の完全/前方一致 → 名称の語境界 → 部分一致のみ、の**一致度順**に並べ替え、弱い一致は件数を分けて表示。失敗ページは `failed_pages` で報告し、不完全なカタログはディスクに固定しない（初回38.5秒 → 以後0.07秒、プロセス再起動後も即時）。`space_weather` は NASA が 429/障害のとき**認証不要の NOAA SWPC へ自動切替**（Kp・NOAAスケール・GOES X線・太陽風・陽子・警報・黒点。`source`=`NOAA SWPC`・`fallback`・`nasa_reason` で出典を明記し、取れなかった項目は `failed`）。検証: 全47ツール exit 0／--dead-code 0／--fuzz 例外漏れ0／--offline exit 0／--figures 描画系8／unittest 15件 OK。
+- v0.30.2 — **LLM の並列ツール呼び出しへの対応と無応答バグの修正**: 全47ツールを `anyio` のワーカースレッド実行（`server.py` の `_reg`）にして並列呼び出しを実際に並行化（実測: 同一ツール4並列 2.55s → 2.47s・4.0×、`astronomy_weather` 3都市同時 11.72s → 3.93s）、同一引数の並行呼び出しは **single-flight** で1回に集約、matplotlib の描画は `img_common.RENDER_LOCK` で直列化。**stdio 起動後に numpy / matplotlib / skyfield を import するとツールが無応答**になる不具合を numpy の起動時 import で修正（`--stdio` ゲートを追加）。CelesTrak の遮断（TCP blackhole）で120秒以上固まる問題を (connect 10s, read 25s)＋遮断の記憶で fail fast 化。画像を返す5ツールのメディアリンク抜けを修正（`--media-links`）、情報パネルが現在位置マーカーを隠す描画バグを `panel_placement` で修正。検証: 全47ツール exit 0／--dead-code 0／--fuzz 264組合せ 例外漏れ0／--offline exit 0／--figures 描画系8＋追加経路18／--media-links 問題0／--concurrency 3/3／--stdio 6/6／unittest 26件 OK。

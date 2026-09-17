@@ -28,7 +28,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import TTL_DAILY, ttl_cache
 from .name_common import split_names as _split_object_names
-from .img_common import (body_rgb, conic_from_elements, figure_notes,
+from .img_common import (RENDER_LOCK, body_rgb, conic_from_elements, figure_notes,
                          figure_payload, figure_text_block, load_font,
                          media_link_line, primary_spec, rgb_hex, save_output,
                          scale_spec, symbol_rgb, verify_curve, view_spec)
@@ -1243,7 +1243,8 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
     import base64
     try:
         if eng == "accurate":
-            png = _render_accurate(scene)
+            with RENDER_LOCK:                    # matplotlib はスレッド安全でないため直列化
+                png = _render_accurate(scene)
             eng_label = "accurate (matplotlib, 線形距離)"
             alt = "太陽系の惑星・小惑星位置の線形距離俯瞰図"
         else:

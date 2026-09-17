@@ -424,3 +424,31 @@ def image_view(url: str, lon: float, lat: float, span_deg: float, out_px: int, *
     res.update({"source_ar": round(ar0, 4), "ar_corrected": bool(abs(ar0 - 2.0) > 1e-6),
                 "pixels": [w0, h0], "credit": credit, "zoom": None})
     return res
+
+
+def panel_placement(iw: int, ih: int, panel_w: int, panel_h: int, *, avoid=(),
+                    margin: int = 12, gap: int = 8):
+    """情報パネルを「指定点（現在位置マーカー等）を隠さない」位置に置く。
+
+    左上 → 右上 → 左下 → 右下 の順に、`avoid` の各点（中心x, 中心y）と重ならない位置を
+    選ぶ。どの隅でも重なる場合は「隠す点が最も少ない」位置を返し、隠れてしまう点を第2
+    返り値で知らせる（呼び出し側はそのマーカーをパネルの上に描き直し、注記に出す）。
+    パネルを描いた後にマーカーを描くと、地図の暗幕でマーカーが消える（実測: 月面の
+    LRO が北緯82°＝図の上端に来ると左上のパネルの下に入り、画素検査が落ちた）。
+
+    戻り: (x0, y0, hidden) — hidden はパネルに隠れてしまう点のリスト
+    """
+    cands = [(margin, margin),
+             (max(margin, iw - panel_w - margin), margin),
+             (margin, max(margin, ih - panel_h - margin)),
+             (max(margin, iw - panel_w - margin), max(margin, ih - panel_h - margin))]
+    best = None
+    for (x0, y0) in cands:
+        hidden = [(px, py) for (px, py) in avoid
+                  if x0 - gap <= px <= x0 + panel_w + gap
+                  and y0 - gap <= py <= y0 + panel_h + gap]
+        if not hidden:
+            return x0, y0, []
+        if best is None or len(hidden) < len(best[2]):
+            best = (x0, y0, hidden)
+    return best

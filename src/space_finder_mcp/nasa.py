@@ -9,6 +9,7 @@ from mcp.types import CallToolResult, TextContent
 
 from . import nasa_budget
 from .cache import TTL_HOURLY, ttl_cache, is_error_result
+from .img_common import media_link_line
 
 NASA = "https://api.nasa.gov"
 
@@ -59,6 +60,10 @@ def apod(key: str, date: Optional[str] = None) -> CallToolResult:
 
     認証不要（DEMO_KEY）または無料開発者キー。content に表示用サマリ、structuredContent に JSON を返す。
 
+    画像URLはアイコン付きのクリック可能リンク（🖼️/🎬）として content の先頭側に出します
+    （インライン画像を描画しない CLI系・Android系ハーネスでも開けるように）。
+    回答時はこのリンクをそのまま提示してください。
+
     date 省略時は「今日」を明示指定して取得する。NASA の APOD API は date を省略すると
     500 を返すことがあり（実測）、また当日分は公開前だと 404 になるため、その場合は
     直近の公開分（前日）へ自動フォールバックする。date を明示した場合はその日のみを取得する。
@@ -96,9 +101,15 @@ def apod(key: str, date: Optional[str] = None) -> CallToolResult:
                                "tried_dates": candidates, "source": "api.nasa.gov",
                                "budget": nasa_budget.status(key)},
         )
+    img_url = d.get("hdurl") or d.get("url")
+    is_video = str(d.get("media_type", "image")).lower() == "video"
+    link = media_link_line(("動画を開く: " if is_video else "画像を開く: ")
+                           + str(d.get("title", "APOD")),
+                           url=img_url, kind=("video" if is_video else "image"))
     text = (f"APOD {d.get('date','')} - {d.get('title','')}\n"
-            f"{d.get('explanation','')}\n"
-            f"画像: {d.get('hdurl') or d.get('url')} (Copyright: {d.get('copyright','不明')})")
+            + (link + "\n" if link else "")
+            + f"{d.get('explanation','')}\n"
+            + f"出典URL: {img_url} (Copyright: {d.get('copyright','不明')})")
     return CallToolResult(
         content=[TextContent(type="text", text=text)],
         structuredContent={

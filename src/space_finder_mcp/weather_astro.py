@@ -129,6 +129,8 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
             （解析雨量・降水短時間予報のパネル＋ナウキャスト＝雨雲の動き）を
             添付する（既定 True。取得失敗時は添付なしで続行）。
             ⚠️ structuredContent.figure.notes は要約せずそのまま引用すること。
+            （添付した雨雲・降水画像は content に「🖼️ [◯◯を開く](URL)」のリンク付きで出します。
+            インライン画像を描画しないハーネスでは、回答にこのリンクをそのまま提示してください。）
     """
     days = as_int(days, 3, 1, 7)
     max_cloud = as_float(max_cloud, 40.0, 0.0, 100.0)
@@ -197,6 +199,10 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
                     type="image",
                     data=base64.b64encode(_img["bytes"]).decode("ascii"),
                     mimeType="image/jpeg", altText=_img["alt"]))
+            # 保存した実パスと出典URLを structuredContent にも残す（LLM が再参照できるように）
+            image_sc["images"] = [{"id": i["id"], "label": i["label"],
+                                   "path": i.get("path"), "page_url": i.get("page_url")}
+                                  for i in _ri["images"]]
 
     # 月相・日月出没（観測可否の月明かり判断に使用）
     moon = None

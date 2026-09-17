@@ -95,6 +95,9 @@ uv run python -m compileall -q src/space_finder_mcp   # 構文チェック
 uv run python scripts/check-tools.py --dead-code      # デッドコード走査（0件を維持）
 uv run python scripts/check-tools.py --offline        # ネットワーク全断で例外漏れを検査
 uv run python scripts/check-tools.py --fuzz           # 数値引数へ不正値を注入（例外漏れ0を維持）
+uv run python scripts/check-tools.py --media-links    # 画像/音声/動画のリンク先行（0件を維持）
+uv run python scripts/check-tools.py --concurrency    # 並列実行（single-flight・スレッド逃がし・例外漏れ）
+uv run python scripts/check-tools.py --stdio          # 実クライアント経路(stdio)で代表ツールが応答するか
 uv run python -m unittest discover -s tests          # 回帰テスト（対応済みの実バグの再発防止）
 uv run python scripts/check-tools.py                  # 全47ツール実呼び出し（数分）
 uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールのみ
@@ -110,8 +113,10 @@ uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールの�
 - 共通処理は `img_common.py`（フォント/JPEG/アンチメリジアン）・`surface_map.py`（天体面地図のタイル合成・等角投影・地点マーカー・画素検証）・`stac_common.py`（bbox/雲量検証）・`name_common.py`（表記ゆれ・和名→英語名・Sesame による名前→座標）・`cache.py` に集約。同じ処理を各モジュールに重複実装しない。
 - 依存追加は最小限（標準ライブラリを優先）。画像は Pillow/matplotlib を関数内で遅延 import。
 - ドキュメント・コメントは日本語。ツールの docstring は**クライアント向け仕様**（例文・引数・認証要否を書く）。
-- **描画系ツールは `structuredContent.figure`（`schema: "figure/1"`）を返す**。視点(`view`)・主天体の置き方(`primary`：楕円は**焦点**であって中心ではない)・縮尺(`scale`)・円錐曲線(`conic`)・注記(`notes`)・自己検証(`verify`)を含め、注記は `img_common` の `figure_notes` 等で**数値から生成**する（手書きは図と文が食い違う）。`content` にも `figure_text_block()` で同じ注記を出し、docstring に「`figure.notes` は要約せず引用する」と明記。**閉じない軌道（e≥1 / a<0）を楕円として描かない**。近点が画面上で分解できない場合（超長距離の楕円の近日点が誇張した主天体円盤の内側に入る等）は `verify_curve(occluders=[(x, y, r_px)])` で上界検査へ自動切替し、その旨を注記に数値から生成する（`periapsis_resolvable: false`）。曲線に重なるラベルは描かず注記に回す。検査は `scripts/check-tools.py --figures`（超長距離楕円の経路も叩く）。
+- **描画系ツールは `structuredContent.figure`（`schema: "figure/1"`）を返す**。視点(`view`)・主天体の置き方(`primary`：楕円は**焦点**であって中心ではない)・縮尺(`scale`)・円錐曲線(`conic`)・注記(`notes`)・自己検証(`verify`)を含め、注記は `img_common` の `figure_notes` 等で**数値から生成**する（手書きは図と文が食い違う）。`content` にも `figure_text_block()` で同じ注記を出し、docstring に「`figure.notes` は要約せず引用する」と明記。**閉じない軌道（e≥1 / a<0）を楕円として描かない**。近点が画面上で分解できない場合（超長距離の楕円の近日点が誇張した主天体円盤の内側に入る等）は `verify_curve(occluders=[(x, y, r_px)])` で上界検査へ自動切替し、その旨を注記に数値から生成する（`periapsis_resolvable: false`）。曲線に重なるラベルは描かず注記に回す。検査は `scripts/check-tools.py --figures`（超長距離楕円の経路も叩く）。加えて、**地図の上に置く情報パネルは `surface_map.panel_placement()` で現在位置マーカーを隠さない隅へ置く**（描いた後にパネルを重ねると、地図の暗幕でマーカーが消える：月面の LRO が北緯82°＝図の上端に来た実測で、左上のパネルの下に入り`marker_pixels: 0` になった）。`verify` に `panel_overlaps_marker` を残し、どの隅でも重なる小さい図ではマーカーをパネルの上に描き直して、その旨を注記に出す。
+- **メディア（画像/音声/動画）を含む応答は、メディア本体より前にアイコン付きリンクを必ず出す**（`🖼️/🎧/🎬/📄 [◯◯を開く](URL または file:///…)`）。CLI系・Android系ハーネスは `ImageContent` を描画しないため、このリンクが唯一の導線。生成画像は `save_output()` で保存し `structuredContent.image_path` にも実パスを入れる。docstring に「回答時はこのリンクをそのまま提示してください」と明記。検査は `scripts/check-tools.py --media-links`。
 
+- **LLM は1ターンで複数ツールを並行に呼ぶ前提で書く**。全ツールは `server.py` の `_reg()` で登録し、同期関数の本体は `anyio.to_thread` のワーカースレッドで実行する（FastMCP は同期関数をイベントループ上でそのまま呼ぶので、逃がさないと1つの API 待ちが他を全部止める。実測: 4並列で wall = 合計 → 逃がした後 4.0×）。`ttl_cache` は single-flight（同一引数の並行呼び出しを1回に集約）、matplotlib の経路は `img_common.RENDER_LOCK` で直列化、モジュール可変状態は `threading.Lock`、キャッシュされた戻り値は書き換えない。検査は `scripts/check-tools.py --concurrency`。CPU 律速は GIL で並列化しない（効くのは I/O 待ち）。加えて、**遅延 import するネイティブ拡張は起動前にまとめて import する**（`server.py` 冒頭の `import numpy`）。stdio サーバーが起動した後に numpy / matplotlib / skyfield を import すると、この環境では import が完了せず**ツール呼び出しが無応答になる**（実測: numpy・matplotlib.pyplot・skyfield.api が HANG。PIL.Image・sgp4・requests は問題なし）。numpy を起動時に1回 import しておけば、その後の matplotlib/skyfield も通る（起動 +0.1 秒）。新しい遅延 import を足すときは事前 import 側にも加え、`scripts/check-tools.py --stdio` で確認する。外部 API を叩くときは **(connect, read) のタイムアウトを必ず指定**し、遮断（403・接続不可）は**記憶して以降は fail fast** する（`celestrak.blocked_status` / `nasa_budget` 参照）。TCP が blackhole したホストへ素の呼び出しを投げると1回の呼び出しが分単位で固まり、並列で走っている他のツール呼び出しまで待たされる（実測: CelesTrak 遮断中に120秒以上無応答 → connect タイムアウト＋遮断記憶で 10 秒→0 秒）。
 ## リリース手順
 
 1. `README.md` のツール表・「直近の更新内容」と `SKILL.md` を**同一変更内で**更新（ツール追加/削除/仕様変更時）

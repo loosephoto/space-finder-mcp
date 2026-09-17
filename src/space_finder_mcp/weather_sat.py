@@ -70,8 +70,12 @@ def weather_satellite_now(satellite="himawari9", band="visible", size=550):
     現在は日本の静止気象衛星 ひまわり9号 のフルディスク実画像に対応。
     NICT/Kochi ミラーの10分刻みタイルから最新フレームを探し、画像を返す。
 
-    戻り: structuredContent に JSON（衛星・帯域・鮮度・画像URL）、content に
+    戻り: structuredContent に JSON（衛星・帯域・鮮度・画像URL/保存パス）、content に
     表示用テキスト＋インライン画像。鮮度（観測時刻/取得時刻/遅延分）は必ず含める。
+    インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
+    画像本体より前に「🖼️ [生成した画像を開く（…）](URL または file:///…)」という
+    アイコン付きリンクを必ず出します。回答時はこのリンクをそのまま提示してください
+    （画像が描画されない環境では唯一の導線）。
 
     Args:
         satellite: 衛星名。既定 himawari9。和名も可（ひまわり / ひまわり9号）。

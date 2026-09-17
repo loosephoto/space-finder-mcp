@@ -1505,11 +1505,14 @@ wheels = [
 
 [[package]]
 name = "space-finder-mcp"
-version = "0.30.1"
+version = "0.30.2"
 source = { editable = "." }
 dependencies = [
+    { name = "anyio" },
     { name = "matplotlib" },
     { name = "mcp" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pillow" },
     { name = "requests" },
     { name = "sgp4" },
@@ -1518,8 +1521,10 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anyio", specifier = ">=4" },
     { name = "matplotlib", specifier = ">=3.11.1" },
     { name = "mcp", specifier = "<2" },
+    { name = "numpy", specifier = ">=1.26" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "sgp4", specifier = ">=2.21" },

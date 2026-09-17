@@ -6,6 +6,8 @@
 - `content` = 人間向け表示（テキストサマリ＋画像は `ImageContent`）
 - `structuredContent` = LLM向け純粋JSON（LLMが表示文を要約しても元データを失わない）
 - ツールの docstring は**クライアント向け仕様**として書く（例文・引数・認証要否・返却形式）。
+- **メディア（画像/音声/動画）は本体より前にアイコン付きリンク**を出す（`🖼️/🎧/🎬 [◯を開く](URL または file:///…)`）。CLI系・Android系ハーネスは `ImageContent` を描画しないため、このリンクが唯一の導線。生成画像は `save_output()` で保存し `structuredContent.image_path` にも実パスを入れる。検査は `--media-links`。
+- **回答文の保証範囲を混同しない**: JSON（`structuredContent`）と `content` の数値・画像・リンクは**サーバー側**で決まりモデル非依存、文章化はホスト側モデルの裁量（`SKILL.md` 注意事項10）。
 
 ## 例外・入力の防御
 
@@ -15,6 +17,13 @@
 - 必須引数が `None`/空の場合も例外を出さず、検証メッセージ（候補一覧付き）を返す。
 - 曖昧入力（複数候補）は**推測せず候補を提示して停止**する。
 
+## 並列処理（LLM は1ターンで複数ツールを呼ぶ）
+
+- ツールは `server.py` の **`_reg()` で登録**する（同期のツール本体を `anyio.to_thread` のワーカースレッドで実行し、イベントループを塞がない）。`mcp.tool()(fn)` を直に使うと同期実行に戻り、1つの API 待ちが他の呼び出しを止める（実測: 4並列で wall = 合計）。
+- **共有状態はスレッド安全に**: `cache`・`nasa_budget` は `threading.Lock`、matplotlib の描画は `img_common.RENDER_LOCK` で直列化、キャッシュされた戻り値は書き換えない。
+- **遅延 import の例外**: numpy / matplotlib / skyfield は **起動前に import**（`server.py` 冒頭で numpy を import 済み）。stdio サーバー起動後に import すると**ツールが無応答**になる（実測）。Pillow / sgp4 / requests は遅延 import のままで問題ない。
+- 検査は `--concurrency`（single-flight・スレッド逃がし）と `--stdio`（実クライアント経路）。
+
 ## キャッシュ（`cache.py`）
 
 - 不変アセット（タイル・画像資産）は `disk_get(url, subdir=...)`。書き込みは `tmp + os.replace` でアトミック。
@@ -22,12 +31,14 @@
 - **エラー応答はキャッシュしない**。`None`/`[]` を返す失敗系にも `skip_if` を付ける。
 - キャッシュされた戻り値を呼び出し側で書き換えるなら **`deepcopy`** する（共有エントリを汚染しない）。
 - キーに **引数オブジェクトを使わない**（Skyfield の site などは毎回別物でキャッシュが効かない）。丸めたスカラー（緯度経度2桁・日付）をキーにする。
+- **同じ引数の並行呼び出しは1回にまとまる（single-flight）**。8並列でも実行は1回・結果は共有（共有レート枠を N 倍消費しない）。先頭が失敗したら後続は自力で実行する。
 - ライブ性が重要なツール（`iss_now`・`tiangong_now`・位置計算）はキャッシュしない。
 
 ## 図の注記（figure/1・描画系ツールのみ）
 
 自前で図を描くツール（solar_system_now / sat_ground_track / planetary_orbiter_track /
-planetary_rover_location_map / sky_map_with_satellites / solar_eclipse_series）は、
+planetary_rover_location_map / sky_map_with_satellites / solar_eclipse_series /
+moon_phase_map / astronomy_weather〔雨雲・降水画像を返すとき〕）は、
 `structuredContent.figure` に「どう描いたか」を自己申告する。
 
 - 主天体は**円錐曲線の焦点**に置く（`primary.at = "focus"`）。楕円の中心に置くと、高離心率の
@@ -40,12 +51,13 @@ planetary_rover_location_map / sky_map_with_satellites / solar_eclipse_series）
   「`figure.notes` は要約・言い換えせず、そのまま引用すること」と書く（LLM 向けの指示）。
 - 図の自己検証(`verify`)を入れる: 描いた画素から近点/遠点距離を逆算して a(1±e) と照合
   （`verify_curve`）、ラベル矩形に曲線色が混入していないこと（文字と線の重なり）も見る。
+- 地図の上に置く**情報パネルは `surface_map.panel_placement()` で現在位置マーカーを隠さない隅へ**置く（描いた後にパネルを重ねると暗幕でマーカーが消える。実測: 月面 LRO で `marker_pixels: 0`）。`verify` に `panel_overlaps_marker` を残す。
 - 検査: `uv run python scripts/check-tools.py --figures`（注記が空・`verify.ok` が偽なら exit 1）。
 ## 構造
 
 - 共通処理は `img_common.py`（フォント探索/JPEG化/アンチメリジアン分割）、`stac_common.py`（bbox/雲量検証）、`cache.py`、`env_config.py` に集約し、各ツールへ重複実装しない。
 - 依存方向は一方向（例: `planetary_rover → planetary_map → img_common/cache`）。循環 import を作らない。
-- 依存追加は最小限（標準ライブラリ優先）。Pillow / matplotlib は関数内で遅延 import（起動を速く保つ）。
+- 依存追加は最小限（標準ライブラリ優先）。Pillow / sgp4 / requests は関数内で遅延 import（起動を速く保つ）。**ただし numpy / matplotlib / skyfield は起動前に import**（遅延 import すると stdio で無応答。上記「並列処理」参照）。`server.py` が直接 import する `anyio`・`numpy` は `pyproject.toml` の依存に明示する。
 
 ## ドキュメント
 

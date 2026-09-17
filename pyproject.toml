@@ -1,6 +1,6 @@
 [project]
 name = "space-finder-mcp"
-version = "0.30.1"
+version = "0.30.2"
 license = "MIT"
 license-files = ["LICENSE"]
 description = "宇宙・天文データを横断検索・表示する MCP サーバー（画像・動画・音声・逆引き歴史Q&A・ロケット打ち上げ）"
@@ -20,6 +20,10 @@ classifiers = [
 ]
 dependencies = [
     "mcp<2",
+    # server.py が直接 import する（MCP の並列ツール呼び出しをワーカースレッドで実行するため）
+    "anyio>=4",
+    # 起動時に必ず import する（stdio サーバー起動後に import すると無応答になるため）
+    "numpy>=1.26",
     "requests>=2.34.2",
     "sgp4>=2.21",
     "skyfield>=1.49",

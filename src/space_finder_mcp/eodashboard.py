@@ -19,6 +19,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import TTL_HOURLY, ttl_cache, is_error_result
 from .input_utils import as_int
+from .img_common import media_link_line
 
 # コレクション定義JSON（GitHub raw）
 RAW = "https://raw.githubusercontent.com/ESA-eodashboards/eodashboard-catalog/main/collections"
@@ -165,6 +166,11 @@ def eodashboard_detail(identifier: str, show_image: bool = True) -> CallToolResu
     例:「NO2データセットの詳細」「EO Dashboardの海面水温の情報」
     content に表示用サマリ＋サムネイル画像(インライン)、structuredContent に JSON を返す。
 
+    インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
+    画像本体より前に「🖼️ [サムネイル画像を開く: …](URL)」というアイコン付きリンクを必ず出します
+    （同じURLを structuredContent.image_url にも入れます）。
+    回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
+
     Args:
         identifier: コレクションIDまたは名前（例 "N1_NO2", "NO2_daily", "sea_ice"）。
                     大まかな名前でも探す。
@@ -207,14 +213,16 @@ def eodashboard_detail(identifier: str, show_image: bool = True) -> CallToolResu
         lines.append("   📚 参考リンク:")
         for ref in meta["references"][:5]:
             lines.append(f"      - [{ref.get('Name','?')}]({ref.get('Url','')})")
+    # サムネイル画像のURL（"N1_NO2/N1_NO2.jpg" 形式 → eodash-assets の collections/<path>）
+    img_url = f"{ASSETS}/{meta['image']}" if meta.get("image") else None
+    if img_url:
+        # インライン描画できないハーネス（CLI/Android 系）でも開けるよう、画像本体より前に出す
+        lines.append("   " + media_link_line(
+            "サムネイル画像を開く: {}".format(meta["title"]), url=img_url, kind="image"))
     lines.append("出典: github.com/ESA-eodashboards/eodashboard-catalog（EO Dashboard, NASA×ESA×JAXA）")
     content_blocks = [TextContent(type="text", text="\n".join(lines))]
 
     # サムネイル画像のインライン表示
-    img_url = None
-    if meta.get("image"):
-        # "N1_NO2/N1_NO2.jpg" 形式 → eodash-assets の collections/<path>
-        img_url = f"{ASSETS}/{meta['image']}"
     if show_image and img_url:
         try:
             r = requests.get(img_url, headers=UA, timeout=25)
@@ -229,4 +237,6 @@ def eodashboard_detail(identifier: str, show_image: bool = True) -> CallToolResu
         except requests.RequestException:
             pass
 
-    return CallToolResult(content=content_blocks, structuredContent={"identifier": meta["id"], "detail": meta})
+    return CallToolResult(content=content_blocks,
+                          structuredContent={"identifier": meta["id"], "image_url": img_url,
+                                             "detail": meta})

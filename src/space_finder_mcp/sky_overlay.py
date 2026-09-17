@@ -22,7 +22,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import disk_get
 from .celestrak import fetch_tle
-from .img_common import (as_image, body_rgb, encode_jpeg, figure_notes,
+from .img_common import (RENDER_LOCK, as_image, body_rgb, encode_jpeg, figure_notes,
                          figure_payload, figure_text_block, load_font,
                          media_link_line, pixel_near, primary_spec, rgb_hex,
                          save_output, scale_spec, symbol_rgb, view_spec)
@@ -558,7 +558,8 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
     import base64
     try:
         if use_acc:
-            img_bytes = _render_accurate(scene)      # matplotlib 出力は PNG
+            with RENDER_LOCK:                        # matplotlib はスレッド安全でないため直列化
+                img_bytes = _render_accurate(scene)  # matplotlib 出力は PNG
             mime = "image/png"
             eng_label = "accurate (matplotlib)"
             alt = "正確な星図で描画した惑星・人工衛星オーバーレイ"
