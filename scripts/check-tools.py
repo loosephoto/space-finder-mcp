@@ -84,7 +84,7 @@ def _is_error(result) -> bool:
 DRAWN_FIGURE_TOOLS = (
     "solar_system_now", "sat_ground_track", "planetary_orbiter_track",
     "planetary_rover_location_map", "sky_map_with_satellites", "solar_eclipse_series",
-    "astronomy_weather", "moon_phase_map",
+    "astronomy_weather", "moon_phase_map", "space_calendar",
 )
 
 

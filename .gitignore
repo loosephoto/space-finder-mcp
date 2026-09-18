@@ -25,3 +25,6 @@ sputnik_beep.wav
 /_*.jpg
 /_*.png
 /_*.wav
+
+# 検討用のスクラッチ（モックアップ・試作・サンプル画像）
+.hermes/

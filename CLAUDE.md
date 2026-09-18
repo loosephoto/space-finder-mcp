@@ -1,6 +1,6 @@
 # Space Finder MCP Server — Claude Code 用プロジェクトガイド
 
-宇宙・天文・地球観測の公開データを **47ツール**で横断検索する MCP サーバー（Python / uv 管理）です。NASA・ESA Copernicus・JAXA・ISRO・CSA・INPE・UK EO DataHub・CNSA・CelesTrak・JPL（DE421/SBDB/Horizons）・Wikidata・Open-Meteo などを統合し、衛星画像・軌道マップ・日食パネル・月齢マップを**画像で返しつつ**、LLM向けに構造化JSONも同時に返します。
+宇宙・天文・地球観測の公開データを **51ツール**で横断検索する MCP サーバー（Python / uv 管理）です。NASA・ESA Copernicus・JAXA・ISRO・CSA・INPE・UK EO DataHub・CNSA・CelesTrak・JPL（DE421/SBDB/Horizons）・Wikidata・Open-Meteo などを統合し、衛星画像・軌道マップ・日食パネル・月齢マップを**画像で返しつつ**、LLM向けに構造化JSONも同時に返します。
 
 **開発規約は分割ルールにあります**: `.claude/rules/`（コーディング規約・検証ゲート・データ出典）を参照してください。
 
@@ -39,7 +39,7 @@ claude mcp list   # 確認
 
 - `-s project` はリポジトリ直下に `.mcp.json` を作ります（チーム共有向け）。個人利用だけで済ませるなら `-s user`（全プロジェクトで有効）を使います。
 
-検証済みの代替コマンド（いずれも 47ツールを返して起動します）:
+検証済みの代替コマンド（いずれも 51ツールを返して起動します）:
 
 ```bash
 uv --directory /abs/path/to/space-finder-mcp run space-finder-mcp
@@ -99,7 +99,7 @@ uv run python scripts/check-tools.py --media-links    # 画像/音声/動画の�
 uv run python scripts/check-tools.py --concurrency    # 並列実行（single-flight・スレッド逃がし・例外漏れ）
 uv run python scripts/check-tools.py --stdio          # 実クライアント経路(stdio)で代表ツールが応答するか
 uv run python -m unittest discover -s tests          # 回帰テスト（対応済みの実バグの再発防止）
-uv run python scripts/check-tools.py                  # 全47ツール実呼び出し（数分）
+uv run python scripts/check-tools.py                  # 全51ツール実呼び出し（数分）
 uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールのみ
 ```
 
@@ -116,12 +116,14 @@ uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールの�
 - **描画系ツールは `structuredContent.figure`（`schema: "figure/1"`）を返す**。視点(`view`)・主天体の置き方(`primary`：楕円は**焦点**であって中心ではない)・縮尺(`scale`)・円錐曲線(`conic`)・注記(`notes`)・自己検証(`verify`)を含め、注記は `img_common` の `figure_notes` 等で**数値から生成**する（手書きは図と文が食い違う）。`content` にも `figure_text_block()` で同じ注記を出し、docstring に「`figure.notes` は要約せず引用する」と明記。**閉じない軌道（e≥1 / a<0）を楕円として描かない**。近点が画面上で分解できない場合（超長距離の楕円の近日点が誇張した主天体円盤の内側に入る等）は `verify_curve(occluders=[(x, y, r_px)])` で上界検査へ自動切替し、その旨を注記に数値から生成する（`periapsis_resolvable: false`）。曲線に重なるラベルは描かず注記に回す。検査は `scripts/check-tools.py --figures`（超長距離楕円の経路も叩く）。加えて、**地図の上に置く情報パネルは `surface_map.panel_placement()` で現在位置マーカーを隠さない隅へ置く**（描いた後にパネルを重ねると、地図の暗幕でマーカーが消える：月面の LRO が北緯82°＝図の上端に来た実測で、左上のパネルの下に入り`marker_pixels: 0` になった）。`verify` に `panel_overlaps_marker` を残し、どの隅でも重なる小さい図ではマーカーをパネルの上に描き直して、その旨を注記に出す。
 - **メディア（画像/音声/動画）を含む応答は、メディア本体より前にアイコン付きリンクを必ず出す**（`🖼️/🎧/🎬/📄 [◯◯を開く](URL または file:///…)`）。CLI系・Android系ハーネスは `ImageContent` を描画しないため、このリンクが唯一の導線。生成画像は `save_output()` で保存し `structuredContent.image_path` にも実パスを入れる。docstring に「回答時はこのリンクをそのまま提示してください」と明記。検査は `scripts/check-tools.py --media-links`。
 
+- **宇宙・天文カレンダーの蓄積ストアは `%LOCALAPPDATA%\space-finder-mcp\` に置く**（`cache` の Temp 配下・`save_output` の出力先とは別。ユーザーの予定が消えてはいけない）。書き込みは tmp＋`os.replace` の原子置換＋`Lock`、API 由来レコードは prune するが **`user:` の予定は prune しない**（削除は tombstone）。打ち上げは `net_precision` が Day/Hour/Minute/Second 以外・または年末（12/30〜01/01）の行を**日付セルに置かない**（LL2 と NASA の双方で実測したプレースホルダ）。
+
 - **LLM は1ターンで複数ツールを並行に呼ぶ前提で書く**。全ツールは `server.py` の `_reg()` で登録し、同期関数の本体は `anyio.to_thread` のワーカースレッドで実行する（FastMCP は同期関数をイベントループ上でそのまま呼ぶので、逃がさないと1つの API 待ちが他を全部止める。実測: 4並列で wall = 合計 → 逃がした後 4.0×）。`ttl_cache` は single-flight（同一引数の並行呼び出しを1回に集約）、matplotlib の経路は `img_common.RENDER_LOCK` で直列化、モジュール可変状態は `threading.Lock`、キャッシュされた戻り値は書き換えない。検査は `scripts/check-tools.py --concurrency`。CPU 律速は GIL で並列化しない（効くのは I/O 待ち）。加えて、**遅延 import するネイティブ拡張は起動前にまとめて import する**（`server.py` 冒頭の `import numpy`）。stdio サーバーが起動した後に numpy / matplotlib / skyfield を import すると、この環境では import が完了せず**ツール呼び出しが無応答になる**（実測: numpy・matplotlib.pyplot・skyfield.api が HANG。PIL.Image・sgp4・requests は問題なし）。numpy を起動時に1回 import しておけば、その後の matplotlib/skyfield も通る（起動 +0.1 秒）。新しい遅延 import を足すときは事前 import 側にも加え、`scripts/check-tools.py --stdio` で確認する。外部 API を叩くときは **(connect, read) のタイムアウトを必ず指定**し、遮断（403・接続不可）は**記憶して以降は fail fast** する（`celestrak.blocked_status` / `nasa_budget` 参照）。TCP が blackhole したホストへ素の呼び出しを投げると1回の呼び出しが分単位で固まり、並列で走っている他のツール呼び出しまで待たされる（実測: CelesTrak 遮断中に120秒以上無応答 → connect タイムアウト＋遮断記憶で 10 秒→0 秒）。
 ## リリース手順
 
 1. `README.md` のツール表・「直近の更新内容」と `SKILL.md` を**同一変更内で**更新（ツール追加/削除/仕様変更時）
 2. `pyproject.toml` の `version` を更新
-3. `uv run python scripts/check-tools.py` で全47ツールが正常なことを確認
+3. `uv run python scripts/check-tools.py` で全51ツールが正常なことを確認
 4. `uv build` でパッケージ作成を確認 → `dist/` `build/` を削除
 
 ## ライセンス・データ出典

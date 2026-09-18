@@ -1,6 +1,8 @@
 """ロケット打ち上げ情報 (Launch Library 2 / The Space Devs, 認証なし)。"""
 from __future__ import annotations
 
+import threading
+import time
 from typing import Optional
 
 import requests
@@ -10,6 +12,45 @@ from .cache import TTL_SHORT, ttl_cache, is_error_result
 from .input_utils import as_int
 
 LL2 = "https://ll.thespacedevs.com/2.3.0"
+
+# ---- LL2 のレート制限（匿名は約 15 req/h）を記憶して fail fast する ----
+# 実測: 429 の Retry-After は 104 秒。遮断中に素の呼び出しを投げると、そのツールが
+# そのぶん待たされ、並列で走っている他のツール呼び出しも巻き込まれる。
+# カレンダー（space_calendar）と同じ匿名枠を共有するので、記憶は 1 箇所に置く。
+_LOCK = threading.Lock()
+_STATE = {"blocked_until": 0.0, "reason": ""}
+
+
+def blocked_left() -> float:
+    """LL2 が 429 で遮断されている残り秒（0 なら送信してよい）。"""
+    with _LOCK:
+        return max(0.0, _STATE["blocked_until"] - time.time())
+
+
+def note_429(retry_after=None) -> None:
+    """429 を受けたことを記録する（Retry-After を尊重。過大な値は丸める）。"""
+    try:
+        wait = float(retry_after)
+    except (TypeError, ValueError):
+        wait = 60.0
+    wait = min(max(wait, 5.0), 900.0)
+    with _LOCK:
+        _STATE["blocked_until"] = time.time() + wait
+        _STATE["reason"] = "Launch Library 2 が 429（Retry-After={:.0f}秒・匿名は約15req/h）".format(wait)
+
+
+def reset_blocked() -> None:
+    """遮断の記憶を消す（主にテスト用）。"""
+    with _LOCK:
+        _STATE["blocked_until"] = 0.0
+        _STATE["reason"] = ""
+
+
+def blocked_message() -> str:
+    """遮断中の説明文（残り秒つき）。"""
+    left = blocked_left()
+    with _LOCK:
+        return "{}（あと {:.0f} 秒で解除）".format(_STATE["reason"], left)
 
 @ttl_cache(TTL_SHORT, maxsize=32, skip_if=is_error_result)
 def upcoming_launches(limit: int = 5) -> CallToolResult:
@@ -21,10 +62,20 @@ def upcoming_launches(limit: int = 5) -> CallToolResult:
         limit: 返す件数（既定 5、最大 15）。
     """
     limit = as_int(limit, 5, 1, 15)
+    if blocked_left() > 0:                      # 遮断中は送信しない（枠を無駄にしない）
+        return CallToolResult(
+            content=[TextContent(type="text", text=blocked_message() + "。しばらく待って再試行してください。")],
+            structuredContent={"error": blocked_message(), "source": "ll.thespacedevs.com",
+                               "retry_after_sec": round(blocked_left())})
     params = {"limit": min(limit, 30), "ordering": "window_start"}
     try:
-        r = requests.get(f"{LL2}/launches/upcoming/", params=params, timeout=25)
+        r = requests.get(f"{LL2}/launches/upcoming/", params=params, timeout=(10, 25))
+        if r.status_code == 429:
+            note_429(r.headers.get("Retry-After"))
+            raise requests.HTTPError("429 Too Many Requests（Retry-After={}）".format(
+                r.headers.get("Retry-After")))
         r.raise_for_status()
+        reset_blocked()                          # 成功したら遮断の記憶を解除する
         d = r.json()
     except requests.RequestException as e:
         return CallToolResult(
@@ -75,10 +126,20 @@ def china_launches(limit: int = 8, status: Optional[str] = None) -> CallToolResu
         status: 状態で絞り込み（例 "Go for Launch", "To Be Determined"）。省略で全状態。
     """
     limit = as_int(limit, 8, 1, 15)
+    if blocked_left() > 0:
+        return CallToolResult(
+            content=[TextContent(type="text", text=blocked_message() + "。しばらく待って再試行してください。")],
+            structuredContent={"error": blocked_message(), "source": "ll.thespacedevs.com",
+                               "retry_after_sec": round(blocked_left())})
     params = {"limit": min(limit * 2, 30), "search": "China", "ordering": "window_start"}
     try:
-        r = requests.get(f"{LL2}/launches/upcoming/", params=params, timeout=25)
+        r = requests.get(f"{LL2}/launches/upcoming/", params=params, timeout=(10, 25))
+        if r.status_code == 429:
+            note_429(r.headers.get("Retry-After"))
+            raise requests.HTTPError("429 Too Many Requests（Retry-After={}）".format(
+                r.headers.get("Retry-After")))
         r.raise_for_status()
+        reset_blocked()                          # 成功したら遮断の記憶を解除する
         d = r.json()
     except requests.RequestException as e:
         return CallToolResult(
@@ -134,10 +195,20 @@ def russia_launches(limit: int = 8, status: Optional[str] = None) -> CallToolRes
         status: 状態で絞り込み（例 "Go for Launch"）。省略で全状態。
     """
     limit = as_int(limit, 8, 1, 15)
+    if blocked_left() > 0:
+        return CallToolResult(
+            content=[TextContent(type="text", text=blocked_message() + "。しばらく待って再試行してください。")],
+            structuredContent={"error": blocked_message(), "source": "ll.thespacedevs.com",
+                               "retry_after_sec": round(blocked_left())})
     params = {"limit": min(limit * 2, 30), "search": "Roscosmos", "ordering": "window_start"}
     try:
-        r = requests.get(f"{LL2}/launches/upcoming/", params=params, timeout=25)
+        r = requests.get(f"{LL2}/launches/upcoming/", params=params, timeout=(10, 25))
+        if r.status_code == 429:
+            note_429(r.headers.get("Retry-After"))
+            raise requests.HTTPError("429 Too Many Requests（Retry-After={}）".format(
+                r.headers.get("Retry-After")))
         r.raise_for_status()
+        reset_blocked()                          # 成功したら遮断の記憶を解除する
         d = r.json()
     except requests.RequestException as e:
         return CallToolResult(

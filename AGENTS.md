@@ -1,6 +1,6 @@
 # AGENTS.md — Space Finder MCP Server（Codex / 汎用コーディングエージェント向け）
 
-宇宙・天文・地球観測の公開データを **47ツール**で横断検索する MCP サーバー（Python / uv 管理）。NASA・ESA・JAXA・ISRO・CSA・INPE・UK・CNSA・CelesTrak・JPL・Wikidata・Open-Meteo 等を統合し、画像（衛星軌道マップ・日食パネル・月齢マップ等）と構造化JSONを同時に返します。
+宇宙・天文・地球観測の公開データを **51ツール**で横断検索する MCP サーバー（Python / uv 管理）。NASA・ESA・JAXA・ISRO・CSA・INPE・UK・CNSA・CelesTrak・JPL・Wikidata・Open-Meteo 等を統合し、画像（衛星軌道マップ・日食パネル・月齢マップ等）と構造化JSONを同時に返します。
 
 `CLAUDE.md` は同じ内容を Claude Code 向けに書いたものです（本ファイルは Codex など AGENTS.md を読むエージェント向け）。詳細なツール仕様は `SKILL.md`、引数一覧は `README.md` を参照してください。
 
@@ -44,7 +44,7 @@ uv run python scripts/check-tools.py --media-links    # 画像/音声/動画の�
 uv run python scripts/check-tools.py --concurrency    # 並列実行（single-flight・スレッド逃がし・例外漏れ）
 uv run python scripts/check-tools.py --stdio          # 実クライアント経路(stdio)で代表ツールが応答するか
 uv run python -m unittest discover -s tests          # 回帰テスト（対応済みの実バグの再発防止）
-uv run python scripts/check-tools.py                  # 全47ツール実呼び出し（数分・終了コード1で失敗）
+uv run python scripts/check-tools.py                  # 全51ツール実呼び出し（数分・終了コード1で失敗）
 ```
 
 - **MCP はホットリロードなし**。`src/` を変更したらクライアントを再起動。
@@ -67,11 +67,14 @@ uv run python scripts/check-tools.py                  # 全47ツール実呼び�
 13. **メディア（画像/音声/動画）を `content` に含むツールは、メディア本体より前にアイコン付きリンクを必ず出す**（`🖼️/🎧/🎬/📄 [◯◯を開く](URL または file:///…)`）。CLI系・Android系ハーネス（codex / opencode）は `ImageContent` を描画しないため、このリンクが唯一の導線になる。生成画像は `save_output()` で保存し、同じパスを `structuredContent.image_path`、外部URLがあるものは `image_url` にも入れる。docstring に「回答時はこのリンクをそのまま提示してください」と明記すること。検査は `scripts/check-tools.py --media-links`（画像より前にリンクが無い／`structuredContent` にURL・保存パスが無い／`image_path` のファイルが存在しない場合は exit 1）。
 14. **LLM は1ターンで複数ツールを並行に呼ぶ前提で書く（並列処理）**。`server.py` の全ツールは `_reg()` 経由で登録し、同期のツール本体を `anyio.to_thread` のワーカースレッドで実行する（FastMCP は同期関数をイベントループ上でそのまま呼ぶため、逃がさないと1つの API 待ちが他の呼び出しを全部止める。実測: 同一ツール4並列で wall = 合計、逃がした後は 4.0×）。共有状態は並行前提で守る: (a) `cache.ttl_cache` は **single-flight**（同一引数の並行呼び出しを1回に集約。無いと N 並列＝N 回の API 呼び出し）、(b) matplotlib で描く経路は `img_common.RENDER_LOCK` で直列化（pyplot はプロセス全体の状態を持ちスレッド安全でない）、(c) モジュールレベルの可変状態は `threading.Lock`（`nasa_budget` / `cache` 参照）、(d) **キャッシュされた戻り値を呼び出し側で書き換えない**（並行時に他人の結果を壊す。書き換えるなら `deepcopy`）。検査は `scripts/check-tools.py --concurrency`。**CPU 律速（Skyfield・Pillow の計算）は GIL で並列化しない**＝並列化が効くのは I/O 待ちで、それが LLM の並列ツール呼び出しの主目的。加えて、**遅延 import するネイティブ拡張は起動前にまとめて import する**（`server.py` 冒頭の `import numpy`）。stdio サーバーが起動した後に numpy / matplotlib / skyfield を import すると、この環境では import が完了せず**ツール呼び出しが無応答になる**（実測: numpy・matplotlib.pyplot・skyfield.api が HANG。PIL.Image・sgp4・requests は問題なし）。numpy を起動時に1回 import しておけば、その後の matplotlib/skyfield も通る（起動 +0.1 秒）。新しい遅延 import を足すときは事前 import 側にも加え、`scripts/check-tools.py --stdio` で確認する。外部 API を叩くときは **(connect, read) のタイムアウトを必ず指定**し、遮断（403・接続不可）は**記憶して以降は fail fast** する（`celestrak.blocked_status` / `nasa_budget` 参照）。TCP が blackhole したホストへ素の呼び出しを投げると1回の呼び出しが分単位で固まり、並列で走っている他のツール呼び出しまで待たされる（実測: CelesTrak 遮断中に120秒以上無応答 → connect タイムアウト＋遮断記憶で 10 秒→0 秒）。
 
+15. **宇宙・天文カレンダーの蓄積ストアは `%LOCALAPPDATA%\space-finder-mcp\`（cache の Temp 配下・`save_output` の出力先とは別）**に置く。ユーザーの予定が消えてはいけないので、一時領域や「keep 超過分を削除する」出力ディレクトリを使ってはならない。書き込みは tmp＋`os.replace` の原子置換＋`threading.Lock`、API 由来レコードは prune の対象だが **`user:` の予定は prune しない**（削除は `deleted` の tombstone で行い、API 側の再取得で復活させない）。打ち上げの日付は `net_precision` が Day/Hour/Minute/Second 以外、または年末（12/30〜01/01）の行を**日付セルに置かない**（LL2 と NASA の双方で実測したプレースホルダ。描くと架空の予定になる）。
+
+
 ## 主要ファイル
 
 ```
 src/space_finder_mcp/
-├── server.py        # FastMCP サーバー定義・47ツール登録
+├── server.py        # FastMCP サーバー定義・51ツール登録
 ├── cache.py         # キャッシュ基盤（TTLメモリ / ディスク資産）
 ├── img_common.py    # 画像共通（フォント探索 / JPEG化 / アンチメリジアン分割）
 ├── surface_map.py   # 天体面地図の共通描画（タイル合成 / 等角投影 / 地点マーカー / 画素検証）
@@ -83,6 +86,8 @@ src/space_finder_mcp/
 ├── solar_eclipse.py # solar_eclipse_series（日食の時系列パネル）
 ├── moon_phase.py    # moon_phase_map（月齢マップ: 月齢カレンダー/朔望月パネル）
 ├── swpc.py          # NOAA SWPC（宇宙天気のフォールバック・認証不要）
+├── calendar_store.py # カレンダーの蓄積ストア（正規化レコード＋来歴 / ユーザー予定 / 月別TTL / prune）
+├── space_calendar.py # space_calendar / calendar_events / calendar_event_add / calendar_event_remove
 └── <データ源>.py     # 各APIツール（nasa / launch / media / celestrak / jaxa / ...）
 tests/                 # 回帰テスト（unittest discover -s tests）
 scripts/check-tools.py   # 回帰検証ゲート

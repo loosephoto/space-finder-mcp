@@ -49,6 +49,7 @@ from . import planetary_rover as _prover
 from . import planetary_map as _pmap
 from . import satellite_map as _satmap
 from . import weather_sat as _wsat
+from . import space_calendar as _calendar
 
 # ---- ネイティブ拡張は「起動前に」import しておく（重要） ----
 # numpy / matplotlib / skyfield を**ツール実行時**（イベントループが動き出した後）に import
@@ -232,3 +233,10 @@ _reg(_oscar.satellite_status)
 
 # ---- 中国 CNSA 系衛星データポータル (NSMC/CNSA-GEO/CRESDA, 到達性+概要) ----
 _reg(_cnsa.cnsa_status)
+
+
+# ---- 宇宙・天文イベントカレンダー（LL2 + Skyfield + 国立天文台 + ローカル予定, 認証不要）----
+_reg(_calendar.space_calendar)
+_reg(_calendar.calendar_events)
+_reg(_calendar.calendar_event_add)
+_reg(_calendar.calendar_event_remove)

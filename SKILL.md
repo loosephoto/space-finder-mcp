@@ -1,6 +1,6 @@
 ---
 name: space-finder-mcp
-description: 宇宙・天文・地球観測データを横断検索するMCPサーバー。NASA/ESA/JAXA/ISRO/CSA/INPE/UK/CNSA/CelesTrak/JPL/Wikidata/Open-Meteo を統合した47ツール。衛星画像・軌道マップ・日食パネル・月齢マップを画像で返し、構造化JSONも同時に提供。
+description: 宇宙・天文・地球観測データを横断検索するMCPサーバー。NASA/ESA/JAXA/ISRO/CSA/INPE/UK/CNSA/CelesTrak/JPL/Wikidata/Open-Meteo を統合した51ツール。衛星画像・軌道マップ・日食パネル・月齢マップを画像で返し、構造化JSONも同時に提供。
 category: space
 ---
 
@@ -63,6 +63,10 @@ category: space
 | `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示）。`view="comet_orbit"` で彗星の軌道面ビュー（太陽＝焦点の楕円／e≥1 は双曲線の枝）。`comet` にカンマ区切りで複数（または `comet2`、最大4天体）指定すると **1彗星=1パネルの1枚画像**（パネルごとに軌道面・縮尺が異なる＝`figure.notes` に自動生成、`figure.kind=orbit_plane_set`、パネル別は `figure.panels[]`。一部の惑星の位置計算に失敗した場合は `structuredContent.planet_errors` に理由を記録し、`content` と `figure.notes` に失敗数を出します） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
 | `solar_eclipse_series` | 日食（太陽が月に欠ける過程）の時系列パネル画像（7枚・食分と太陽高度・次回日食の自動検索=約4年(1400日)先まで・max_magnitude対応。**地平線下で見えない食は返さない**） | JPL DE421+Skyfield | 不要 |
 | `moon_phase_map` | **月齢マップ**。`layout="calendar"`（既定）=1か月の日別格子、`layout="lunation"`=1朔望月（朔→朔）の時系列パネル（`days` 3〜12枚）。輝面の向きは太陽の位置角から計算（月齢からの決め打ちをしない）。朔・望・上弦・下弦の時刻を現地時間で併記 | JPL DE421+Skyfield | 不要 |
+| `space_calendar` | **宇宙・天文イベントカレンダー**（月グリッドの画像＋`structuredContent.events`）。打ち上げ（LL2・`net_precision` が Day/Hour/Minute/Second の行だけを日付セルに置き、日付未定は本文へ）・天文現象（Skyfield ローカル計算）・公開イベント（国立天文台）・自分の予定を重ねる。**read-through**: 要求月 M に対して窓 [M-1, M+2] を蓄積ストアで確保し、未取得・期限切れの月だけ取得（2回目以降は API 0 回・実測 0.4 秒） | Launch Library 2 + Skyfield + 国立天文台 + nasa.gov | 不要 |
+| `calendar_events` | 蓄積済みイベント一覧（図もAPIも無しの軽い経路） | 蓄積ストア | 不要 |
+| `calendar_event_add` | 自分の予定を追加（`2026-10-24`/`10月24日`・時刻・終了日・毎日/毎週/毎月/毎年）。**フローティングなローカル日時**で保存（place を変えても動かない・外部送信なし） | ローカル（`%LOCALAPPDATA%\space-finder-mcp`） | 不要 |
+| `calendar_event_remove` | 予定の削除（冪等・同名複数は候補提示で停止） | ローカル | 不要 |
 | `eodashboard_collections` | EO Dashboard（NASA×ESA×JAXA共同）の173データセットをテーマ・機関・キーワードで検索 | EO Dashboard (GitHub catalog) | 不要 |
 | `eodashboard_detail` | EO Dashboardの1データセットの詳細（衛星・センサー・説明・画像・参照リンク） | EO Dashboard (GitHub catalog) | 不要 |
 | `space_weather` | 宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象）。**NASA が枠切れ/障害なら認証不要の NOAA SWPC へ自動切替**（Kp・NOAAスケール・GOES X線・太陽風・陽子・警報・黒点。出典と切替理由を明記） | NASA DONKI → **NOAA SWPC** | 不要（SWPC）/キー任意（DONKI） |
@@ -141,6 +145,9 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 「次の朔望月の満ち欠けを画像で」          → moon_phase_map(layout="lunation", days=8)  # 朔→朔の8枚パネル
 「2026年9月の満月はいつ？」              → moon_phase_map(date="2026-09")  # 朔・望・上弦・下弦の時刻を現地時間で返す
 「9年前のあの日の月齢は？」              → moon_phase_map(date="2017-08-06")  # 日付だけで過去も可（暦はローカル計算）
+「今月の宇宙・天文イベントカレンダー」      → space_calendar(place="東京")  # 打ち上げ・天文現象・公開イベント・自分の予定（既定は今月）
+「10/24に観望会を入れて」                → calendar_event_add(title="観望会", date="10-24", time="19:30")  # 予定はローカルのみ
+「今月の予定だけ一覧で」                  → calendar_events()  # 図を描かない軽い経路
 「今夜の観測に向く時間帯は？」                → astronomy_weather(place="東京")  # 日本国内は気象庁の雨雲・降水画像も同時に返る（figure.notes を要約せず引用）
 「東京の今夜の空に何が見える？」              → sky_map_with_satellites(place="東京")
 「いま宇宙天気はどう？」                      → space_weather()  # NASA が枠切れなら NOAA SWPC に自動切替（出典が変わる）
@@ -185,7 +192,7 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 - 応答の`content`には、インライン画像を描画できないクライアント向けに
   `🖼️ [生成した画像を開く](file:///…)` のリンクが先頭に入ります（回答時はそのまま提示）。
 
-実装メモ（このサーバーを改修する場合）: 全47ツールは `server.py` の `_reg()` で登録し、
+実装メモ（このサーバーを改修する場合）: 全51ツールは `server.py` の `_reg()` で登録し、
 本体は `anyio.to_thread` のワーカースレッドで実行します（元の同期関数は
 `tool.fn.sync_fn` に残るので、検証スクリプトは同期呼び出しのまま使えます）。検査は
 `scripts/check-tools.py --concurrency`（single-flight・スレッド逃がし・混在並列）と
@@ -222,7 +229,7 @@ uv run python scripts/check-tools.py --figures        # 描画系の図の注記
 uv run python scripts/check-tools.py --media-links    # 画像/音声/動画の「リンク先行」を検査
 uv run python scripts/check-tools.py --concurrency    # 並列ツール呼び出し（single-flight・スレッド逃がし）を検査
 uv run python scripts/check-tools.py --stdio          # 実クライアント経路(stdio)で代表ツールが応答するか検査
-uv run python scripts/check-tools.py                  # 全47ツール実呼び出し（数分、exit 1 で失敗）
+uv run python scripts/check-tools.py                  # 全51ツール実呼び出し（数分、exit 1 で失敗）
 ```
 
 **MCPサーバーはホットリロードなし** — `src/` 変更後はクライアント再起動が必要です。
@@ -270,4 +277,4 @@ uv run python scripts/check-tools.py                  # 全47ツール実呼び�
 
 ## 更新履歴
 
-- v0.30.2 — **LLM の並列ツール呼び出しへの対応と無応答バグの修正**: 全47ツールを `anyio` のワーカースレッド実行（`server.py` の `_reg`）にして並列呼び出しを実際に並行化（実測: 同一ツール4並列 2.55s → 2.47s・4.0×、`astronomy_weather` 3都市同時 11.72s → 3.93s）、同一引数の並行呼び出しは **single-flight** で1回に集約、matplotlib の描画は `img_common.RENDER_LOCK` で直列化。**stdio 起動後に numpy / matplotlib / skyfield を import するとツールが無応答**になる不具合を numpy の起動時 import で修正（`--stdio` ゲートを追加）。CelesTrak の遮断（TCP blackhole）で120秒以上固まる問題を (connect 10s, read 25s)＋遮断の記憶で fail fast 化。画像を返す5ツールのメディアリンク抜けを修正（`--media-links`）、情報パネルが現在位置マーカーを隠す描画バグを `panel_placement` で修正。検証: 全47ツール exit 0／--dead-code 0／--fuzz 264組合せ 例外漏れ0／--offline exit 0／--figures 描画系8＋追加経路18／--media-links 問題0／--concurrency 3/3／--stdio 6/6／unittest 26件 OK。
+- v0.31.0 — **宇宙・天文イベントカレンダー（4ツール）**: `space_calendar`（月グリッド＋`structuredContent.events`。打ち上げ=LL2 の月範囲クエリ、天文現象=DE421+Skyfield のローカル計算、公開イベント=国立天文台、自分の予定=ローカルストア）と `calendar_events` / `calendar_event_add` / `calendar_event_remove`。**蓄積ストア（`%LOCALAPPDATA%\space-finder-mcp\`・原子置換・月別TTL・prune）を一次ソースにした read-through** で、要求月 M に対して窓 [M-1, M+2] を確保し未取得の月だけ取得（初回 8〜11秒 / 2回目以降 API 0回・実測 0.4秒）。予定はフローティングなローカル日時で `place` を変えても動かない。`net_precision` が Day/Hour/Minute/Second 以外・年末の行は日付セルに置かない（実測: 3ヶ月122件中、日付確定は4件）。NASA の WP REST（event-type=12929）と照合して公式URLを付与、LL2 の遮断記憶は `launch.py` に集約して3ツールと共有。検証: 51ツール実呼び出し／--dead-code 0／--fuzz 288組合せ 例外漏れ0／--offline exit 0／--figures 描画系9／--media-links 12ツール 問題0／--concurrency 3/3／--stdio 6/6／unittest 48件 OK。

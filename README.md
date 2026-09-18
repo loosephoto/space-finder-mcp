@@ -93,27 +93,27 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 - `content` の並びは常に「リンクを含むテキスト → `ImageContent`」なので、**画像を描けないクライアントでもリンクは必ず見えます**。
 - **機械的に検査します** — `scripts/check-tools.py --media-links`（画像ブロックより前にアイコン付きリンクが無い／`structuredContent` にURL・保存パスが無い／`image_path` のファイルが存在しない場合は exit 1。実測: 画像を返す12ツールすべて OK）。生成系の docstring には「回答時はこのリンクをそのまま提示してください」と明記しています。
 
-### 🆕 直近の更新内容（v0.30.2）
+### 🆕 直近の更新内容（v0.31.0）
 
-**「LLM の並列ツール呼び出しに応えるサーバーへ」**（v0.30.2）。同期ツールをワーカースレッドで実行して**並列呼び出しを本当に並行化**し、同じ引数の並行呼び出しは1回に集約しました。あわせて、**stdio 経由でツールが無応答になる不具合**と、**外部APIの遮断で呼び出しが分単位で固まる不具合**を修正しています。
+**「宇宙・天文イベントカレンダー（4ツール）」**（v0.31.0）。1か月を格子で描くカレンダーに、打ち上げ（Launch Library 2）・天文現象（JPL DE421 + Skyfield のローカル計算）・国立天文台の公開イベント・自分の予定を重ねます。**蓄積ストアを一次ソースにした read-through** にしたので、取得は「未取得・期限切れの月だけ」で済みます。
 
-- **🔀 並列ツール呼び出し** — 全47ツールを `anyio` のワーカースレッド実行に変更（FastMCP は同期関数をイベントループ上で呼ぶため、これが無いと1つの API 待ちが他の呼び出しを全部止めます）。実測: 同一ツール4並列が wall 2.55s → **2.47s（4.0×）**、`astronomy_weather` を3都市同時で 11.72s → **3.93s（3.0×）**。同一引数の並行呼び出しは **single-flight** で1回に集約（8並列でも実行1回＝共有レート枠を無駄にしない）、matplotlib の描画は `img_common.RENDER_LOCK` で直列化。
-- **⚠️ 無応答（stdio）の修正** — サーバー起動後に numpy / matplotlib / skyfield を import すると **ツール呼び出しが応答を返さない**状態になっていました（`constellation_now` / `moon_phase_map` / `accurate` エンジンの描画。関数を直接呼ぶ既存ゲートでは検出できない種類の不具合）。numpy を起動時に import して解消し、`--stdio` ゲート（実クライアント経路で子プロセスを起動）を追加。
-- **⏱️ 外部API遮断で固まらない** — CelesTrak が TCP を blackhole すると**1回の呼び出しが120秒以上無応答**（並列で走る他ツールも待たされる）。接続を (connect 10秒, read 25秒) で打ち切り、遮断を記憶して以降は **fail fast**（初回 10.0s → 以降 0.0s）。
-- **🖼️ メディアのリンクを全ツールで徹底** — 画像を返す12ツールを全数チェックしたところ4ツールに抜け（`eodashboard_detail` は画像リンク無し、`apod` は生URLのみ、`astronomy_weather` は `structuredContent` に保存パス無し）。メディア本体より前のアイコン付きリンクを全ツールに揃え、**`--media-links`** ゲートで機械的に検査。
-- **🗺️ 図の検証で見つかった描画バグ** — 情報パネルを現在位置マーカーの後に描いていたため、マーカーが暗幕に隠れる場合がありました（月面 LRO が北緯82°で `marker_pixels: 0`）。`surface_map.panel_placement()` で**マーカーを隠さない隅**へ置き、`verify.panel_overlaps_marker` を追加（同型の潜在バグを3ツールで修正）。
-- **🧪 回帰テスト** — 並列（single-flight・スレッド逃がし）、起動時の import、遮断時の fail fast を追加（計26件）。
-- **検証** — 全47ツール exit 0（39 OK／8 error はいずれも外部の一時制限）／`--dead-code` 0／`--fuzz` 264組合せ 例外漏れ0／`--offline` exit 0／`--figures` 描画系8＋追加経路18／`--media-links` 問題0／`--concurrency` 3/3／`--stdio` 6/6／`unittest` 26件 OK。
+- **🗓️ `space_calendar`** — 月グリッドの画像＋`structuredContent.events`。打ち上げは LL2 の月範囲クエリ（1ヶ月＝1リクエスト）、天文現象は月相・二十四節気・惑星の衝/合/内合・最大離角（東方/西方まで）・日食月食・流星群をローカル計算、公開イベントは国立天文台のイベント一覧（開催日の**範囲**つき）、自分の予定はローカルの蓄積ストアから。`figure/1` の自己検証は「申告した各イベントが自分の日付セルに自カテゴリ色で描かれたか」を画素で確認します（実測 30/30）。
+- **📌 自分の予定** — `calendar_event_add` / `calendar_event_remove` / `calendar_events`（一覧は図もAPIも使わない軽い経路）。日付は `2026-10-24` / `10月24日` 形式、時刻・終了日・繰り返し（毎日/毎週/毎月/毎年）対応。**フローティングなローカル日時**で保存するので `place` を変えても予定の日付は動きません（打ち上げは現地時刻に追従します）。削除は冪等で、同名が複数あるときは削除せず候補を提示します。保存先は `%LOCALAPPDATA%\space-finder-mcp\`（`cache` の Temp 配下ではない＝予定が消えない）で、**外部送信はありません**。
+- **💾 蓄積（read-through）** — 要求月 M に対して窓 [M-1, M+2] を確保し、**未取得・期限切れの月だけ**取得（月が進むと差分は1ヶ月＝1リクエスト）。初回 8〜11秒 / 2回目以降は **API 0回・0.4秒**（実測。`requests.get` を禁止しても描画できることを回帰テストで保証）。計算値は決定的なので月をキーに永久キャッシュします。
+- **⚖️ 日付未定の打ち上げを描かない** — LL2 の `net_precision` が Day/Hour/Minute/Second 以外、または年末（12/30〜01/01）の行は日付セルに置かず本文に列挙します（実測: 3ヶ月窓の122件中、日付が確定していたのは4件だけ。素朴に描くと**架空の打ち上げを大量に描く**ところでした）。
+- **🔗 NASA 公式リストと照合** — nasa.gov の WordPress REST（`event-type=12929`）を **API** で引き、一致した打ち上げに公式ページURLを付けます（別ホストなので `NASA_API_KEY` の枠を消費しません）。
+- **🚦 LL2 のレート制限を共有** — 匿名は約15 req/h、429 の `Retry-After` は実測104秒。`launch.py` に遮断の記憶を集約し、3つの打ち上げツールとカレンダーで共有して **fail fast**（実測: 429 のときは警告を出しつつ、蓄積済みのデータで描画を継続）。
+- **検証** — 全51ツール実呼び出し（42 OK／9 error はいずれも外部の一時制限: CelesTrak 遮断・LL2 429）／`--dead-code` 0／`--fuzz` 288組合せ 例外漏れ0／`--offline` exit 0／`--figures` 描画系9／`--media-links` 12ツール 問題0／`--concurrency` 3/3／`--stdio` 6/6 無応答0／`unittest` 48件 OK。
 
-登録ツールは **47本**（増減なし）。
+登録ツールは **51本**（v0.31.0 で4本追加）。
 
 ### 以前の更新
 
+- **v0.30.2** — LLM の並列ツール呼び出しへの対応（全47ツールを `anyio` のワーカースレッド実行・single-flight・`RENDER_LOCK`。実測 4並列 2.55s→2.47s）と、stdio 無応答（numpy の起動時 import）・外部API遮断での固まり（fail fast）・メディアリンク抜け・情報パネルが現在位置マーカーを隠す描画バグの修正。
 - **v0.30.1** — 衛星カタログの**全件走査と一致度順**、NASA 断時の**宇宙天気 SWPC フォールバック**（`source` で出典明示）。
 - **v0.30.0** — 気象庁の**雨雲・降水画像**（解析雨量・降水短時間予報＋ナウキャスト、雷活動度で警告）を `astronomy_weather` に統合し、日食ルーチンを応用した**月齢マップ `moon_phase_map`** を追加（47ツール）。
 - **v0.29.1** — 外部データの部分失敗・異常値を黙って落とさない修正と回帰テスト（ISS時刻の防御的変換、`neo_today` の content 側 redact、部分失敗の数値化）。
 - **v0.29.0** — 気象庁の天気図（実況＋24時間予想）を `astronomy_weather` に統合し、日本国内では雲量の予報と天気図を同時に返す。`weather_satellite_now` をひまわり9号専用から **GEO 13機＋LEO 6機の19機**へ拡張（取得不可機は理由コード）。EUMETSAT の旧静的画像サーバ廃止（2026-02）に伴い GeoServer WMS へ移行。
-- **v0.28.0** — 天体面地図の描画を `surface_map.py` に集約（タイル合成・等角投影・地点マーカー・画素検証）。地点マーカー図 `planetary_orbiter_track(sites=...)`（アポロ6地点・月/火星/金星の着陸点・木星SL9・タイタン）。複数彗星の1枚パネル。近点が分解できない楕円は上界検査へ自動切替。日食の既定探索を1400日へ拡大し62→28秒。`space_weather` をカテゴリ単位キャッシュへ。
 
 ## 📦 インストール
 
@@ -210,7 +210,7 @@ codex mcp list
 |:--|:--|
 | [`CLAUDE.md`](CLAUDE.md) | Claude Code 用プロジェクトガイド（セットアップ・規約・検証・リリース手順） |
 | [`AGENTS.md`](AGENTS.md) | Codex など `AGENTS.md` を読むエージェント向けガイド |
-| [`SKILL.md`](SKILL.md) | エージェント向けスキル定義（47ツールの仕様・使用例・キャッシュ・注意事項） |
+| [`SKILL.md`](SKILL.md) | エージェント向けスキル定義（51ツールの仕様・使用例・キャッシュ・注意事項） |
 | [`.claude/rules/`](.claude/rules/) | 開発規約（コーディング・検証ゲート・データ出典） |
 
 ### Hermes Agent
@@ -225,7 +225,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 
 ## 🛠️ ツール一覧
 
-登録ツールは **47本**（他国の宇宙機関データ 15本＋火星探査ローバー状況 1本＋天文観測(ESO/CADC/ALMA) 3本＋電波望遠鏡(TART) 1本＋天文ニュース 1本＋天体観測用天気 1本＋天体位置・星座 1本＋星図合成 1本＋太陽系俯瞰 1本＋日食時系列 1本＋月齢マップ 1本＋NASA POWER気候 1本＋EO Dashboard 2本＋宇宙天気 1本＋AWS STAC 2本＋ISS位置 1本＋衛星地上軌道 1本＋汎用天体周回機 1本＋汎用ローバー位置 1本＋WMO OSCAR 1本＋気象衛星リアルタイム画像 1本＋中国/ロシア打ち上げ・天宮 3本＋メディア/逆引き 4本）。全47ツールを実呼び出しで検証済みです（外部APIの障害・レート制限時は、例外ではなく CallToolResult のエラーとして返します）。
+登録ツールは **51本**（宇宙・天文イベントカレンダー 4本（`space_calendar` / `calendar_events` / `calendar_event_add` / `calendar_event_remove`）＋他国の宇宙機関データ 15本＋火星探査ローバー状況 1本＋天文観測(ESO/CADC/ALMA) 3本＋電波望遠鏡(TART) 1本＋天文ニュース 1本＋天体観測用天気 1本＋天体位置・星座 1本＋星図合成 1本＋太陽系俯瞰 1本＋日食時系列 1本＋月齢マップ 1本＋NASA POWER気候 1本＋EO Dashboard 2本＋宇宙天気 1本＋AWS STAC 2本＋ISS位置 1本＋衛星地上軌道 1本＋汎用天体周回機 1本＋汎用ローバー位置 1本＋WMO OSCAR 1本＋気象衛星リアルタイム画像 1本＋中国/ロシア打ち上げ・天宮 3本＋メディア/逆引き 4本）。全51ツールを実呼び出しで検証済みです（外部APIの障害・レート制限時は、例外ではなく CallToolResult のエラーとして返します）。
 
 | ツール | できること | データ源 | 認証 |
 |--------|-----------|---------|------|
@@ -273,6 +273,10 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `planetary_orbiter_track` | 任意の天体（月・火星・水星・タイタン等）を周回する探査機の現在位置と軌道トレイルを、その天体の地図にプロットした画像を返す。JPL Horizons の状態ベクトルを IAU 自転モデルで天体固定座標（緯度経度・高度）に変換し、NASA Trek の等角図法地図に重ねる。`span_deg=360`で天体全面表示にも対応。**過去機（かぐや等）は運用終了を案内し、落点が公表されている機体は落点を地点マーカーで描いた地図（`figure.kind="impact_site_map"`）を返す**。`sites="apollo"`（または `"apollo11"`〜`"apollo17"`, `"all"`）で **地点マーカー図**（`figure.kind="landing_site_map"`／木星は `impact_site_map`）も返す。**全球等角図がある天体（月・火星・水星・タイタン・ベスタ・ケレス）は地形画像の上に、無い天体（木星・土星・冥王星・金星・ガリレオ衛星など）は緯度経度グリッドの上に**公表座標を描く | JPL Horizons + NASA Trek / NASA NSSDC / PDS | 不要 |
 | `planetary_rover_location_map` | 任意の天体面を移動する探査ローバーの現在地をその天体の地図中心に示した画像（走行経路・着陸点）。NASA MMGIS の位置データと NASA Trek の等角地図を合成。現状データは火星ローバー（Perseverance/Curiosity） | NASA MMGIS + Trek WMTS | 不要 |
 | `weather_satellite_now` | GEO/LEO気象衛星19機（ひまわり9号・GOES-18/19・Meteosat・FY・GK-2A・INSAT・NOAA-20/-21・SNPP・Metop-B/C・FY-3D）の公開画像。GEOは最新フレーム、LEOは日次全球合成。取得不可は `restricted`/`unavailable`/`non_image_product` の理由コードで返す | JMA(himawari.asia)/NOAA STAR/EUMETSAT WMS/CMA-NSMC/KMA/IMD/NASA GIBS | 不要 |
+| `space_calendar` | **宇宙・天文イベントカレンダー**（月グリッド図＋JSON）。打ち上げ（LL2 の月範囲クエリ・日付精度 `net_precision` が Day/Hour/Minute/Second の行だけを日付セルに配置）・天文現象（Skyfield のローカル計算: 月相・二十四節気・惑星の衝/合/内合・最大離角・日食月食・流星群）・公開イベント（国立天文台）・自分の予定を重ねて描く。取得結果は**蓄積ストア**に溜め、要求月 M に対して窓 [M-1, M+2] を確保し**未取得・期限切れの月だけ**取りに行く（2回目は API 0 回）。NASA の公式リスト（WP REST）と照合した行には公式URLを付与 | Launch Library 2 + JPL DE421/Skyfield + 国立天文台 + nasa.gov | 不要 |
+| `calendar_events` | 蓄積済みイベントの一覧（**図を描かず外部APIも呼ばない**軽い経路）。打ち上げ・天文現象・公開イベント・自分の予定を日付順に返す | 蓄積ストア（ローカル） | 不要 |
+| `calendar_event_add` | **自分の予定をカレンダーに追加**（ローカル保存・外部送信なし）。日付は `2026-10-24` / `10月24日` 形式、時刻・終了日・繰り返し（毎日/毎週/毎月/毎年）対応。**フローティングなローカル日時**なので `place` を変えても予定の日付は動かない | ローカル（`%LOCALAPPDATA%\space-finder-mcp`） | 不要 |
+| `calendar_event_remove` | 自分の予定を削除（id か title[+date]）。冪等（既に無ければエラーにしない）。同名が複数あるときは**削除せず候補を提示**して停止 | ローカル | 不要 |
 | `satellite_status` | 世界中の気象・地球観測衛星の運用ステータス・軌道・打ち上げ日（Roscosmos等）。**カタログ全1,000件超を走査**し、query は一致度順（acronym 完全/前方一致 → 名称の語境界 → 部分一致のみ）で提示 | WMO OSCAR | 不要 |
 | `cnsa_status` | 中国CNSA系衛星データポータル（風雲/NSMC・高分/CNSA-GEO・CBERS/CRESDA）の到達状態・概要＋認証不要の代替経路 | CNSA各公式ポータル | 不要(ダウンロードは要登録) |
 | `tiangong_now` | 天宮（Tiangong）中国宇宙ステーションの現在位置（SGP4伝播＋Googleマップ表示） | CelesTrak TLE + SGP4 | 不要 |
@@ -758,7 +762,7 @@ ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカ�
 # 1. 構文チェック
 uv run python -m compileall -q src/space_finder_mcp
 
-# 2. 全47ツールを実呼び出し（例外漏れ・structuredContent欠落・タイムアウトを検出。数分）
+# 2. 全51ツールを実呼び出し（例外漏れ・structuredContent欠落・タイムアウトを検出。数分）
 uv run python scripts/check-tools.py
 
 # 3. ネットワーク全断を注入して「例外が外へ漏れないか」を検査
@@ -847,6 +851,8 @@ src/space_finder_mcp/
 ├── mars_rover.py         # mars_rover_status（火星ローバー状況・天気）
 ├── surface_map.py        # 天体面地図の共通描画（タイル合成・等角投影・地点マーカー・画素検証）
 ├── planetary_map.py      # planetary_orbiter_track（汎用・天体周回機マップ／落点マップ）
+├── calendar_store.py     # 蓄積ストア（正規化レコード＋来歴／ユーザー予定・原子書き込み・月別TTL・prune）
+├── space_calendar.py     # space_calendar / calendar_events / calendar_event_add / calendar_event_remove
 └── planetary_rover.py    # planetary_rover_location_map（汎用・ローバー位置マップ）
 ```
 
