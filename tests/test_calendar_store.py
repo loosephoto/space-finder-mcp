@@ -276,6 +276,23 @@ class CalendarToolTests(unittest.TestCase):
         self.assertEqual(r.structuredContent["warnings"], [])
         self.assertTrue(r.structuredContent["image_path"])
 
+    def test_calendar_events_also_prunes(self):
+        """一覧だけを使い続けても古いデータが残らない（保持期限は calendar_events でも適用）。
+
+        space_calendar を呼ばない利用でも過去データが溜まらないようにするための回帰テスト。
+        有効なユーザー予定は保持期限の対象外（消えない）。
+        """
+        from space_finder_mcp.solar_eclipse import _local_tz
+        _local_tz.__dict__.setdefault("_c", {})[(35.7, 139.7)] = 9.0   # 東京の TZ を先に埋める
+        self._put([{"key": "ll2:old", "kind": "launch", "title": "古い打ち上げ",
+                    "start_utc": "2020-01-01T00:00:00Z", "solid": True}])
+        self.store.user_add("古い予定", dt.date(2020, 1, 1))
+        r = self.cal.calendar_events(year=2026, month=10, place="東京")
+        self.assertNotIn("error", r.structuredContent)
+        left = [rec["key"] for rec in self.store.records()]
+        self.assertNotIn("ll2:old", left)                              # 期限切れの API データは消える
+        self.assertTrue([k for k in left if k.startswith("user:")])    # 予定は残る
+
     def test_corroboration_matches_nasa_list(self):
         """NASA 公式リスト（API）と突き合わせて公式URLを足す。"""
         mapping = self.cal._corroboration_map(

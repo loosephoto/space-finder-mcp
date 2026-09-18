@@ -598,6 +598,9 @@ def space_calendar(year: Optional[int] = None, month: Optional[int] = None, plac
         "UTC から基準地の現地時刻へ変換している",
         "自己検証: セルに描いた {} 件のうち、自カテゴリ色を画素で確認できたのは {} 件".format(
             verify["checked"], verify["checked"] - len(verify["missing"])),
+        "蓄積ストアは過去 {} 日ぶんの API 由来データを保持し、それより古いものは呼び出し時に"
+        "自動削除する（有効なユーザー予定は対象外・削除した予定は tombstone として残る）".format(
+            store.KEEP_PAST_DAYS),
         "出典: Launch Library 2 (thespacedevs.com) ／ JPL DE421 + Skyfield ／ 国立天文台 イベント情報"
         " ／ nasa.gov（照合用）",
     ])
@@ -732,6 +735,7 @@ def calendar_events(year: Optional[int] = None, month: Optional[int] = None, pla
     """蓄積済みのイベント一覧を返す（図を描かず、外部APIも呼ばない軽い経路）。
 
     蓄積ストア（`space_calendar` が取得したものと `calendar_event_add` で入れた予定）だけを読みます。
+    呼び出し時に保持期限（カレンダーと同じ日数＝過去データの自動削除）も適用します。
     「今月の予定は？」「10月の公開イベントは？」のように、まず一覧だけ見たいときに使ってください。
     打ち上げ・天文現象の鮮度は `structuredContent.sources` に取得時刻として入ります。
 
@@ -751,6 +755,9 @@ def calendar_events(year: Optional[int] = None, month: Optional[int] = None, pla
     kinds_set, kerr = _parse_kinds(kinds)
     if kerr:
         return _err(kerr)
+    # 一覧だけを使い続けても古いデータが残らないように、ここでも保持期限を適用する
+    # （space_calendar と同じ KEEP_PAST_DAYS。有効なユーザー予定は対象外）
+    store.prune()
     corr = store.kv_get("corroboration_map_v1", None, allow_stale=True) or {}
     drawn, tray = _assemble(year_i, month_i, off, kinds_set, corr)
     counts = {k: sum(1 for e in drawn if e["kind"] == k) for k in store.KIND_ORDER}

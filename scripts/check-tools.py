@@ -46,6 +46,16 @@ COORDS = {"latitude": 35.68, "lat": 35.68, "longitude": 139.69, "lon": 139.69,
           "ra": 83.82, "dec": -5.39}
 
 
+# 引数が必須のツールは None を渡すと「引数を指定してください」で終わり、経路が検証されない。
+# ゲート専用の安全な引数をここで与える（存在しない ID を渡す削除は冪等なので副作用なし）。
+GATE_ARGS = {
+    "calendar_event_add": {"title": "ゲート検証用の予定", "date": "2026-10-24", "time": "19:30"},
+    "calendar_event_remove": {"id": "user:gate-does-not-exist"},
+}
+# カレンダーのストアに書き込むツールは、ゲートでは一時ストアへ逃がす（利用者の実データを汚さない）
+STORE_WRITE_TOOLS = ("calendar_event_add",)
+
+
 def _fill_kwargs(fn) -> dict:
     params = [p for p in inspect.signature(fn).parameters.values()
               if p.default is inspect.Parameter.empty or p.default is None]
@@ -294,6 +304,12 @@ def figure_extra_rows(timeout=180.0) -> list:
         th.start()
         th.join(timeout)
         dt = time.perf_counter() - t0
+        if tmp_store:
+            calendar_store.STORE_PATH = orig_store_path
+            try:
+                os.remove(tmp_store)
+            except OSError:
+                pass
         if th.is_alive():
             rows.append({"tool": label, "status": "TIMEOUT", "seconds": round(dt, 2)})
             continue
@@ -334,7 +350,12 @@ def run_all(only=None, timeout=180, offline=False) -> list:
             raise requests.ConnectionError("check-tools: simulated network failure")
         requests.get, requests.post = boom, boom
 
+    import os
+    import tempfile
+    from space_finder_mcp import calendar_store
+
     rows = []
+    orig_store_path = calendar_store.STORE_PATH
     names = sorted(mcp._tool_manager._tools)
     if only:
         names = [n for n in names if n in only]
@@ -342,9 +363,18 @@ def run_all(only=None, timeout=180, offline=False) -> list:
         fn = sync_fn(mcp._tool_manager._tools[name])
         out = {}
 
+        tmp_store = None
+        if name in STORE_WRITE_TOOLS:                   # 実ストアを汚さないよう一時ファイルへ
+            fd, tmp_store = tempfile.mkstemp(suffix=".json")
+            os.close(fd)
+            os.remove(tmp_store)
+            calendar_store.STORE_PATH = tmp_store
+
         def call():
             try:
-                out["result"] = fn(**_fill_kwargs(fn))
+                kw = _fill_kwargs(fn)
+                kw.update(GATE_ARGS.get(name, {}))
+                out["result"] = fn(**kw)
             except Exception as e:                      # 例外が外へ漏れた = 異常
                 out["exc"] = "{}: {}".format(type(e).__name__, e)
 

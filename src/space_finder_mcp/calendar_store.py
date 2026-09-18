@@ -32,6 +32,9 @@ TTL_LAUNCH_FUTURE = 6 * 3600
 TTL_PUBLIC = 24 * 3600
 TTL_NASA_LIST = 24 * 3600
 TTL_NEVER = None          # 計算値は決定的なので期限なし（キーに年月が入る）
+# 過去日の API 由来レコードを保持する日数（これを過ぎたら prune で消える）。
+# 有効なユーザー予定はこの対象外（永久に残す）。
+KEEP_PAST_DAYS = 45
 
 # カテゴリ（表示名と色）。図の描画と figure.notes の双方がこの1つの表を出典にする。
 KINDS = {
@@ -167,7 +170,7 @@ def records(*, kinds: Optional[Iterable[str]] = None, sources: Optional[Iterable
     return out
 
 
-def prune(keep_past_days: int = 45, tombstone_days: int = 180) -> int:
+def prune(keep_past_days: int = KEEP_PAST_DAYS, tombstone_days: int = 180) -> int:
     """古い API 由来レコードと古い tombstone を消す（``user:`` の予定は消さない）。"""
     now = _now()
     removed = 0
