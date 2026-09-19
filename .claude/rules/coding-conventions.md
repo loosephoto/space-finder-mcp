@@ -38,7 +38,7 @@
 
 自前で図を描くツール（solar_system_now / sat_ground_track / planetary_orbiter_track /
 planetary_rover_location_map / sky_map_with_satellites / solar_eclipse_series /
-moon_phase_map / astronomy_weather〔雨雲・降水画像を返すとき〕）は、
+moon_phase_map / astronomy_weather〔雨雲・降水画像を返すとき〕 / space_calendar）は、
 `structuredContent.figure` に「どう描いたか」を自己申告する。
 
 - 主天体は**円錐曲線の焦点**に置く（`primary.at = "focus"`）。楕円の中心に置くと、高離心率の

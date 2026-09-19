@@ -7,6 +7,7 @@
 | 打ち上げ | Launch Library 2 | **API**（月範囲クエリ・1ヶ月=1リクエスト）。`net_precision` で日付精度を判定し、日付が確定した行だけを日付セルに置く |
 | 天文現象 | JPL DE421 + Skyfield | **ローカル計算**（月相・二十四節気・惑星の衝/合/内合/最大離角・日食月食・流星群） |
 | 公開・イベント | 国立天文台（NINS のイベント一覧） | HTML（構造化された `news-item` ブロック。開催日の範囲が取れる） |
+| JAXA 施設公開 | ファン!ファン!JAXA!（施設見学）＋ 宇宙科学研究所のイベント表 | HTML（`<li>` / `<tr>` 単位の小さな正規表現）。**告知済みのみ**のスナップショット（アーカイブ無し）なので、取得日を窓にして毎日取り直す |
 | ユーザー予定 | ローカルの蓄積ストア | `calendar_event_add` / `remove` / `events` |
 
 蓄積（`calendar_store.py`）を一次ソースにした **read-through**: 要求月 M に対して窓 [M-1, M+2] を確保し、
@@ -17,15 +18,18 @@
 `corroborated` と公式ページURLを付ける（nasa.gov は別ホストなので NASA_API_KEY の予算を消費しない）。
 
 図は `structuredContent.figure`（schema: figure/1）を返し、`figure.notes` は**要約せず引用**してください。
-出典: Launch Library 2 (thespacedevs.com) ／ JPL DE421 + Skyfield ／ 国立天文台 イベント情報 ／ nasa.gov。
+出典: Launch Library 2 (thespacedevs.com) ／ JPL DE421 + Skyfield ／ 国立天文台 イベント情報 ／
+JAXA（ファン!ファン!JAXA!・宇宙科学研究所） ／ nasa.gov。
 """
 from __future__ import annotations
 
 import calendar as _cal
 import datetime as dt
+import html
 import re
 import time
 from typing import Optional
+from urllib.parse import urljoin
 
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
@@ -42,6 +46,16 @@ LL2 = "https://ll.thespacedevs.com/2.3.0"
 NASA_EVENT_API = "https://www.nasa.gov/wp-json/wp/v2/event"
 NASA_LAUNCH_TERM = 12929          # "Launch Schedule" ターム（実測: 69件）
 NINS_EVENTS = "https://www.nins.jp/event/cat72/"
+# JAXA の施設公開。fanfun の一覧は「近日開催」だけ（過去分のアーカイブ・ページングは無い。
+# ?page=2 も同一内容を返す実測）、ISAS のイベント表は月ごとの表で過去1年ぶんが残る。
+FANFUN_VISIT = "https://fanfun.jaxa.jp/visit/"
+ISAS_EVENTS = "https://www.isas.jaxa.jp/outreach/events/"
+# 施設名ラベル（fanfun の <span data-icn-color="03">）。これだけが付いた行が施設の公開イベントで、
+# 「お知らせ」「休館案内」が付く行はイベントではない（実測: 臨時休館・見学中止の告知）。
+JAXA_FACILITIES = ("種子島", "内之浦", "筑波", "調布", "相模原", "地球観測", "角田",
+                   "勝浦", "増田", "沖縄", "臼田", "大樹", "能代")
+_JAXA_HINT = re.compile(r"公開|施設紹介")
+_JAXA_DATE = re.compile(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日")
 UA = {"User-Agent": "curl/8.5.0 (compatible; space-finder-mcp/0.31; "
                     "+https://github.com/loosephoto/space-finder-mcp)"}
 
@@ -302,6 +316,9 @@ def _ensure_coverage(year: int, month: int, off: float) -> list:
     else:
         store.upsert(pub, "public:{}".format(year), window=str(year), complete=True,
                      ttl=store.TTL_PUBLIC)
+    jaxa_err = _jaxa_public_events()
+    if jaxa_err:
+        warnings.append("JAXA 施設公開: {}".format(jaxa_err))
     _computed_month(year, month, off)
     nasa_items = store.kv_get("corroboration_map_v1", store.TTL_NASA_LIST)
     if nasa_items is None:
@@ -543,7 +560,8 @@ def space_calendar(year: Optional[int] = None, month: Optional[int] = None, plac
 
     打ち上げは Launch Library 2 の API（月範囲）から、日付が確定した行だけを日付セルに置きます。
     天文現象は JPL DE421 + Skyfield のローカル計算（月相・二十四節気・惑星の衝/合/内合・最大離角・
-    日食月食・流星群）、公開・イベントは国立天文台のイベント一覧、自分の予定はローカルの蓄積ストア
+    日食月食・流星群）、公開・イベントは国立天文台のイベント一覧と JAXA の施設公開（一般公開・特別公開）、
+    自分の予定はローカルの蓄積ストア
     （`calendar_event_add` で追加）から取ります。取得結果は蓄積ストアに溜め、要求月 M に対して
     窓 [M-1, M+2] を確保して**未取得・期限切れの月だけ**取りに行きます（月が進むと差分は1ヶ月）。
 
@@ -596,13 +614,15 @@ def space_calendar(year: Optional[int] = None, month: Optional[int] = None, plac
         if nasa_hits else "NASA 公式リストとの照合は 0 件（照合できた行のみ公式URLを付けます）",
         "予定・公開イベントは現地の暦日のまま（時刻のタイムゾーン変換をしない）。打ち上げ・天文現象は"
         "UTC から基準地の現地時刻へ変換している",
+        "JAXA の施設一般公開・特別公開は告知済みのぶんだけを載せる（一覧に過去分のアーカイブが無い"
+        "ため、未告知の月はセルが空になる＝開催なしではない）",
         "自己検証: セルに描いた {} 件のうち、自カテゴリ色を画素で確認できたのは {} 件".format(
             verify["checked"], verify["checked"] - len(verify["missing"])),
         "蓄積ストアは過去 {} 日ぶんの API 由来データを保持し、それより古いものは呼び出し時に"
         "自動削除する（有効なユーザー予定は対象外・削除した予定は tombstone として残る）".format(
             store.KEEP_PAST_DAYS),
         "出典: Launch Library 2 (thespacedevs.com) ／ JPL DE421 + Skyfield ／ 国立天文台 イベント情報"
-        " ／ nasa.gov（照合用）",
+        " ／ JAXA（ファン!ファン!JAXA!・宇宙科学研究所） ／ nasa.gov（照合用）",
     ])
     fig = figure_payload(
         kind="calendar", title="{}年{}月 宇宙・天文イベントカレンダー".format(year_i, month_i),
@@ -642,7 +662,7 @@ def space_calendar(year: Optional[int] = None, month: Optional[int] = None, plac
                                   for k, v in e.items()} for e in tray],
             "counts": counts, "warnings": warnings, "figure": fig, "verify": verify,
             "image_path": out_path, "store": store.stats(),
-            "source": "Launch Library 2 / JPL DE421+Skyfield / 国立天文台 / nasa.gov",
+            "source": "Launch Library 2 / JPL DE421+Skyfield / 国立天文台 / JAXA / nasa.gov",
         },
     )
 
@@ -854,6 +874,136 @@ def _public_events(year: int, month: int):
             "certainty": "unverified",
         })
     return out, None
+
+
+
+# ---- JAXA 施設公開（一般公開・特別公開）----------------------------------------
+def _strip_tags(s: str) -> str:
+    """HTML 断片からタグを落として空白を畳む（この用途だけの小さな補助）。"""
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", str(s or "")))).strip()
+
+
+def _jaxa_dates(when: str):
+    """告知文から日付を拾う。戻り: (開始日, 終了日 or None)。
+
+    1件に複数の日付が並ぶ（実測: 「【特別公開】11/7…【オンライン】11/8…」）ので、最初の日付を
+    開始、最後の日付を終了に寄せる（現地／オンラインの2日間は範囲として描く）。
+    """
+    ds = []
+    for m in _JAXA_DATE.finditer(when or ""):
+        try:
+            ds.append(dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3))))
+        except ValueError:
+            continue
+    if not ds:
+        return None, None
+    return ds[0], (ds[-1] if ds[-1] > ds[0] else None)
+
+
+def _jaxa_record(venue: str, title: str, when: str, start, end, url: str, source: str) -> dict:
+    """1件の施設公開レコードへ正規化する（時刻は告知文のまま detail に残す）。"""
+    title = re.sub(r"のお知らせ$", "", title).strip() or title
+    return {
+        "key": "jaxa:" + url, "kind": "public", "title": title[:70],
+        "detail": "{} ／ {}".format(venue or "JAXA", when),
+        "start_local": start.isoformat() + "T00:00",
+        "end_local": end.isoformat() if end else None,
+        "all_day": True, "venue": venue, "source": source, "url": url,
+        # 「（予定）」付きの告知は確定前（実測: 相模原の【オンライン】行）
+        "certainty": "unverified" if "予定" in when else "confirmed",
+    }
+
+
+def _jaxa_fanfun_visit() -> list:
+    """ファン!ファン!JAXA! の「施設見学」ページから日付付きの公開イベントを抽出する。
+
+    一覧は「近日開催」だけのスナップショット（過去分のアーカイブは無い）。実測では `<li>` の中に
+    施設名の `<span>` ＋ `<time>日付</time>` ＋ `<a href>` が揃う行だけが公開イベントで、
+    「お知らせ」「休館案内」の行にはカテゴリの `<span>` が付く。大きな正規表現は使わない
+    （大きな HTML では壊滅的バックトラックでハングする実測がある: NINS の一覧参照）。
+    """
+    r = requests.get(FANFUN_VISIT, timeout=(10, 25), headers=UA)
+    r.encoding = "utf-8"
+    r.raise_for_status()
+    out = []
+    for raw_li in r.text.split("<li>")[1:]:
+        seg = raw_li.split("</li>")[0]
+        tm = re.search(r"<time[^>]*>(.*?)</time>", seg, re.S)
+        a = re.search(r'<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', seg, re.S)
+        if not (tm and a):
+            continue
+        labels = [_strip_tags(x) for x in re.findall(r"<span[^>]*>(.*?)</span>", seg, re.S)]
+        if not labels or any(l not in JAXA_FACILITIES for l in labels):
+            continue                       # 施設名以外のラベル＝お知らせ・休館案内など（イベントではない）
+        when, title = _strip_tags(tm.group(1)), _strip_tags(a.group(2))
+        if not _JAXA_HINT.search(title + when):
+            continue                       # 公開・施設紹介以外（見学規制の告知など）は採らない
+        start, end = _jaxa_dates(when)
+        if start is None:
+            continue
+        out.append(_jaxa_record(labels[0], title, when, start, end, a.group(1),
+                                "ファン!ファン!JAXA!（施設見学）"))
+    return out
+
+
+def _jaxa_isas_events() -> list:
+    """JAXA 宇宙科学研究所のイベント表から「公開」イベントを抽出する（過去1年ぶんが残る）。
+
+    fanfun の一覧が「近日開催」しか持たないのに対し、こちらは月ごとの表で過去分も並ぶので、
+    過去月の補完に使う。表は `<th>月</th>` ＋ `<time>` ＋ `<a>` の素直な構造。
+    """
+    r = requests.get(ISAS_EVENTS, timeout=(10, 25), headers=UA)
+    r.encoding = "utf-8"
+    r.raise_for_status()
+    out = []
+    for tr in re.findall(r"<tr>(.*?)</tr>", r.text, re.S):
+        for blk in re.split(r'<div class="events-table__blc"', tr)[1:]:
+            tm = re.search(r"<time[^>]*>(.*?)</time>", blk, re.S)
+            a = re.search(r'<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', blk, re.S)
+            if not (tm and a):
+                continue
+            title = _strip_tags(a.group(2))
+            if "公開" not in title:
+                continue                   # 一般公開・特別公開だけ（講演会・ライブ配信は対象外）
+            when = _strip_tags(tm.group(1))
+            start, end = _jaxa_dates(when)
+            if start is None:
+                continue
+            venue = next((v for v in JAXA_FACILITIES if v in title), "")
+            out.append(_jaxa_record(venue, title, when, start, end,
+                                    urljoin(ISAS_EVENTS, a.group(1)),
+                                    "JAXA 宇宙科学研究所 イベント情報"))
+    return out
+
+
+def _jaxa_public_events() -> Optional[str]:
+    """JAXA の施設公開（fanfun の近日開催＋ISAS の過去分）を取り込む。戻り: 警告 or None。
+
+    fanfun はアーカイブを持たないスナップショットなので、月キーの read-through（窓 [M-1, M+2]）には
+    載せず、**取得日を窓にして毎日取り直す**。窓を年や月で固定すると「まだ告知されていない月」を
+    「取得済み＝予定なし」と凍結してしまう（未告知の月が空なのは開催なしではない）。
+    片方の取得に失敗したら complete=False にして、当日中は再取得を許す。
+    """
+    src = "jaxa_public:v1"
+    window = dt.date.today().isoformat()
+    if store.source_is_fresh(src, store.TTL_PUBLIC, window=window):
+        return None
+    recs, errs = [], []
+    for fn, label in ((_jaxa_fanfun_visit, "ファン!ファン!JAXA!"),
+                      (_jaxa_isas_events, "宇宙科学研究所")):
+        try:
+            recs.extend(fn())
+        except requests.RequestException as ex:
+            errs.append("{}: {}".format(label, ex))
+    seen, uniq = set(), []
+    for rec in recs:
+        norm = re.sub(r"\s+", "", rec["title"])
+        if norm in seen:                   # 相模原の特別公開は両方に載る（先勝ちで1件に寄せる）
+            continue
+        seen.add(norm)
+        uniq.append(rec)
+    store.upsert(uniq, src, window=window, complete=not errs, failed=errs, ttl=store.TTL_PUBLIC)
+    return " ／ ".join(errs) if errs else None
 
 
 def _phases(eph, ts, t0, t1):

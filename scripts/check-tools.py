@@ -304,12 +304,6 @@ def figure_extra_rows(timeout=180.0) -> list:
         th.start()
         th.join(timeout)
         dt = time.perf_counter() - t0
-        if tmp_store:
-            calendar_store.STORE_PATH = orig_store_path
-            try:
-                os.remove(tmp_store)
-            except OSError:
-                pass
         if th.is_alive():
             rows.append({"tool": label, "status": "TIMEOUT", "seconds": round(dt, 2)})
             continue
@@ -338,6 +332,49 @@ def figure_extra_rows(timeout=180.0) -> list:
                                 "notes": len((fig or {}).get("notes") or []),
                                 "verify_ok": ((fig or {}).get("verify") or {}).get("ok")}})
     return rows
+
+# 画像を返す条件が既定引数では満たされないツールの追加経路（規約13のリンク先行を機械的に検査する）。
+MEDIA_EXTRA_CALLS = (
+    # MAST は preview_image のときだけプレビュー画像を返す（既定はテキストのみ）
+    ("mast_observations[preview_image]", "mast_observations",
+     {"ra": 189.9976, "dec": -11.6231, "radius": 0.02, "mission": "JWST",
+      "preview_image": True, "limit": 1}),
+)
+
+
+def media_extra_rows(timeout=180.0) -> list:
+    """メディア（画像）を返す追加経路を実行し、リンク先行（規約13）を検査する。"""
+    from space_finder_mcp.server import mcp as _mcp
+    rows = []
+    for label, tool_name, kw in MEDIA_EXTRA_CALLS:
+        fn = sync_fn(_mcp._tool_manager._tools[tool_name])
+        out = {}
+
+        def call():
+            try:
+                out["r"] = fn(**kw)
+            except Exception as e:
+                out["exc"] = "{}: {}".format(type(e).__name__, e)
+
+        th = threading.Thread(target=call, daemon=True)
+        t0 = time.perf_counter()
+        th.start()
+        th.join(timeout)
+        dt = time.perf_counter() - t0
+        if th.is_alive():
+            rows.append({"tool": label, "status": "TIMEOUT", "seconds": round(dt, 2)})
+            continue
+        if "exc" in out:
+            rows.append({"tool": label, "status": "LEAKED_EXCEPTION", "seconds": round(dt, 2),
+                         "detail": str(out["exc"])[:200]})
+            continue
+        r = out["r"]
+        blocks = [getattr(c, "type", "?") for c in (getattr(r, "content", None) or [])]
+        issues = media_issues(tool_name, r)
+        rows.append({"tool": label, "status": "MEDIA_INVALID" if issues else "OK",
+                     "seconds": round(dt, 2), "blocks": blocks, "media_issues": issues})
+    return rows
+
 
 def run_all(only=None, timeout=180, offline=False) -> list:
     """全ツールを実行して結果を返す。offline=True なら requests を必ず失敗させる。"""
@@ -764,6 +801,7 @@ def main() -> int:
     if args.media_links:
         rows = run_all(only=only, timeout=args.timeout, offline=False)
         out = [r for r in rows if "image" in (r.get("blocks") or [])]
+        out = out + (media_extra_rows(timeout=args.timeout) if not only else [])
         bad = [r for r in out if r["status"] in ("TIMEOUT", "LEAKED_EXCEPTION", "MEDIA_INVALID")
                or r.get("media_issues")]
         if args.json:

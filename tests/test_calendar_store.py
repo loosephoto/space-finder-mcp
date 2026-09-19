@@ -257,6 +257,9 @@ class CalendarToolTests(unittest.TestCase):
                             "start_utc": "2026-10-19T19:41:00Z"}], "ll2:2026-10",
                           window="ll2:2026-10", complete=True, ttl=S.TTL_LAUNCH_FUTURE)
         self.store.upsert([], "public:2026", window="2026", complete=True, ttl=S.TTL_PUBLIC)
+        # JAXA 施設公開はスナップショット源（窓＝取得日）なので、ここも当日の窓で埋める
+        self.store.upsert([], "jaxa_public:v1", window=dt.date.today().isoformat(),
+                          complete=True, ttl=S.TTL_PUBLIC)
         self.store.upsert([{"key": "computed:phase:x", "kind": "sky", "title": "満月", "solid": True,
                             "start_utc": "2026-10-26T04:11:00Z"}], "computed:2026-10",
                           window="v1", complete=True, ttl=S.TTL_NEVER)

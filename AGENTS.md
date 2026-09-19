@@ -1,6 +1,6 @@
 # AGENTS.md — Space Finder MCP Server（Codex / 汎用コーディングエージェント向け）
 
-宇宙・天文・地球観測の公開データを **51ツール**で横断検索する MCP サーバー（Python / uv 管理）。NASA・ESA・JAXA・ISRO・CSA・INPE・UK・CNSA・CelesTrak・JPL・Wikidata・Open-Meteo 等を統合し、画像（衛星軌道マップ・日食パネル・月齢マップ等）と構造化JSONを同時に返します。
+宇宙・天文・地球観測の公開データを **53ツール**で横断検索する MCP サーバー（Python / uv 管理）。NASA・ESA・JAXA・ISRO・CSA・INPE・UK・CNSA・CelesTrak・JPL・Wikidata・Open-Meteo 等を統合し、画像（衛星軌道マップ・日食パネル・月齢マップ等）と構造化JSONを同時に返します。
 
 `CLAUDE.md` は同じ内容を Claude Code 向けに書いたものです（本ファイルは Codex など AGENTS.md を読むエージェント向け）。詳細なツール仕様は `SKILL.md`、引数一覧は `README.md` を参照してください。
 
@@ -44,7 +44,7 @@ uv run python scripts/check-tools.py --media-links    # 画像/音声/動画の�
 uv run python scripts/check-tools.py --concurrency    # 並列実行（single-flight・スレッド逃がし・例外漏れ）
 uv run python scripts/check-tools.py --stdio          # 実クライアント経路(stdio)で代表ツールが応答するか
 uv run python -m unittest discover -s tests          # 回帰テスト（対応済みの実バグの再発防止）
-uv run python scripts/check-tools.py                  # 全51ツール実呼び出し（数分・終了コード1で失敗）
+uv run python scripts/check-tools.py                  # 全53ツール実呼び出し（数分・終了コード1で失敗）
 ```
 
 - **MCP はホットリロードなし**。`src/` を変更したらクライアントを再起動。
@@ -61,7 +61,7 @@ uv run python scripts/check-tools.py                  # 全51ツール実呼び�
 7. api.nasa.gov へ投げる前に `nasa_budget.check()` を通す（枠を使い切っていたら HTTP を出さない）。429 は `nasa_budget.note_429()` で `Retry-After` を記録する。
 8. 曖昧な入力（複数候補の衛星名など）は推測せず**候補を提示して停止**する。
 9. 過去ミッション（かぐや等）は正確に「表示できない」と返す（誤った天体を出さない）。
-10. 依存追加は最小限。Pillow / matplotlib は遅延 import。ドキュメント・コメントは日本語。
+10. 依存追加は最小限。Pillow / sgp4 / requests は遅延 import（起動を速く保つ）。**numpy / matplotlib / skyfield は起動時に import**（遅延 import すると stdio でツールが無応答になる。規約14参照）。ドキュメント・コメントは日本語。
 11. **ツールを追加・削除・変更したら `README.md` のツール表と `SKILL.md` を同一変更内で更新**。
 12. **描画系ツール（自前で図を描くツール）は `structuredContent.figure`（`schema: "figure/1"`）を返す**。視点(`view`)・主天体の置き方(`primary`：楕円は**焦点**であって中心ではない)・縮尺(`scale`)・円錐曲線(`conic`)・注記(`notes`)・自己検証(`verify`)を含め、**注記は数値から生成**する（`img_common` の `Conic` / `conic_from_elements` / `figure_notes` / `figure_payload` / `figure_text_block` / `verify_curve` を使う。手書きすると図と文が食い違う）。`content` にも同じ注記を `figure_text_block()` で出し、docstring に「`figure.notes` は要約せず引用する」と明記する。近点／遠点が**画面上で分解できない**場合（超長距離の楕円で近日点が誇張した主天体の円盤の内側に入る等）は、`verify_curve` の `occluders=[(中心x, 中心y, 半径px)]` に円盤を渡すと等値検査をやめて上界検査へ自動で切り替える（`periapsis_resolvable` / `periapsis_check` に残る）。このときは注記にも「この縮尺では図から確認できない」旨を**数値から生成**して明示すること（ゲートが要求）。加えて、曲線に重なるラベルは**描かず**（`skipped_labels` を注記に出す。重ねて描くと図と文が食い違う）、画面外へはみ出すラベル矩形は `verify_curve` 側でクランプされることを前提にしない（描かないこと）。検査は `scripts/check-tools.py --figures`（注記が空・`verify.ok` が偽なら exit 1。超長距離楕円の経路も叩く）。加えて、**地図の上に置く情報パネルは `surface_map.panel_placement()` で現在位置マーカーを隠さない隅へ置く**（描いた後にパネルを重ねると、地図の暗幕でマーカーが消える：月面の LRO が北緯82°＝図の上端に来た実測で、左上のパネルの下に入り`marker_pixels: 0` になった）。`verify` に `panel_overlaps_marker` を残し、どの隅でも重なる小さい図ではマーカーをパネルの上に描き直して、その旨を注記に出す。
 13. **メディア（画像/音声/動画）を `content` に含むツールは、メディア本体より前にアイコン付きリンクを必ず出す**（`🖼️/🎧/🎬/📄 [◯◯を開く](URL または file:///…)`）。CLI系・Android系ハーネス（codex / opencode）は `ImageContent` を描画しないため、このリンクが唯一の導線になる。生成画像は `save_output()` で保存し、同じパスを `structuredContent.image_path`、外部URLがあるものは `image_url` にも入れる。docstring に「回答時はこのリンクをそのまま提示してください」と明記すること。検査は `scripts/check-tools.py --media-links`（画像より前にリンクが無い／`structuredContent` にURL・保存パスが無い／`image_path` のファイルが存在しない場合は exit 1）。
@@ -74,7 +74,7 @@ uv run python scripts/check-tools.py                  # 全51ツール実呼び�
 
 ```
 src/space_finder_mcp/
-├── server.py        # FastMCP サーバー定義・51ツール登録
+├── server.py        # FastMCP サーバー定義・53ツール登録
 ├── cache.py         # キャッシュ基盤（TTLメモリ / ディスク資産）
 ├── img_common.py    # 画像共通（フォント探索 / JPEG化 / アンチメリジアン分割）
 ├── surface_map.py   # 天体面地図の共通描画（タイル合成 / 等角投影 / 地点マーカー / 画素検証）
@@ -88,7 +88,7 @@ src/space_finder_mcp/
 ├── swpc.py          # NOAA SWPC（宇宙天気のフォールバック・認証不要）
 ├── calendar_store.py # カレンダーの蓄積ストア（正規化レコード＋来歴 / ユーザー予定 / 月別TTL / prune）
 ├── space_calendar.py # space_calendar / calendar_events / calendar_event_add / calendar_event_remove
-└── <データ源>.py     # 各APIツール（nasa / launch / media / celestrak / jaxa / ...）
+└── <データ源>.py     # 各APIツール（nasa / launch / media / celestrak / jaxa / mast / gcn 等）
 tests/                 # 回帰テスト（unittest discover -s tests）
 scripts/check-tools.py   # 回帰検証ゲート
 ```

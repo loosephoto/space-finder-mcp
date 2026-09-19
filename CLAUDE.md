@@ -1,6 +1,6 @@
 # Space Finder MCP Server — Claude Code 用プロジェクトガイド
 
-宇宙・天文・地球観測の公開データを **51ツール**で横断検索する MCP サーバー（Python / uv 管理）です。NASA・ESA Copernicus・JAXA・ISRO・CSA・INPE・UK EO DataHub・CNSA・CelesTrak・JPL（DE421/SBDB/Horizons）・Wikidata・Open-Meteo などを統合し、衛星画像・軌道マップ・日食パネル・月齢マップを**画像で返しつつ**、LLM向けに構造化JSONも同時に返します。
+宇宙・天文・地球観測の公開データを **53ツール**で横断検索する MCP サーバー（Python / uv 管理）です。NASA・ESA Copernicus・JAXA・ISRO・CSA・INPE・UK EO DataHub・CNSA・CelesTrak・JPL（DE421/SBDB/Horizons）・Wikidata・Open-Meteo などを統合し、衛星画像・軌道マップ・日食パネル・月齢マップを**画像で返しつつ**、LLM向けに構造化JSONも同時に返します。
 
 **開発規約は分割ルールにあります**: `.claude/rules/`（コーディング規約・検証ゲート・データ出典）を参照してください。
 
@@ -39,7 +39,7 @@ claude mcp list   # 確認
 
 - `-s project` はリポジトリ直下に `.mcp.json` を作ります（チーム共有向け）。個人利用だけで済ませるなら `-s user`（全プロジェクトで有効）を使います。
 
-検証済みの代替コマンド（いずれも 51ツールを返して起動します）:
+検証済みの代替コマンド（いずれも 53ツールを返して起動します）:
 
 ```bash
 uv --directory /abs/path/to/space-finder-mcp run space-finder-mcp
@@ -62,7 +62,7 @@ ISSの現在位置を地球地図で →  mcp__space-finder__sat_ground_track
 
 ---
 
-## 利用可能なツール（45種）
+## 利用可能なツール（53種）
 
 | カテゴリ | 本数 | ツール |
 |:--|:--|:--|
@@ -73,6 +73,8 @@ ISSの現在位置を地球地図で →  mcp__space-finder__sat_ground_track
 | 衛星・軌道 | 5 | `sat_tle` `satellite_status` `sat_ground_track` `iss_now` `tiangong_now` |
 | 天体位置・画像合成 | 7 | `constellation_now` `sky_map_with_satellites` `solar_system_now` `solar_eclipse_series` `moon_phase_map` `planetary_orbiter_track` `planetary_rover_location_map` |
 | 観測支援・天文データ | 8 | `astronomy_weather` `astronomy_news` `eso_seeing` `cadc_observations` `alma_search` `radio_sources_now` `power_climate` `mars_rover_status` |
+| 気象衛星の実画像 | 1 | `weather_satellite_now` |
+| 宇宙・天文カレンダー | 4 | `space_calendar` `calendar_events` `calendar_event_add` `calendar_event_remove` |
 
 各ツールの引数・データ源の詳細は `README.md` のツール一覧、エージェント向け仕様は `SKILL.md` を参照。
 
@@ -99,7 +101,7 @@ uv run python scripts/check-tools.py --media-links    # 画像/音声/動画の�
 uv run python scripts/check-tools.py --concurrency    # 並列実行（single-flight・スレッド逃がし・例外漏れ）
 uv run python scripts/check-tools.py --stdio          # 実クライアント経路(stdio)で代表ツールが応答するか
 uv run python -m unittest discover -s tests          # 回帰テスト（対応済みの実バグの再発防止）
-uv run python scripts/check-tools.py                  # 全51ツール実呼び出し（数分）
+uv run python scripts/check-tools.py                  # 全53ツール実呼び出し（数分）
 uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールのみ
 ```
 
@@ -111,7 +113,7 @@ uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールの�
 - 数値変換は防御的に。**ツール入口の数値引数は必ず `input_utils.as_int` / `as_float` を通す**（不正値 `"5件"` を `int()` へ直に渡すと例外が外へ漏れる）。API応答値も同様。`d[key]` より `.get()`。
 - キャッシュは `cache.py` の `ttl_cache` / `disk_get` を使い、**エラー応答はキャッシュしない**（`skip_if=is_error_result`）。キャッシュ値を呼び出し側で書き換えるなら `deepcopy`。
 - 共通処理は `img_common.py`（フォント/JPEG/アンチメリジアン）・`surface_map.py`（天体面地図のタイル合成・等角投影・地点マーカー・画素検証）・`stac_common.py`（bbox/雲量検証）・`name_common.py`（表記ゆれ・和名→英語名・Sesame による名前→座標）・`cache.py` に集約。同じ処理を各モジュールに重複実装しない。
-- 依存追加は最小限（標準ライブラリを優先）。画像は Pillow/matplotlib を関数内で遅延 import。
+- 依存追加は最小限（標準ライブラリを優先）。Pillow / sgp4 / requests は関数内で遅延 import（起動を速く保つ）。**ただし numpy / matplotlib / skyfield は起動時に import**（遅延 import すると stdio で無応答。下記「並列」の項を参照）。
 - ドキュメント・コメントは日本語。ツールの docstring は**クライアント向け仕様**（例文・引数・認証要否を書く）。
 - **描画系ツールは `structuredContent.figure`（`schema: "figure/1"`）を返す**。視点(`view`)・主天体の置き方(`primary`：楕円は**焦点**であって中心ではない)・縮尺(`scale`)・円錐曲線(`conic`)・注記(`notes`)・自己検証(`verify`)を含め、注記は `img_common` の `figure_notes` 等で**数値から生成**する（手書きは図と文が食い違う）。`content` にも `figure_text_block()` で同じ注記を出し、docstring に「`figure.notes` は要約せず引用する」と明記。**閉じない軌道（e≥1 / a<0）を楕円として描かない**。近点が画面上で分解できない場合（超長距離の楕円の近日点が誇張した主天体円盤の内側に入る等）は `verify_curve(occluders=[(x, y, r_px)])` で上界検査へ自動切替し、その旨を注記に数値から生成する（`periapsis_resolvable: false`）。曲線に重なるラベルは描かず注記に回す。検査は `scripts/check-tools.py --figures`（超長距離楕円の経路も叩く）。加えて、**地図の上に置く情報パネルは `surface_map.panel_placement()` で現在位置マーカーを隠さない隅へ置く**（描いた後にパネルを重ねると、地図の暗幕でマーカーが消える：月面の LRO が北緯82°＝図の上端に来た実測で、左上のパネルの下に入り`marker_pixels: 0` になった）。`verify` に `panel_overlaps_marker` を残し、どの隅でも重なる小さい図ではマーカーをパネルの上に描き直して、その旨を注記に出す。
 - **メディア（画像/音声/動画）を含む応答は、メディア本体より前にアイコン付きリンクを必ず出す**（`🖼️/🎧/🎬/📄 [◯◯を開く](URL または file:///…)`）。CLI系・Android系ハーネスは `ImageContent` を描画しないため、このリンクが唯一の導線。生成画像は `save_output()` で保存し `structuredContent.image_path` にも実パスを入れる。docstring に「回答時はこのリンクをそのまま提示してください」と明記。検査は `scripts/check-tools.py --media-links`。
@@ -123,7 +125,7 @@ uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールの�
 
 1. `README.md` のツール表・「直近の更新内容」と `SKILL.md` を**同一変更内で**更新（ツール追加/削除/仕様変更時）
 2. `pyproject.toml` の `version` を更新
-3. `uv run python scripts/check-tools.py` で全51ツールが正常なことを確認
+3. `uv run python scripts/check-tools.py` で全53ツールが正常なことを確認
 4. `uv build` でパッケージ作成を確認 → `dist/` `build/` を削除
 
 ## ライセンス・データ出典

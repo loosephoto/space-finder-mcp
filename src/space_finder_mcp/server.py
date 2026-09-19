@@ -36,6 +36,8 @@ from . import tiangong as _tiangong
 from . import power as _power
 from . import eso as _eso
 from . import cadc as _cadc
+from . import mast as _mast
+from . import gcn as _gcn
 from . import skyfield_pos as _sky
 from . import news as _news
 from . import mars_rover as _mars
@@ -117,6 +119,8 @@ _reg(_power.power_climate)
 # ---- 天文観測データ (ESO パラナル / CADC カナダ) ----
 _reg(_eso.eso_seeing)
 _reg(_cadc.cadc_observations)
+_reg(_mast.mast_observations)
+_reg(_gcn.gcn_alerts)
 
 # ---- 電波天文 (ALMA Science Archive / TART, 認証不要) ----
 _reg(_alma.alma_search)
