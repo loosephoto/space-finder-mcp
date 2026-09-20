@@ -10,6 +10,7 @@ uv run python scripts/check-tools.py --fuzz           # 3'. 数値引数へ不�
 uv run python scripts/check-tools.py                  # 4. 全53ツール実呼び出し（数分）
 uv run python scripts/check-tools.py --figures        # 5. 描画系の figure/1（注記・caption・verify.ok）
 uv run python scripts/check-tools.py --media-links    # 6. 画像/音声/動画の「リンク先行」0件
+uv run python scripts/check-tools.py --fonts          # 6'. 日本語フォントの解決（Win/mac/Linux 共通・豆腐回避）
 uv run python scripts/check-tools.py --concurrency    # 7. 並列実行（single-flight・スレッド逃がし）
 uv run python scripts/check-tools.py --stdio          # 8. 実クライアント経路(stdio)で無応答なし
 uv run python -m unittest discover -s tests           # 9. 回帰テスト
@@ -26,6 +27,7 @@ uv run python scripts/check-tools.py --only sat_tle,apod   # 変更したツー�
 |:--|:--|
 | ツール追加/削除 | 全件実行（`check-tools.py`）／`README.md` ツール表・`SKILL.md`・`server.py` の登録を同期 |
 | 画像生成の変更 | 画像が出ること（`blocks` に `image` がある）＋デコード可能・非単色。**リファクタなら旧実装とバイト比較**して等価性を確認 |
+| フォント探索の変更 | `--fonts` で解決したフォントが**日本語グリフを持つ**こと（cmap 検証）。Windows のパスだけを列挙すると macOS / Linux が豆腐になる。`SPACE_FINDER_FONT` での明示指定も試す |
 | キャッシュの変更 | 2回目がキャッシュヒットすること（リクエスト数0）／**エラーが固定化しないこと**／キャッシュ値の書き換えが他呼び出しへ漏れないこと／**同じ引数の並行呼び出しが1回にまとまる（single-flight）こと** |
 | 遅延 import の追加 | **ネイティブ拡張（numpy 等）は起動前に import** する（stdio 起動後の import は無応答）。`server.py` 冒頭に追加し `--stdio` で確認 |
 | 外部APIの遮断 | 遮断（403・接続不可）を記憶して以降 fail fast する（`celestrak` 参照）。connect タイムアウト必須（blackhole で分単位に固まる） |

@@ -93,20 +93,20 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 - `content` の並びは常に「リンクを含むテキスト → `ImageContent`」なので、**画像を描けないクライアントでもリンクは必ず見えます**。
 - **機械的に検査します** — `scripts/check-tools.py --media-links`（画像ブロックより前にアイコン付きリンクが無い／`structuredContent` にURL・保存パスが無い／`image_path` のファイルが存在しない場合は exit 1。実測: 画像を返す12ツールすべて OK）。生成系の docstring には「回答時はこのリンクをそのまま提示してください」と明記しています。
 
-### 🆕 直近の更新内容（v0.32.0）
+### 🆕 直近の更新内容（v0.32.1）
 
-**「観測アーカイブ・速報・国内イベントの3層を追加」**（v0.32.0）。カレンダーに JAXA 施設公開、天文データに MAST、速報に NASA GCN を加え、**52 → 53ツール**にしました。
+**「画像内の日本語フォントを Windows / macOS / Linux 共通で解決」**（v0.32.1）。ツールの増減はありません（**53本**のまま）。
 
-- **🏛 JAXA 施設の一般公開・特別公開をカレンダーに** — ファン!ファン!JAXA!（施設見学）と宇宙科学研究所のイベント表から**施設公開だけ**を抽出（休館案内・見学規制・見学中止の告知は除外）。一覧に過去分のアーカイブが無いため **取得日を窓にして毎日取り直し**、未告知の月は「セルが空＝開催なしではない」と注記に明示します。
-- **🔭 `mast_observations`（新ツール）** — JWST・ハッブル(HST)・TESS・Kepler・GALEX の**科学アーカイブ**を、天体名（和名可・Sesame で座標解決）／座標コーン／装置（部分一致）／種別／観測日で検索。観測ID・校正レベル・フィルタに加え、`include_products=true` で FITS のダウンロードURL、`preview_image=true` で観測プレビュー画像を**チャットにインライン表示**（🖼️リンク先行）。校正用露出（BIAS/DARK）は既定で除外し、接続不可は記憶して fail fast します（MAST は混雑時に1クエリ60〜90秒）。
-- **🛰 `gcn_alerts`（新ツール）** — NASA GCN の**過渡天体速報（GCN Circulars）**を期間（1〜60日）・キーワードで新しい順に一覧し、`circular_id` で投稿者・観測時刻・本文まで返します。一覧は公開アーカイブの **HTML を主経路**（サイト内部の JSON ルートは 403 を返すことがあるためフォールバック）、本文は投稿経路の差（メール=`<pre><code>`／Webフォーム=`usa-paragraph`）を吸収して抽出。
-- **🧪 回帰テスト** — MAST 14件・GCN 13件・JAXA 施設公開 8件を追加（計84件）。メディア検査は `MEDIA_EXTRA_CALLS` を追加し `preview_image=true` の経路も機械検証します。
-- **検証** — 全53ツール実呼び出し exit 0（**47 OK／6 error はいずれも外部の一時制限**）／`--dead-code` 0／`--fuzz` 312組合せ 例外漏れ0／`--offline` exit 0／`--figures` 描画系9／`--media-links` 13経路 問題0／`--concurrency` 3/3／`--stdio` 6/6 無応答0／`unittest` 84件 OK。
+- **🈁 日本語が豆腐（□）になる不都合の修正** — 画像系ツールのフォント探索が Windows のパス（メイリオ等）だけを列挙していたため、macOS / Linux では PIL 既定フォントに落ちて図中の日本語が**すべて化けていました**。探索を **環境変数（`SPACE_FINDER_FONT` / `SPACE_FINDER_FONT_BOLD`）→ OS 標準パス → 標準フォントディレクトリの走査** に拡張し、macOS はヒラギノ角ゴシック（W3／太字 W6）、Linux は Noto Sans CJK → IPAex → IPA → VL / Takao を自動で選びます。
+- **🔍 名前ではなく cmap で検証** — 採用するフォントが**実際に日本語グリフを持っているか**をフォントの `cmap` テーブルを直接読んで確認します（DejaVu Sans のような日本語なしフォントは最後の保険に降格）。`fontTools` 等の追加依存はありません。
+- **📐 matplotlib 版（accurate）も共通化** — `sky_map_with_satellites` / `solar_system_now` の accurate 版はツールごとにフォント名を探していました。共通ヘルパー `apply_matplotlib_cjk_font()` が候補チェーンを rcParams に設定します（`pyplot` を import しないため stdio 起動後の無応答も回避）。
+- **🧪 検証** — 新ゲート `scripts/check-tools.py --fonts`（日本語グリフを持たないフォントを掴んでいれば exit 1）と回帰テスト8件を追加（**計94件**）。全53ツール実呼び出し exit 0（46 OK／7 error は外部の一時制限）／`--dead-code` 0／`--fuzz` 312組合せ 例外漏れ0／`--offline` exit 0／`--figures` 描画系9 問題0／`--media-links` 問題0／`--concurrency` 3/3／`--stdio` 6/6 無応答0／`unittest` 94件 OK。
 
 登録ツールは **53本**。
 
 ### 以前の更新
 
+- **v0.32.0** — **観測アーカイブ・速報・国内イベントの3層を追加（52→53ツール）**: `mast_observations`（MAST・プレビュー画像をインライン表示）・`gcn_alerts`（GCN Circulars・HTML 主経路）・カレンダーへの **JAXA 施設公開**（告知済みのみ・取得日を窓に毎日更新）。
 - **v0.31.1** — **蓄積ストアの保持期限を全経路で適用**（`calendar_events` でも prune・`KEEP_PAST_DAYS` を単一出典・有効なユーザー予定は対象外）。`figure.notes` に保持期限を定数から生成。ゲートは予定系4ツールに専用引数を与え、書き込みを一時ストアへ逃がして実経路を検証（計49件）。
 - **v0.31.0** — **宇宙・天文イベントカレンダー（4ツール）**。`space_calendar`（月グリッド＋`structuredContent.events`。打ち上げ=LL2・天文現象=DE421+Skyfield・公開イベント=国立天文台・自分の予定=ローカル）と `calendar_events` / `calendar_event_add` / `calendar_event_remove`。蓄積ストアを一次ソースにした read-through（窓 [M-1, M+2]・未取得の月だけ取得。初回 8〜11秒／2回目以降 API 0回・0.4秒）。
 - **v0.30.2** — LLM の並列ツール呼び出しへの対応（全47ツールを `anyio` のワーカースレッド実行・single-flight・`RENDER_LOCK`。実測 4並列 2.55s→2.47s）と、stdio 無応答（numpy の起動時 import）・外部API遮断での固まり（fail fast）・メディアリンク抜け・情報パネルが現在位置マーカーを隠す描画バグの修正。
@@ -118,6 +118,7 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 
 ### 前提
 - [uv](https://docs.astral.sh/uv/)（Python 3.11+）
+- 画像を返すツールの日本語表示には OS の日本語フォントを使います（Windows: メイリオ / macOS: ヒラギノ / Linux: Noto CJK 等。無い環境では下記「日本語フォント」参照）
 
 ### インストール
 
@@ -136,6 +137,39 @@ uv run space-finder-mcp
 ```
 
 > ローカルで `uv run` を使うため、`uv` が `PATH` にある必要があります。
+
+### 日本語フォント（画像内の文字）
+
+画像を返すツール（`sat_ground_track` / `moon_phase_map` / `solar_eclipse_series` /
+`sky_map_with_satellites` 等）は、図中の日本語を描くために **Windows / macOS / Linux それぞれの
+標準日本語フォント** を自動で探します（`img_common.py`）。探索順は
+**(1) 環境変数 → (2) OS 標準パス → (3) 標準フォントディレクトリの走査** で、
+採用する前に **そのフォントが実際に日本語グリフを持っているかを cmap で検証**します
+（名前だけでは判定できないため。例: DejaVu Sans は日本語なし）。
+
+| OS | 主な採用フォント |
+|---|---|
+| Windows | メイリオ（`meiryo.ttc`）/ 太字はメイリオ Bold（`meiryob.ttc`）→ Yu Gothic → MS Gothic |
+| macOS | ヒラギノ角ゴシック W3（太字は W6）→ Arial Unicode MS |
+| Linux | Noto Sans CJK JP → IPAex ゴシック → IPA ゴシック → VL ゴシック / Takao ゴシック |
+
+日本語フォントが1つも入っていない環境（最小構成の Linux 等）では画像の日本語が**豆腐（□）**に
+なります。その場合は日本語フォント（例: `fonts-noto-cjk` / `fonts-ipaexfont-gothic`）を入れるか、
+環境変数で明示指定してください。
+
+```bash
+export SPACE_FINDER_FONT="/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+export SPACE_FINDER_FONT_BOLD="/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
+```
+
+現在の解決結果は検証ゲートで確認できます（日本語グリフを持たないフォントを掴んでいれば exit 1）。
+
+```bash
+uv run python scripts/check-tools.py --fonts
+```
+
+`engine="accurate"`（matplotlib）の `sky_map_with_satellites` / `solar_system_now` も同じフォントを使います
+（`img_common.apply_matplotlib_cjk_font()`）。
 
 ### （任意）NASA APIキー
 

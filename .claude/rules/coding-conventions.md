@@ -7,6 +7,7 @@
 - `structuredContent` = LLM向け純粋JSON（LLMが表示文を要約しても元データを失わない）
 - ツールの docstring は**クライアント向け仕様**として書く（例文・引数・認証要否・返却形式）。
 - **メディア（画像/音声/動画）は本体より前にアイコン付きリンク**を出す（`🖼️/🎧/🎬 [◯を開く](URL または file:///…)`）。CLI系・Android系ハーネスは `ImageContent` を描画しないため、このリンクが唯一の導線。生成画像は `save_output()` で保存し `structuredContent.image_path` にも実パスを入れる。検査は `--media-links`。
+- **画像内の日本語フォントは OS 非依存で解決**する（`img_common.load_font()`：環境変数 → OS 標準パス → フォントディレクトリ走査。採用前に **cmap で日本語グリフを検証**）。matplotlib 経路は `apply_matplotlib_cjk_font()`（pyplot 非依存）。検査は `--fonts`。
 - **回答文の保証範囲を混同しない**: JSON（`structuredContent`）と `content` の数値・画像・リンクは**サーバー側**で決まりモデル非依存、文章化はホスト側モデルの裁量（`SKILL.md` 注意事項10）。
 
 ## 例外・入力の防御

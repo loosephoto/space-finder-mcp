@@ -686,6 +686,49 @@ def fuzz_args(only=None, timeout=60, live=False) -> list:
     return rows
 
 
+def fonts_report() -> list:
+    """日本語フォントの解決結果を検査する（Windows / macOS / Linux 共通の探索）。
+
+    画像内の日本語が豆腐（□）にならないよう、解決したフォントが実際に日本語グリフを
+    持つこと（cmap を直接確認）と、matplotlib 経路（accurate 版）が同じフォントを
+    掴むことを確認する。日本語フォントが無い環境では SPACE_FINDER_FONT で指定する。
+    """
+    from space_finder_mcp import img_common as ic
+    rows = []
+    status = ic.font_status()
+    for key, label in (("regular", "標準"), ("bold", "太字")):
+        info = status.get(key) or {}
+        ok = info.get("japanese_glyphs") is True
+        rows.append({
+            "check": "フォント({})".format(label),
+            "status": "OK" if ok else "NG",
+            "path": info.get("path"),
+            "source": info.get("source"),
+            "detail": "" if ok else (
+                "日本語フォントを解決できません（画像の日本語が豆腐になります）。"
+                "そのOSの日本語フォントを入れるか、環境変数 SPACE_FINDER_FONT で指定してください"),
+        })
+    family = ic.apply_matplotlib_cjk_font()
+    path = None
+    try:
+        from matplotlib import font_manager, rcParams
+        fp = font_manager.FontProperties(family=rcParams["font.sans-serif"])
+        path = font_manager.findfont(fp, fallback_to_default=False)
+    except Exception:
+        path = None
+    ok = bool(path) and ic._cmap_has_glyphs(path, ic._CJK_PROBE) is True
+    rows.append({
+        "check": "matplotlib(accurate版)",
+        "status": "OK" if ok else "NG",
+        "path": path,
+        "source": family,
+        "detail": "" if ok else (
+            "matplotlib の日本語フォントを解決できません"
+            "（sky_overlay / solar_system の accurate 版が豆腐になります）"),
+    })
+    return rows
+
+
 def scan_dead_code() -> list:
     """未参照の定義・未使用 import を返す（__future__ は除外）。"""
     files = sorted(f for f in os.listdir(SRC + os.sep + "space_finder_mcp") if f.endswith(".py"))
@@ -734,6 +777,8 @@ def main() -> int:
                     help="並列ツール呼び出し（single-flight・実際に並行・例外漏れなし）を検査（固定の代表セット）")
     ap.add_argument("--media-links", action="store_true",
                     help="メディア（画像/音声/動画）を返すツールの「アイコン付きリンク先行」を検査")
+    ap.add_argument("--fonts", action="store_true",
+                    help="日本語フォントの解決（Windows/macOS/Linux 共通）を検査。解決したフォントが日本語グリフを持つか（豆腐回避）")
     ap.add_argument("--only", help="カンマ区切りのツール名で絞り込み")
     ap.add_argument("--timeout", type=float, default=180.0, help="1ツールあたりの制限秒（既定180）")
     ap.add_argument("--json", action="store_true", help="JSONで出力")
@@ -749,6 +794,23 @@ def main() -> int:
                 print("  {file}:{line} {kind}: {name}".format(**x))
             print("  検出数:", len(found))
         return 1 if found else 0
+
+    if args.fonts:
+        rows = fonts_report()
+        bad = [r for r in rows if r["status"] != "OK"]
+        if args.json:
+            print(json.dumps({"mode": "fonts", "rows": rows, "problems": bad},
+                             ensure_ascii=False, indent=2))
+        else:
+            print("=== 日本語フォントの検査（Windows / macOS / Linux 共通）===")
+            for r in rows:
+                print("  {m} {c:24s} path={p} source={s}".format(
+                    m="ok " if r["status"] == "OK" else "NG ",
+                    c=r["check"], p=r["path"], s=r["source"]))
+                if r["detail"]:
+                    print("      ! " + r["detail"])
+            print("  検査項目:", len(rows), "/ 問題:", len(bad))
+        return 1 if bad else 0
 
     only = set(x.strip() for x in args.only.split(",")) if args.only else None
 

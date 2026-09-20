@@ -22,9 +22,9 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import disk_get
 from .celestrak import fetch_tle
-from .img_common import (RENDER_LOCK, as_image, body_rgb, encode_jpeg, figure_notes,
-                         figure_payload, figure_text_block, load_font,
-                         media_link_line, pixel_near, primary_spec, rgb_hex,
+from .img_common import (RENDER_LOCK, apply_matplotlib_cjk_font, as_image, body_rgb,
+                         encode_jpeg, figure_notes, figure_payload, figure_text_block,
+                         load_font, media_link_line, pixel_near, primary_spec, rgb_hex,
                          save_output, scale_spec, symbol_rgb, view_spec)
 from .input_utils import as_float
 
@@ -254,14 +254,12 @@ def _render_accurate(scene):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import numpy as np
-    from matplotlib import font_manager
     from matplotlib.lines import Line2D
     from matplotlib.transforms import offset_copy
-    for f in font_manager.fontManager.ttflist:
-        if f.name in ("Noto Sans JP", "Meiryo", "Yu Gothic"):
-            plt.rcParams["font.family"] = f.name
-            break
-    plt.rcParams["axes.unicode_minus"] = False
+    # 日本語フォントは OS 非依存の共通ヘルパーで設定する（Windows / macOS / Linux）。
+    # ここで個別にフォント名を探すと macOS（ヒラギノ）・Linux（Noto CJK / IPA）で
+    # 見つからず、日本語が豆腐（□）になる。
+    apply_matplotlib_cjk_font()
 
     fig = plt.figure(figsize=(9.5, 9.5))
     ax = fig.add_subplot(111, polar=True)

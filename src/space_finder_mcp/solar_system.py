@@ -28,10 +28,11 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import TTL_DAILY, ttl_cache
 from .name_common import split_names as _split_object_names
-from .img_common import (RENDER_LOCK, body_rgb, conic_from_elements, figure_notes,
-                         figure_payload, figure_text_block, load_font,
-                         media_link_line, primary_spec, rgb_hex, save_output,
-                         scale_spec, symbol_rgb, verify_curve, view_spec)
+from .img_common import (RENDER_LOCK, apply_matplotlib_cjk_font, body_rgb,
+                         conic_from_elements, figure_notes, figure_payload,
+                         figure_text_block, load_font, media_link_line, primary_spec,
+                         rgb_hex, save_output, scale_spec, symbol_rgb, verify_curve,
+                         view_spec)
 
 _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
 os.makedirs(_DATA_DIR, exist_ok=True)
@@ -554,12 +555,9 @@ def _render_accurate(scene):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import numpy as np
-    from matplotlib import font_manager
-    for f in font_manager.fontManager.ttflist:
-        if f.name in ("Noto Sans JP", "Meiryo", "Yu Gothic"):
-            plt.rcParams["font.family"] = f.name
-            break
-    plt.rcParams["axes.unicode_minus"] = False
+    # 日本語フォントは OS 非依存の共通ヘルパーで設定する（Windows / macOS / Linux）。
+    # 個別にフォント名を探すと macOS（ヒラギノ）・Linux（Noto CJK / IPA）で見つからない。
+    apply_matplotlib_cjk_font()
 
     fig, ax = plt.subplots(figsize=(9.5, 9.5))
     ax.set_facecolor("#0b1026")

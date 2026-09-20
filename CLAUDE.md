@@ -98,6 +98,7 @@ uv run python scripts/check-tools.py --dead-code      # デッドコード走査
 uv run python scripts/check-tools.py --offline        # ネットワーク全断で例外漏れを検査
 uv run python scripts/check-tools.py --fuzz           # 数値引数へ不正値を注入（例外漏れ0を維持）
 uv run python scripts/check-tools.py --media-links    # 画像/音声/動画のリンク先行（0件を維持）
+uv run python scripts/check-tools.py --fonts          # 日本語フォントの解決（Win/mac/Linux 共通・豆腐回避。日本語グリフ無しで exit 1）
 uv run python scripts/check-tools.py --concurrency    # 並列実行（single-flight・スレッド逃がし・例外漏れ）
 uv run python scripts/check-tools.py --stdio          # 実クライアント経路(stdio)で代表ツールが応答するか
 uv run python -m unittest discover -s tests          # 回帰テスト（対応済みの実バグの再発防止）
@@ -112,6 +113,7 @@ uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールの�
 - 各ツールは必ず `CallToolResult` を返す（**例外を外へ漏らさない**）。`content` に人間向け表示（画像は `ImageContent`）、`structuredContent` に LLM向け純粋JSON。
 - 数値変換は防御的に。**ツール入口の数値引数は必ず `input_utils.as_int` / `as_float` を通す**（不正値 `"5件"` を `int()` へ直に渡すと例外が外へ漏れる）。API応答値も同様。`d[key]` より `.get()`。
 - キャッシュは `cache.py` の `ttl_cache` / `disk_get` を使い、**エラー応答はキャッシュしない**（`skip_if=is_error_result`）。キャッシュ値を呼び出し側で書き換えるなら `deepcopy`。
+- **日本語フォントは OS 非依存で解決する**（画像内の日本語が豆腐=□になるのを防ぐ）。`img_common.load_font()` が *環境変数 `SPACE_FINDER_FONT`(`_BOLD`) → OS 標準パス（Windows メイリオ / macOS ヒラギノ / Linux Noto CJK・IPA・VL・Takao）→ 標準フォントディレクトリの走査* の順に探し、採用前に **cmap を読んで日本語グリフの有無を検証**する（名前では判定できない。例: DejaVu Sans は日本語なし）。Windows のパスだけを列挙すると macOS / Linux で PIL 既定フォントに落ちて日本語が全部化ける。matplotlib 経路（accurate 版）は各ツールでフォント名を列挙せず `img_common.apply_matplotlib_cjk_font()` を使う（pyplot を import せず rcParams を設定する）。検査は `scripts/check-tools.py --fonts`。
 - 共通処理は `img_common.py`（フォント/JPEG/アンチメリジアン）・`surface_map.py`（天体面地図のタイル合成・等角投影・地点マーカー・画素検証）・`stac_common.py`（bbox/雲量検証）・`name_common.py`（表記ゆれ・和名→英語名・Sesame による名前→座標）・`cache.py` に集約。同じ処理を各モジュールに重複実装しない。
 - 依存追加は最小限（標準ライブラリを優先）。Pillow / sgp4 / requests は関数内で遅延 import（起動を速く保つ）。**ただし numpy / matplotlib / skyfield は起動時に import**（遅延 import すると stdio で無応答。下記「並列」の項を参照）。
 - ドキュメント・コメントは日本語。ツールの docstring は**クライアント向け仕様**（例文・引数・認証要否を書く）。

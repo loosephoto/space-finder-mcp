@@ -3,7 +3,7 @@
 各マップツール（planetary_map / planetary_rover / satellite_map / sky_overlay /
 solar_system / solar_eclipse）が個別に持っていた以下を1箇所に集約する:
 
-- 日本語フォント探索（Windows のメイリオ等 → 無ければ PIL 既定フォント）
+- 日本語フォント探索（Windows / macOS / Linux の標準日本語フォント → 無ければ PIL 既定フォント）
 - JPEG エンコード（上限バイト数を超えたら縮小して再エンコード）
 - 経度±180°（アンチメリジアン）をまたぐ軌道線の分割
 
@@ -11,9 +11,11 @@ PIL は重いので各関数内で遅延 import する（既存の各ツール�
 """
 from __future__ import annotations
 
+import glob as _glob
 import io
 import math
 import os
+import sys
 import threading
 import time
 import urllib.parse
@@ -29,13 +31,383 @@ from .cache import CACHE_ROOT
 # このロックで直列化する（Pillow 合成だけの経路はロック不要なので触らない）。
 RENDER_LOCK = threading.RLock()
 
-# フォント探索順（先頭ほど優先）。bold はメイリオ Bold を最優先にする。
+# ---------- 日本語フォント探索（Windows / macOS / Linux 共通） ----------
+# 画像内の日本語が「豆腐（□）」になるのを防ぐため、OS ごとの標準日本語フォントを順に探す。
+# Windows 固定パスだけを見ると macOS / Linux では PIL 既定フォントに落ちて日本語が全部化ける。
+#
+# 探索順（先頭ほど優先）:
+#   1. 環境変数 SPACE_FINDER_FONT / SPACE_FINDER_FONT_BOLD（明示指定は無条件で尊重）
+#   2. OS 標準パス（下表）
+#   3. 標準フォントディレクトリの走査（ディストリビューション差を吸収）
+# 候補は「実際に日本語グリフを持っているか」を cmap で検証してから採用する
+# （名前だけでは判定できない。例: DejaVu Sans は日本語なし）。
+_FONT_ENV = {False: "SPACE_FINDER_FONT", True: "SPACE_FINDER_FONT_BOLD"}
+_FONT_ENV_COMMON = "SPACE_FINDER_FONT"
+# 日本語グリフの有無を判定する代表文字（cmap を直接調べる）
+_CJK_PROBE = ("日", "曜", "語")
+
+_WIN_FONTS = os.path.join(os.environ.get("WINDIR", "C:/Windows"), "Fonts")
+
 _FONT_CANDIDATES = {
-    False: ("C:/Windows/Fonts/meiryo.ttc", "C:/Windows/Fonts/yugothb.ttc",
-            "C:/Windows/Fonts/msgothic.ttc"),
-    True: ("C:/Windows/Fonts/meiryob.ttc", "C:/Windows/Fonts/yugothb.ttc",
-           "C:/Windows/Fonts/msgothic.ttc"),
+    False: (
+        # Windows
+        os.path.join(_WIN_FONTS, "meiryo.ttc"),
+        os.path.join(_WIN_FONTS, "YuGothR.ttc"),
+        os.path.join(_WIN_FONTS, "yugothb.ttc"),
+        os.path.join(_WIN_FONTS, "msgothic.ttc"),
+        # macOS（ヒラギノ角ゴシック。10.13 以降は日本語ファイル名）
+        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+        "/System/Library/Fonts/ヒラギノ角ゴ ProN W3.otf",
+        "/System/Library/Fonts/Hiragino Sans W3.ttc",
+        "/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+        "/Library/Fonts/ヒラギノ角ゴ ProN W3.otf",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        # Linux（Noto CJK → IPAex → IPA → VL/Takao）
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
+        "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf",
+        "/usr/share/fonts/truetype/ipaexfont-gothic/ipaexg.ttf",
+        "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+        "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+        "/usr/share/fonts/truetype/vlgothic/VL-Gothic-Regular.ttf",
+        "/usr/share/fonts/truetype/takao-gothic/TakaoPGothic.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",   # 日本語なし（最後の保険）
+    ),
+    True: (
+        # Windows
+        os.path.join(_WIN_FONTS, "meiryob.ttc"),
+        os.path.join(_WIN_FONTS, "YuGothB.ttc"),
+        os.path.join(_WIN_FONTS, "yugothb.ttc"),
+        os.path.join(_WIN_FONTS, "msgothic.ttc"),
+        # macOS（W6 が太字相当）
+        "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
+        "/System/Library/Fonts/ヒラギノ角ゴ ProN W6.otf",
+        "/System/Library/Fonts/Hiragino Sans W6.ttc",
+        "/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
+        "/Library/Fonts/ヒラギノ角ゴ ProN W6.otf",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",   # 太字が無ければ W3 で代用
+        # Linux
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Bold.otf",
+        "/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf",
+        "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf",
+        "/usr/share/fonts/truetype/ipaexfont-gothic/ipaexg.ttf",
+        "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+        "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+        "/usr/share/fonts/truetype/vlgothic/VL-Gothic-Regular.ttf",
+        "/usr/share/fonts/truetype/takao-gothic/TakaoPGothic.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",   # 日本語なし（最後の保険）
+    ),
 }
+
+# 標準フォントディレクトリを走査するときのファイル名パターン（(標準, 太字) の優先順）。
+# パッケージ構成・配置はディストリビューションごとに変わるので、既知パスだけで判定しない。
+_FONT_FAMILY_GLOBS = (
+    ("ヒラギノ角ゴシック W3.ttc", "ヒラギノ角ゴシック W6.ttc"),
+    ("ヒラギノ角ゴ ProN W3.otf", "ヒラギノ角ゴ ProN W6.otf"),
+    ("Hiragino*W3.ttc", "Hiragino*W6.ttc"),
+    ("NotoSansCJKjp-Regular.otf", "NotoSansCJKjp-Bold.otf"),
+    ("NotoSansCJK-Regular.ttc", "NotoSansCJK-Bold.ttc"),
+    ("NotoSansJP-Regular.otf", "NotoSansJP-Bold.otf"),
+    ("NotoSansJP-Regular.ttf", "NotoSansJP-Bold.ttf"),
+    ("NotoSansCJKjp*.otf", "NotoSansCJKjp*.otf"),
+    ("NotoSansCJK*.ttc", "NotoSansCJK*.ttc"),
+    ("ipaexg.ttf", "ipaexg.ttf"),
+    ("ipag.ttf", "ipagp.ttf"),
+    ("fonts-japanese-gothic.ttf", "fonts-japanese-gothic.ttf"),
+    ("VL-Gothic-Regular.ttf", "VL-Gothic-Regular.ttf"),
+    ("TakaoPGothic.ttf", "TakaoPGothic.ttf"),
+    ("meiryo.ttc", "meiryob.ttc"),
+    ("YuGothR.ttc", "YuGothB.ttc"),
+    ("msgothic.ttc", "msmincho.ttc"),
+    ("Arial Unicode.ttf", "Arial Unicode.ttf"),
+    ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf"),   # 日本語なし（最後の保険）
+)
+
+# matplotlib に渡すフォントファミリ名の候補（先頭ほど優先。PIL 側で見つからない場合の保険）
+_MPL_FAMILY_CANDIDATES = (
+    "Noto Sans CJK JP", "Noto Sans JP", "Source Han Sans JP", "Hiragino Sans",
+    "Hiragino Kaku Gothic ProN", "ヒラギノ角ゴシック", "Yu Gothic", "Meiryo",
+    "IPAexGothic", "IPAGothic", "TakaoPGothic", "VL Gothic", "Arial Unicode MS",
+)
+def _font_search_dirs() -> List[str]:
+    """OS 標準のフォントディレクトリ（存在しないものは無視してよい）。"""
+    if os.name == "nt":
+        return [os.path.join(os.environ.get("WINDIR", "C:/Windows"), "Fonts"),
+                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "Windows", "Fonts")]
+    if sys.platform == "darwin":
+        return ["/System/Library/Fonts", "/System/Library/Fonts/Supplemental",
+                "/Library/Fonts", os.path.expanduser("~/Library/Fonts")]
+    return ["/usr/share/fonts", "/usr/local/share/fonts", "/usr/share/fonts/truetype",
+            "/usr/share/fonts/opentype", os.path.expanduser("~/.local/share/fonts"),
+            os.path.expanduser("~/.fonts")]
+
+
+@lru_cache(maxsize=4)
+def _scan_font_dirs(bold: bool) -> Tuple[str, ...]:
+    """標準フォントディレクトリを走査して日本語フォント候補を返す（環境差の吸収）。"""
+    out: List[str] = []
+    dirs = [d for d in _font_search_dirs() if d and os.path.isdir(d)]
+    for reg, bld in _FONT_FAMILY_GLOBS:
+        pat = bld if bold else reg
+        if not pat:
+            continue
+        for d in dirs:
+            try:
+                hits = sorted(_glob.glob(os.path.join(d, "**", pat), recursive=True))
+            except Exception:
+                continue
+            for p in hits:
+                if p not in out:
+                    out.append(p)
+    return tuple(out)
+
+
+def _cmap_subtable_has(fh, off: int, chars) -> Optional[bool]:
+    """cmap サブテーブル（format 0/4/6/12）に chars が揃っているか。None=判定不能。"""
+    fh.seek(off)
+    fmt_b = fh.read(2)
+    if len(fmt_b) < 2:
+        return None
+    fmt = int.from_bytes(fmt_b, "big")
+    cps = [ord(c) for c in chars]
+
+    if fmt == 4:
+        fh.seek(off + 2)
+        length = int.from_bytes(fh.read(2), "big")
+        if length < 16 or length > 8_000_000:
+            return None
+        fh.seek(off)
+        data = fh.read(length)
+        if len(data) < length:
+            return None
+        n = int.from_bytes(data[6:8], "big") // 2
+        if n <= 0:
+            return None
+        ends_b, starts_b = 14, 14 + n * 2 + 2
+        delta_b, ro_b = starts_b + n * 2, starts_b + n * 4
+        for cp in cps:
+            seg = None
+            for k in range(n):
+                if int.from_bytes(data[ends_b + k * 2: ends_b + k * 2 + 2], "big") >= cp:
+                    seg = k
+                    break
+            if seg is None:
+                return False
+            start = int.from_bytes(data[starts_b + seg * 2: starts_b + seg * 2 + 2], "big")
+            if cp < start:
+                return False
+            ro = int.from_bytes(data[ro_b + seg * 2: ro_b + seg * 2 + 2], "big")
+            if ro == 0:
+                delta = int.from_bytes(data[delta_b + seg * 2: delta_b + seg * 2 + 2], "big",
+                                       signed=True)
+                if ((cp + delta) & 0xFFFF) == 0:
+                    return False
+            else:
+                addr = ro_b + seg * 2 + ro + (cp - start) * 2
+                if addr + 2 > len(data):
+                    return False
+                if int.from_bytes(data[addr: addr + 2], "big") == 0:
+                    return False
+        return True
+
+    if fmt == 12:
+        fh.seek(off + 12)
+        ng_b = fh.read(4)
+        if len(ng_b) < 4:
+            return None
+        ng = int.from_bytes(ng_b, "big")
+        if ng <= 0 or ng > 500_000:
+            return None
+        fh.seek(off + 16)
+        groups = fh.read(ng * 12)
+        if len(groups) < ng * 12:
+            return None
+        for cp in cps:
+            lo, hi, ok = 0, ng - 1, False
+            while lo <= hi:
+                mid = (lo + hi) // 2
+                s = int.from_bytes(groups[mid * 12: mid * 12 + 4], "big")
+                e = int.from_bytes(groups[mid * 12 + 4: mid * 12 + 8], "big")
+                if cp < s:
+                    hi = mid - 1
+                elif cp > e:
+                    lo = mid + 1
+                else:
+                    ok = int.from_bytes(groups[mid * 12 + 8: mid * 12 + 12], "big") != 0
+                    break
+            if not ok:
+                return False
+        return True
+
+    if fmt == 6:
+        fh.seek(off + 6)
+        hdr = fh.read(4)
+        if len(hdr) < 4:
+            return None
+        first, count = int.from_bytes(hdr[0:2], "big"), int.from_bytes(hdr[2:4], "big")
+        fh.seek(off + 10)
+        gids = fh.read(count * 2)
+        if len(gids) < count * 2:
+            return None
+        for cp in cps:
+            idx = cp - first
+            if idx < 0 or idx >= count or int.from_bytes(gids[idx * 2: idx * 2 + 2], "big") == 0:
+                return False
+        return True
+
+    if fmt == 0:
+        fh.seek(off + 6)
+        data = fh.read(256)
+        if len(data) < 256:
+            return None
+        for cp in cps:
+            if cp > 255 or data[cp] == 0:
+                return False
+        return True
+
+    return None
+
+def _cmap_has_glyphs(path: str, chars) -> Optional[bool]:
+    """フォントファイルが chars のグリフを全て持つか調べる（True/False/None=判定不能）。
+
+    True=あり / False=欠けている（その文字は豆腐になる）/ None=未対応形式・読めない。
+    fontTools 等の追加依存を足さず、cmap テーブルだけを最小限読む。
+    """
+    if not path:
+        return False
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(12)
+            if len(head) < 12:
+                return None
+            if head[:4] == b"ttcf":                      # TrueType Collection
+                fh.seek(12)
+                sfnt = int.from_bytes(fh.read(4), "big")
+            elif head[:4] in (b"\x00\x01\x00\x00", b"OTTO", b"true"):
+                sfnt = 0
+            else:
+                return None
+            fh.seek(sfnt + 4)
+            num_tables = int.from_bytes(fh.read(2), "big")
+            fh.seek(sfnt + 12)
+            cmap_off = None
+            for _ in range(num_tables):
+                rec = fh.read(16)
+                if len(rec) < 16:
+                    return None
+                if rec[:4] == b"cmap":
+                    cmap_off = int.from_bytes(rec[8:12], "big")
+                    break
+            if cmap_off is None:
+                return None
+            fh.seek(cmap_off + 2)
+            n_sub = int.from_bytes(fh.read(2), "big")
+            subs = []
+            for _ in range(n_sub):
+                rec = fh.read(8)
+                if len(rec) < 8:
+                    break
+                subs.append((int.from_bytes(rec[0:2], "big"),
+                             int.from_bytes(rec[2:4], "big"),
+                             int.from_bytes(rec[4:8], "big")))
+            # Unicode サブテーブルを優先（(3,10)=BMP 外も含む → (3,1) → (0,*)）
+            prefer = {(3, 10): 0, (3, 1): 1}
+            subs.sort(key=lambda s: prefer.get((s[0], s[1]), 2 if s[0] == 0 else 3))
+            for _pid, _eid, off in subs:
+                res = _cmap_subtable_has(fh, cmap_off + off, chars)
+                if res is not None:
+                    return res
+            return None
+    except Exception:
+        return None
+
+@lru_cache(maxsize=4)
+def _resolve_font(bold: bool) -> Tuple[Optional[str], str]:
+    """日本語フォントのパスと入手元（env / platform / scan / none）を返す。
+
+    日本語グリフを持たないフォントは後回しにし、他に候補が無い場合だけ最後の保険として
+    使う（例: 日本語フォント未導入の Linux で DejaVu Sans）。
+    """
+    env = os.environ.get(_FONT_ENV[bool(bold)]) or os.environ.get(_FONT_ENV_COMMON)
+    if env and os.path.isfile(env):
+        return os.path.abspath(env), "env"           # 明示指定は無条件で尊重する
+    fallback: Optional[Tuple[str, str]] = None
+    for src, cands in (("platform", _FONT_CANDIDATES[bool(bold)]),
+                       ("scan", tuple(_scan_font_dirs(bool(bold))))):
+        for p in cands:
+            if not p or not os.path.isfile(p):
+                continue
+            has = _cmap_has_glyphs(p, _CJK_PROBE)
+            if has:
+                return p, src
+            if fallback is None:
+                fallback = (p, src)
+    return fallback if fallback else (None, "none")
+
+
+def font_status() -> dict:
+    """この環境で解決した日本語フォントの状態を返す（トラブルシュート・検証用）。
+
+    japanese_glyphs が True でない場合、画像内の日本語は豆腐（□）になる。
+    環境変数 SPACE_FINDER_FONT / SPACE_FINDER_FONT_BOLD で明示指定できる
+    （検証は scripts/check-tools.py --fonts）。
+    """
+    out = {
+        "platform": sys.platform,
+        "env": {k: v for k, v in (("SPACE_FINDER_FONT", os.environ.get("SPACE_FINDER_FONT")),
+                                  ("SPACE_FINDER_FONT_BOLD",
+                                   os.environ.get("SPACE_FINDER_FONT_BOLD"))) if v},
+        "regular": None,
+        "bold": None,
+    }
+    for bold in (False, True):
+        path, src = _resolve_font(bool(bold))
+        out["bold" if bold else "regular"] = {
+            "path": path,
+            "source": src,
+            "japanese_glyphs": _cmap_has_glyphs(path, _CJK_PROBE) if path else False,
+        }
+    return out
+
+def apply_matplotlib_cjk_font() -> Optional[str]:
+    """matplotlib の rcParams に日本語フォントを設定する（Windows / macOS / Linux 共通）。
+
+    sky_overlay / solar_system の accurate 版（matplotlib）が使う。Pillow 側と
+    同じ探索結果（_resolve_font）を最優先にし、無ければ matplotlib のフォント一覧から
+    日本語ファミリを選ぶ。戻り値は設定したファミリ名（見つからなければ None）。
+
+    matplotlib.pyplot は import しない（rcParams は pyplot 無しでも触れる。stdio 起動後の
+    pyplot import はこの環境で HANG するため、呼び出し側が import 済みの rcParams を共有する）。
+    """
+    from matplotlib import rcParams
+    try:
+        from matplotlib import font_manager
+    except Exception:                               # pragma: no cover - matplotlib 欠如時
+        return None
+
+    family: Optional[str] = None
+    path, _src = _resolve_font(False)
+    if path:
+        try:
+            font_manager.fontManager.addfont(path)   # matplotlib に登録（重複は無視される）
+            family = font_manager.FontProperties(fname=path).get_name()
+        except Exception:
+            family = None
+    if not family:                                   # PIL 側で見つからない環境の保険
+        have = {f.name for f in font_manager.fontManager.ttflist}
+        family = next((n for n in _MPL_FAMILY_CANDIDATES if n in have), None)
+
+    chain = ([family] if family else []) + [n for n in _MPL_FAMILY_CANDIDATES if n != family]
+    rcParams["font.family"] = "sans-serif"
+    rcParams["font.sans-serif"] = chain + ["DejaVu Sans"]
+    rcParams["axes.unicode_minus"] = False
+    return family
 
 
 # ---------- 天体・記号の表示色（描画系ツール共通の単一の出典） ----------
@@ -85,17 +457,23 @@ def rgb_hex(rgb) -> str:
 
 @lru_cache(maxsize=128)
 def load_font(sz: int, bold: bool = False):
-    """日本語 TrueType フォントを返す（見つからなければ PIL 既定フォント）。
+    """日本語 TrueType フォントを返す（Windows / macOS / Linux 共通）。
 
-    各ツールが個別実装していたフォント探索の共通版。サイズ・太さ単位で
-    lru_cache するため、同一描画内での再ロードが発生しない。
+    各ツールが個別実装していたフォント探索の共通版。探索順は `_resolve_font`
+    （環境変数 → OS 標準パス → 標準フォントディレクトリ走査）で、日本語グリフの
+    有無を cmap で確認してから採用する。サイズ・太さ単位で lru_cache するため、
+    同一描画内での再ロードが発生しない。
+
+    どの OS でも日本語フォントが見つからない環境では PIL 既定フォントに落ちる
+    （その場合日本語は豆腐になる。状態は `font_status()` で確認できる）。
     """
     from PIL import ImageFont
-    for p in _FONT_CANDIDATES[bool(bold)]:
+    path, _src = _resolve_font(bool(bold))
+    if path:
         try:
-            return ImageFont.truetype(p, sz)
+            return ImageFont.truetype(path, sz)
         except Exception:
-            continue
+            pass
     return ImageFont.load_default()
 
 

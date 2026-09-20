@@ -41,6 +41,7 @@ uv run python scripts/check-tools.py --dead-code      # 未参照定義・未使
 uv run python scripts/check-tools.py --offline        # ネットワーク全断で例外漏れを検査
 uv run python scripts/check-tools.py --fuzz           # 数値引数へ不正値を注入（例外漏れ0を維持）
 uv run python scripts/check-tools.py --media-links    # 画像/音声/動画のリンク先行（0件を維持）
+uv run python scripts/check-tools.py --fonts          # 日本語フォントの解決（Win/mac/Linux 共通・豆腐回避。日本語グリフ無しで exit 1）
 uv run python scripts/check-tools.py --concurrency    # 並列実行（single-flight・スレッド逃がし・例外漏れ）
 uv run python scripts/check-tools.py --stdio          # 実クライアント経路(stdio)で代表ツールが応答するか
 uv run python -m unittest discover -s tests          # 回帰テスト（対応済みの実バグの再発防止）
@@ -69,6 +70,15 @@ uv run python scripts/check-tools.py                  # 全53ツール実呼び�
 
 15. **宇宙・天文カレンダーの蓄積ストアは `%LOCALAPPDATA%\space-finder-mcp\`（cache の Temp 配下・`save_output` の出力先とは別）**に置く。ユーザーの予定が消えてはいけないので、一時領域や「keep 超過分を削除する」出力ディレクトリを使ってはならない。書き込みは tmp＋`os.replace` の原子置換＋`threading.Lock`、API 由来レコードは prune の対象だが **`user:` の予定は prune しない**（削除は `deleted` の tombstone で行い、API 側の再取得で復活させない）。打ち上げの日付は `net_precision` が Day/Hour/Minute/Second 以外、または年末（12/30〜01/01）の行を**日付セルに置かない**（LL2 と NASA の双方で実測したプレースホルダ。描くと架空の予定になる）。
 
+
+16. **画像内の日本語フォントは OS 非依存で解決する**。`img_common.load_font()` が
+    *環境変数 `SPACE_FINDER_FONT`(`_BOLD`) → OS 標準パス（Windows メイリオ / macOS ヒラギノ /
+    Linux Noto CJK・IPA・VL・Takao）→ 標準フォントディレクトリの走査* の順に探し、採用前に
+    **cmap を読んで日本語グリフの有無を検証**する（名前だけでは判定できない。例: DejaVu Sans は
+    日本語なし）。Windows のパスだけを列挙すると macOS / Linux で PIL 既定フォントに落ちて
+    日本語が全部豆腐（□）になる。matplotlib 経路（accurate 版）は各ツールでフォント名を
+    列挙せず `img_common.apply_matplotlib_cjk_font()` を使う（rcParams を pyplot 非依存で設定する
+    ので stdio 起動後の pyplot import も起こさない）。検査は `scripts/check-tools.py --fonts`。
 
 ## 主要ファイル
 
