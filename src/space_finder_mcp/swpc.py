@@ -3,7 +3,7 @@
 NASA DONKI（api.nasa.gov）は DEMO_KEY が **1時間30リクエスト/IP の共有枠**で、
 他のクライアントと同じ枠を取り合うため 429 になりやすい（実測: 枠を使い切ると
 cooldown 中は宇宙天気が一切返せない）。NOAA の SWPC（Space Weather Prediction
-Center）は **認証不要** で、現在の Kp・GOES X線フラックス・太陽風（RTSW）・
+Center）は **認証不要** で、現在の Kp・GOES X線フラックス・フレアイベント（直近7日）・太陽風（RTSW）・
 陽子フラックス・警報・黒点相対数を JSON で公開している。そこで DONKI が
 使えないときのフォールバックとして本モジュールを使う。
 
@@ -59,6 +59,21 @@ def _xray_class(flux) -> str:
         if f >= base:
             return "{}{:.1f}".format(letter, f / base)
     return "A{:.1f}".format(f / 1e-8)
+
+
+def _flare_rank(cls) -> float:
+    """フレア規模（"M2.1" / "X1.0" / "?"）を比較用の数値にする（大きいほど大規模）。
+
+    A/B/C/M/X の順に 100 点刻みで重み付けし、同じ級の中は数値で比較する。
+    不明値は -1（どの級よりも小さい）として扱い、並べ替えで先頭に来ないようにする。
+    """
+    s = str(cls or "").strip().upper()
+    if not s or s[0] not in "ABCMX":
+        return -1.0
+    try:
+        return "ABCMX".index(s[0]) * 100.0 + float(s[1:] or 0)
+    except (TypeError, ValueError):
+        return "ABCMX".index(s[0]) * 100.0
 
 
 def _last(rows, key=None):
@@ -164,6 +179,35 @@ def fetch_all() -> dict:
             out.append({"issued": a.get("issue_datetime"), "summary": msg[:240]})
         return out
 
+    def flares():
+        """GOES X線のフレアイベント一覧（直近7日）。
+
+        別ファイル xray-flares-7-day.json は **フレアごとに1行**（開始/最大/終了の時刻と
+        級）を返す（実測 31 行）。時間変化ではなく「発生した事象」が欲しいのでこちらを使う。
+        **空配列は「7日間フレアなし」という正当な値**なので failed にしない
+        （形が配列でないときだけ失敗として扱う）。
+        """
+        rows = _get_json("/json/goes/primary/xray-flares-7-day.json")
+        if not isinstance(rows, list):
+            raise ValueError("フレアイベントの応答が配列ではありません")
+        events = []
+        for r in rows:
+            if not isinstance(r, dict) or not r.get("max_time"):
+                continue
+            events.append({"begin": r.get("begin_time"), "max": r.get("max_time"),
+                           "end": r.get("end_time"), "max_class": r.get("max_class"),
+                           "begin_class": r.get("begin_class"),
+                           "satellite": r.get("satellite")})
+        events.sort(key=lambda e: e.get("max") or "")
+        counts = {}
+        for e in events:
+            letter = str(e.get("max_class") or "?")[:1]
+            counts[letter] = counts.get(letter, 0) + 1
+        top = max(events, key=lambda e: _flare_rank(e.get("max_class")), default={})
+        return {"events": events, "count": len(events), "counts_by_class": counts,
+                "max_class": top.get("max_class"), "max_time": top.get("max"),
+                "satellite": top.get("satellite")}
+
     def cycle():
         rows = _get_json("/json/solar-cycle/observed-solar-cycle-indices.json")
         last = _last(rows, key="ssn")
@@ -171,16 +215,17 @@ def fetch_all() -> dict:
             raise ValueError("黒点相対数の行が空")
         return {"month": last.get("time-tag"), "ssn": last.get("ssn"), "f10_7": last.get("f10.7")}
 
-    for key, loader in (("scales", scales), ("kp", kp), ("xray", xray), ("wind", wind),
-                        ("proton", proton), ("alerts", alerts), ("cycle", cycle)):
+    for key, loader in (("scales", scales), ("kp", kp), ("xray", xray), ("flares", flares),
+                        ("wind", wind), ("proton", proton), ("alerts", alerts),
+                        ("cycle", cycle)):
         add(key, loader)
     return {"sections": sections, "failed": failed, "fetched_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
 
 
 # kind ごとに表示する項目（NASA DONKI の kind と同じ語彙で受ける）
 _SECTIONS_BY_KIND = {
-    "all": ("scales", "kp", "xray", "wind", "proton", "alerts", "cycle"),
-    "flare": ("xray",),
+    "all": ("scales", "kp", "xray", "flares", "wind", "proton", "alerts", "cycle"),
+    "flare": ("xray", "flares"),
     "gst": ("scales", "kp", "wind"),
     "sep": ("proton", "scales"),
     "cme": ("wind",),          # CME のイベント一覧はこの経路では提供していない（注記する）
@@ -225,6 +270,29 @@ def _sec_lines(key: str, sec: dict) -> list:
                 "- 現在 **{}** ／ 直近6時間の最大 **{}**（{}）".format(
                     cls, sec.get("peak_class"), str(sec.get("peak_time") or "").rstrip("Z")),
                 "  - {} クラス: {}".format(cls[0], _FLARE_JA.get(cls[0], "?"))]
+    if key == "flares":
+        out = ["### 太陽フレア（GOES X線フレアイベント・直近7日）"]
+        n = int(sec.get("count") or 0)
+        if not n:
+            out.append("- GOES が記録したフレアイベントはありません（この7日間は静穏）。")
+            return out
+        counts = sec.get("counts_by_class") or {}
+        breakdown = " / ".join("{}級 {}件".format(k, counts[k])
+                               for k in sorted(counts, key=_flare_rank))
+        out.append("- 直近7日で **{}件**（{}）／ 最大 **{}**（{} UTC）".format(
+            n, breakdown, sec.get("max_class") or "?",
+            str(sec.get("max_time") or "").replace("T", " ").rstrip("Z")))
+        ranked = sorted((sec.get("events") or []),
+                        key=lambda e: _flare_rank(e.get("max_class")), reverse=True)
+        for e in ranked[:5]:
+            out.append("- **{}** 最大 {} UTC（開始 {} / 終了 {}）".format(
+                e.get("max_class") or "?",
+                str(e.get("max") or "").replace("T", " ").rstrip("Z"),
+                str(e.get("begin") or "").replace("T", " ").rstrip("Z"),
+                str(e.get("end") or "").replace("T", " ").rstrip("Z")))
+        if n > 5:
+            out.append("- …ほか {} 件（規模の大きい順に表示）".format(n - 5))
+        return out
     if key == "wind":
         return ["### 太陽風（RTSW: DSCOVR/ACE）",
                 "- 速度 {:.0f} km/s（60分平均 {:.0f}）／ 密度 {} /cm³".format(
@@ -264,6 +332,14 @@ def _advice(sections: dict) -> str:
         return ("現在は静穏ですが、今後1〜3日に G{}（{}）の地磁気嵐が予測されています。"
                 "高緯度域の観測・衛星運用は該当時間帯の変動に注意してください。".format(
                     g_max, _G_SCALE_JA.get(str(g_max), "小規模")))
+    # 地磁気嵐が無くても、直近のフレア規模は観測・通信へ影響しうる（数値から生成する）
+    fl = sections.get("flares") or {}
+    if _flare_rank(fl.get("max_class")) >= _flare_rank("M1.0"):
+        return ("直近7日に **{}** フレア（{} UTC）が発生しています。"
+                "M級以上では高緯度域の短波通信や衛星測位に乱れが出ることがあり、"
+                "太陽電波を観測する場合は該当時刻の影響に注意してください。".format(
+                    fl.get("max_class"),
+                    str(fl.get("max_time") or "").replace("T", " ").rstrip("Z")))
     return "現在は静穏です。フレア・地磁気嵐とも目立った活動はありません。"
 
 
@@ -271,7 +347,8 @@ def space_weather_now(kind: str = "all", nasa_reason: str = "") -> CallToolResul
     """NOAA SWPC（認証不要）による宇宙天気の現況を返す（DONKI のフォールバック）。
 
     NASA DONKI がレート制限や障害で使えないときに呼ぶ。Kp・NOAA スケール・
-    GOES X線・太陽風（RTSW）・陽子フラックス・警報・黒点相対数を返し、
+    GOES X線・フレアイベント（7日）・太陽風（RTSW）・陽子フラックス・警報・
+    黒点相対数を返し、
     **どの項目が取得できなかったか**も数値で示す。出典は SWPC と明記し、
     NASA から切り替えた事実と理由も content に出す（出所の取り違えを防ぐ）。
     """

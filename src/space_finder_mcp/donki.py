@@ -89,7 +89,7 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
 
     **NASA 側がレート制限・障害のときは、認証不要の NOAA SWPC（Kp・NOAA スケール・
 
-    GOES X線・太陽風・陽子・警報・黒点相対数）に自動で切り替えて返す**（どちらの出典かを
+    GOES X線・フレアイベント（直近7日）・太陽風・陽子・警報・黒点相対数）に自動で切り替えて返す**（どちらの出典かを
 
     content と structuredContent.source に明記する）。
     例:「最近の太陽フレア」「CME(コロナ質量放出)の情報」「地磁気嵐は起きてる?」

@@ -38,6 +38,7 @@ from . import eso as _eso
 from . import cadc as _cadc
 from . import mast as _mast
 from . import gcn as _gcn
+from . import ssd as _ssd
 from . import skyfield_pos as _sky
 from . import news as _news
 from . import mars_rover as _mars
@@ -206,6 +207,14 @@ _reg(_eodash.eodashboard_detail)
 
 # ---- 宇宙天気 (NASA DONKI, キーは NASA_API_KEY 任意) ----
 _reg(_donki.space_weather)
+
+
+# ---- 天体異常系 (JPL SSD/CNEOS: 火球・小惑星接近・衝突リスク, 認証不要・APIキー不要) ----
+# api.nasa.gov のキー枠（DEMO_KEY 30 req/h/IP）を消費しないため、apod / neo_today /
+# space_weather の枠争いに影響しない。
+_reg(_ssd.fireball_reports)
+_reg(_ssd.neo_close_approach)
+_reg(_ssd.impact_risk)
 
 
 # ---- AWS Earth Search STAC (Sentinel/Landsat/NAIP, 認証不要) ----

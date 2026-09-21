@@ -93,19 +93,22 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 - `content` の並びは常に「リンクを含むテキスト → `ImageContent`」なので、**画像を描けないクライアントでもリンクは必ず見えます**。
 - **機械的に検査します** — `scripts/check-tools.py --media-links`（画像ブロックより前にアイコン付きリンクが無い／`structuredContent` にURL・保存パスが無い／`image_path` のファイルが存在しない場合は exit 1。実測: 画像を返す12ツールすべて OK）。生成系の docstring には「回答時はこのリンクをそのまま提示してください」と明記しています。
 
-### 🆕 直近の更新内容（v0.32.1）
+### 🆕 直近の更新内容（v0.33.0）
 
-**「画像内の日本語フォントを Windows / macOS / Linux 共通で解決」**（v0.32.1）。ツールの増減はありません（**53本**のまま）。
+**「天体異常系（火球・小惑星接近・衝突リスク）を追加」**（v0.33.0）。登録ツールは **53 → 56本**（天体異常系 3本）。
 
-- **🈁 日本語が豆腐（□）になる不都合の修正** — 画像系ツールのフォント探索が Windows のパス（メイリオ等）だけを列挙していたため、macOS / Linux では PIL 既定フォントに落ちて図中の日本語が**すべて化けていました**。探索を **環境変数（`SPACE_FINDER_FONT` / `SPACE_FINDER_FONT_BOLD`）→ OS 標準パス → 標準フォントディレクトリの走査** に拡張し、macOS はヒラギノ角ゴシック（W3／太字 W6）、Linux は Noto Sans CJK → IPAex → IPA → VL / Takao を自動で選びます。
-- **🔍 名前ではなく cmap で検証** — 採用するフォントが**実際に日本語グリフを持っているか**をフォントの `cmap` テーブルを直接読んで確認します（DejaVu Sans のような日本語なしフォントは最後の保険に降格）。`fontTools` 等の追加依存はありません。
-- **📐 matplotlib 版（accurate）も共通化** — `sky_map_with_satellites` / `solar_system_now` の accurate 版はツールごとにフォント名を探していました。共通ヘルパー `apply_matplotlib_cjk_font()` が候補チェーンを rcParams に設定します（`pyplot` を import しないため stdio 起動後の無応答も回避）。
-- **🧪 検証** — 新ゲート `scripts/check-tools.py --fonts`（日本語グリフを持たないフォントを掴んでいれば exit 1）と回帰テスト8件を追加（**計94件**）。全53ツール実呼び出し exit 0（46 OK／7 error は外部の一時制限）／`--dead-code` 0／`--fuzz` 312組合せ 例外漏れ0／`--offline` exit 0／`--figures` 描画系9 問題0／`--media-links` 問題0／`--concurrency` 3/3／`--stdio` 6/6 無応答0／`unittest` 94件 OK。
+- **🪨 `fireball_reports` — 火球（大気圏突入）の観測記録（JPL CNEOS / Fireball）** — 直近N日（1〜1825日）の火球を、緯度経度・突入高度・**衝突エネルギー(kt)**・放射エネルギー(J)・突入速度（速度成分 vx,vy,vz から算出。欠測は省く）つきで返します。衝突エネルギーは**広島型原爆（約15kt）との比**に言い換え（数値から生成）。火球は**隕石の回収ではなく大気圏突入の観測**である旨と、位置が未報告の記録は「位置不明」（架空の座標を作らない）である旨を必ず併記します。
+- **☄️ `neo_close_approach` — 小惑星・彗星の地球接近（JPL CNEOS / CAD）** — `neo_today`（今日のみ・api.nasa.gov の共有枠）より広く、**任意の期間（1〜365日）と距離（au）**で接近イベントを返します。1 au を超える距離も扱い、地心距離を **au / km / 月距離(LD=384,400km)** の3通りで併記。既知の直径があればそれを、無ければ絶対等級 H から**推定**した直径（アルベド0.14 仮定・推定である旨を併記）。`hazardous_only` で PHA のみ、API の `total` と表示件数の差（切り捨て）も明示します。
+- **☄️ `impact_risk` — 将来の衝突リスク（JPL Sentry）** — 累積衝突確率 `ip` を**確率＋「何回に1回」**で表示し、パレルモスケール・想定時期・想定衝突数・（`designation` 指定時は）仮想衝突(VI)まで返します。`designation` は**仮符号/番号**のみ受け付け（**和名・愛称は JPL 側が 400 で拒否**するため、推測せず仮符号での指定方法を案内）、**削除済みの天体は HTTP 200 + `error` で返る**ので検査して「リスクなし（監視対象から外れた）」を意味しうる旨を案内します。
+- **🔑 3ツールとも APIキー不要** — JPL SSD（`ssd-api.jpl.nasa.gov`）は認証不要なので、`DEMO_KEY`（**30 req/h/IP の共有枠**）を消費せず、`apod` / `neo_today` / `space_weather` の枠争いを悪化させません。
+- **☀️ `space_weather` の SWPC フォールバックにフレアイベント（直近7日）を追加** — X線クラスに加えて、**フレアごとの発生時刻（開始/最大/終了）と級の内訳**を返します（`xray-flares-7-day.json`。**空配列は「フレアなし＝静穏」**として扱い、取得失敗 `failed` と区別）。M級以上なら AI 助言と `_advice` にも反映します。
+- **🧪 検証** — 実測に基づく回帰テスト28件を追加（`energy` の単位は **10^10 J** で kt は `impact-e` だけ／0件では **`data` キー自体が来ない**／`fields` の並びに依存しない／Sentry の **200 + `error`**／和名は 400 で拒否／SWPC の空配列は静穏）。
 
-登録ツールは **53本**。
+登録ツールは **56本**。
 
 ### 以前の更新
 
+- **v0.32.1** — **画像内の日本語フォントを OS 非依存で解決（豆腐=□の修正）**: `img_common.load_font()` の探索を *環境変数 → OS 標準パス（Windows メイリオ / macOS ヒラギノ / Linux Noto CJK・IPA・VL・Takao）→ 標準フォントディレクトリの走査* に拡張し、採用前に **cmap で日本語グリフの有無を検証**（追加依存なし）。matplotlib 経路は `apply_matplotlib_cjk_font()`。新ゲート `--fonts` と回帰テスト8件（計94件）。
 - **v0.32.0** — **観測アーカイブ・速報・国内イベントの3層を追加（52→53ツール）**: `mast_observations`（MAST・プレビュー画像をインライン表示）・`gcn_alerts`（GCN Circulars・HTML 主経路）・カレンダーへの **JAXA 施設公開**（告知済みのみ・取得日を窓に毎日更新）。
 - **v0.31.1** — **蓄積ストアの保持期限を全経路で適用**（`calendar_events` でも prune・`KEEP_PAST_DAYS` を単一出典・有効なユーザー予定は対象外）。`figure.notes` に保持期限を定数から生成。ゲートは予定系4ツールに専用引数を与え、書き込みを一時ストアへ逃がして実経路を検証（計49件）。
 - **v0.31.0** — **宇宙・天文イベントカレンダー（4ツール）**。`space_calendar`（月グリッド＋`structuredContent.events`。打ち上げ=LL2・天文現象=DE421+Skyfield・公開イベント=国立天文台・自分の予定=ローカル）と `calendar_events` / `calendar_event_add` / `calendar_event_remove`。蓄積ストアを一次ソースにした read-through（窓 [M-1, M+2]・未取得の月だけ取得。初回 8〜11秒／2回目以降 API 0回・0.4秒）。
@@ -173,7 +176,7 @@ uv run python scripts/check-tools.py --fonts
 
 ### （任意）NASA APIキー
 
-`apod`・`neo_today` は [api.nasa.gov](https://api.nasa.gov) の無料キーを使います。未設定でも `DEMO_KEY` で動作しますが、**レート制限 30 req/hr/IP** と低く、`space_weather`(DONKI) も同じ枠を共有するため、キー未設定だと3ツールが枠を取り合います。実用にはキーを推奨します。
+`apod`・`neo_today` は [api.nasa.gov](https://api.nasa.gov) の無料キーを使います。未設定でも `DEMO_KEY` で動作しますが、**レート制限 30 req/hr/IP** と低く、`space_weather`(DONKI) も同じ枠を共有するため、キー未設定だと3ツールが枠を取り合います。実用にはキーを推奨します。なお **`fireball_reports` / `neo_close_approach` / `impact_risk`（JPL CNEOS）と `space_weather` の SWPC フォールバックは認証不要**で、この枠を消費しません。
 
 **呼び出し回数はサーバー側で管理しています**（`nasa_budget.py`）— 直近1時間の使用数を数え、枠を使い切っていたら**HTTP を投げずに**回復までの目安（例:「約30分後に自動的に回復します」）を返します。実際に 429 を受けた場合は `Retry-After` を尊重し、その間は再試行しません（同じ 429 を繰り返し踏みに行かない）。**CelesTrak** も短時間の連続リクエストで IP 単位に遮断され（403、または TCP が返らない blackhole）、その間は 1 回の呼び出しが分単位で固まります。接続は (connect 10 秒, read 25 秒) で打ち切り、遮断を受けたら**セッション内で記憶して以降は HTTP を出さずに即座に案内**を返します（`sat_tle` / `sat_ground_track` / `tiangong_now` / `sky_map_with_satellites` が該当）。
 
@@ -258,7 +261,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 
 ## 🛠️ ツール一覧
 
-登録ツールは **53本**（宇宙・天文イベントカレンダー 4本（`space_calendar` / `calendar_events` / `calendar_event_add` / `calendar_event_remove`）＋ロケット打ち上げ・逆引き 4本＋NASA日次・宇宙天気 3本＋メディア 3本＋各国宇宙機関・地球観測 16本＋衛星・軌道 5本＋天体位置・画像合成 7本＋観測支援・天文データ 10本＋気象衛星リアルタイム画像 1本）。全53ツールを実呼び出しで検証済みです（外部APIの障害・レート制限時は、例外ではなく CallToolResult のエラーとして返します）。
+登録ツールは **56本**（宇宙・天文イベントカレンダー 4本（`space_calendar` / `calendar_events` / `calendar_event_add` / `calendar_event_remove`）＋ロケット打ち上げ・逆引き 4本＋NASA日次・宇宙天気 3本＋メディア 3本＋各国宇宙機関・地球観測 16本＋衛星・軌道 5本＋天体位置・画像合成 7本＋観測支援・天文データ 10本＋気象衛星リアルタイム画像 1本＋天体異常系 3本）。全56ツールを実呼び出しで検証済みです（外部APIの障害・レート制限時は、例外ではなく CallToolResult のエラーとして返します）。
 
 | ツール | できること | データ源 | 認証 |
 |--------|-----------|---------|------|
@@ -300,7 +303,10 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `moon_phase_map` | **月齢マップ**（月の満ち欠け）。`layout="calendar"`（既定）で1か月の日別格子（日月火水木金土・月齢・照度・月相）、`layout="lunation"` で1朔望月（朔→朔）の時系列パネル。輝面の向きは太陽の位置角から計算（月齢からの決め打ちをしない）。朔・望・上弦・下弦の時刻を現地時間で併記 | JPL DE421+Skyfield | 不要 |
 | `eodashboard_collections` | EO Dashboard（NASA×ESA×JAXA共同）の173データセットをテーマ・機関・キーワードで検索 | EO Dashboard (GitHub catalog) | 不要 |
 | `eodashboard_detail` | EO Dashboardの1データセットの詳細（衛星・センサー・説明・画像・参照リンク） | EO Dashboard (GitHub catalog) | 不要 |
-| `space_weather` | 宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象）。**NASA が枠切れ・障害のときは認証不要の NOAA SWPC（Kp・NOAAスケール・GOES X線・太陽風・陽子・警報・黒点）へ自動切替**（出典を明記） | NASA DONKI → **NOAA SWPC（フォールバック）** | 不要（SWPC）/キー任意（DONKI） |
+| `space_weather` | 宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象）。**NASA が枠切れ・障害のときは認証不要の NOAA SWPC（Kp・NOAAスケール・GOES X線・フレアイベント（直近7日）・太陽風・陽子・警報・黒点）へ自動切替**（出典を明記） | NASA DONKI → **NOAA SWPC（フォールバック）** | 不要（SWPC）/キー任意（DONKI） |
+| `fireball_reports` | **火球（大気圏突入）の観測記録**（直近1〜1825日・衝突エネルギーの下限指定可）。緯度経度・突入高度・**衝突エネルギー(kt)**・放射エネルギー(J)・突入速度（成分から算出）。広島型原爆（約15kt）との比を併記。⚠️ 隕石の回収情報ではなく**大気圏突入の観測** | NASA/JPL CNEOS Fireball Data | 不要 |
+| `neo_close_approach` | **小惑星・彗星の地球接近**（1〜365日先・距離上限 au）。地心距離を **au / km / 月距離**で併記し、既知の直径（無ければ絶対等級 H から**推定**・アルベド0.14 仮定）と接近時刻の不確かさを返す。`hazardous_only` で PHA のみ。⚠️ 接近は衝突ではない | NASA/JPL CNEOS SBDB CAD | 不要 |
+| `impact_risk` | **将来の衝突リスク**（JPL Sentry）。累積衝突確率を**確率＋「何回に1回」**で表示し、パレルモスケール・想定時期・想定衝突数を返す。`designation`（**仮符号/番号のみ・和名不可**）を指定すると仮想衝突(VI)の一覧まで | NASA/JPL CNEOS Sentry | 不要 |
 | `stac_collections` | AWS Earth Searchの衛星データコレクション一覧 | AWS Earth Search STAC | 不要 |
 | `stac_search` | Sentinel-2 / Landsat / NAIP / DEM をSTAC検索（場所・日時・雲量） | AWS Earth Search STAC | 不要 |
 | `iss_now` | ISS（国際宇宙ステーション）の現在位置を取得し Googleマップリンクで表示 | Open Notify | 不要 |
@@ -528,7 +534,7 @@ A: eodashboard_detail("N1_NO2") → 詳細+サムネイル画像
 - `kind` で取得対象を選択: `all`（既定）/ `flare`（太陽フレア）/ `cme`（コロナ質量放出）/ `gst`（地磁気嵐）/ `sep`（太陽粒子現象）
 - 期間は `start_date` / `end_date`（YYYY-MM-DD）で指定
 - 認証: 環境変数 `NASA_API_KEY`（`apod` と同じキーを使用）。未設定時は `DEMO_KEY`（低レート）
-- **フォールバック**: NASA が枠切れ（429）や障害のときは、**認証不要の NOAA SWPC**（`services.swpc.noaa.gov`）へ自動で切り替えます。Kp・NOAAスケール（R/S/G の現在値と1〜3日予測）・GOES X線クラス・太陽風（速度／密度／Bt／Bz）・陽子フラックス・警報・黒点相対数を返し、**どちらの出典で答えたか**を `content` と `structuredContent.source`（`NOAA SWPC` ＋ `fallback: true` ＋ NASA 側の理由 `nasa_reason`）に明記します。SWPC 側でも取得できなかった項目は `failed` に残します
+- **フォールバック**: NASA が枠切れ（429）や障害のときは、**認証不要の NOAA SWPC**（`services.swpc.noaa.gov`）へ自動で切り替えます。Kp・NOAAスケール（R/S/G の現在値と1〜3日予測）・GOES X線クラス・**フレアイベント（直近7日・発生時刻と級の内訳）**・太陽風（速度／密度／Bt／Bz）・陽子フラックス・警報・黒点相対数を返し、**どちらの出典で答えたか**を `content` と `structuredContent.source`（`NOAA SWPC` ＋ `fallback: true` ＋ NASA 側の理由 `nasa_reason`）に明記します。SWPC 側でも取得できなかった項目は `failed` に残します
 - **枠の使い方**: 1回の呼び出しで4エンドポイント（FLR/CME/GST/SEP）を叩くため `DEMO_KEY` を4消費します。**カテゴリ単位でキャッシュ**するので、`kind` を変えた呼び出しで同じカテゴリを取り直しません（実測: `all` の直後の `flare` は HTTP 0回）。429 時は「429 後の待機」か「枠切れ」かを区別した案内を返します（自分の使用数だけを出すと、IP を共有する DEMO_KEY では数字と矛盾して見えるため）
 
 ```text
@@ -541,6 +547,26 @@ A: space_weather() → フレア・CME・地磁気嵐・粒子現象をまとめ
 ```
 
 出典: api.nasa.gov（NASA Space Weather）
+
+### ☄️ `fireball_reports` / `neo_close_approach` / `impact_risk` — 天体異常系（JPL CNEOS）
+
+[NASA/JPL CNEOS](https://cneos.jpl.nasa.gov/)（Center for Near Earth Object Studies）の公開 API （`ssd-api.jpl.nasa.gov`）から、**火球・小惑星等の接近・将来の衝突リスク**を取得します。**3ツールとも認証不要（APIキー不要）**で、`DEMO_KEY`（30 req/h/IP の共有枠）を消費しません。
+
+- **`fireball_reports`** — 火球（fireball）は**大気圏に突入して光った現象**の観測記録です（米国政府センサ・地上観測の報告）。`days`（1〜1825）・`min_impact_energy_kt`（kt TNT 換算の下限）・`limit`（1〜50）・`require_location`（位置が報告された記録のみ）を指定できます。火球の**ゼロ件**は `data` キー自体が返らない（`count: 0` のみ）ため、その場合も「該当なし」として扱います。**隕石の回収・落下物の推定はしません**（落下物の情報が欲しい場合は別の情報源が必要です）。
+- **`neo_close_approach`** — `days`（1〜365）・`max_distance_au`（既定 0.05 ≒ 19.5 月距離。1 LD ≒ 0.00256 au）・`limit`・`hazardous_only`（PHA のみ）。距離は **au / km / 月距離(LD)** の3通りで併記します。直径は**既知の値があればそれを、無ければ絶対等級 H とアルベド 0.14 の仮定から換算**した推定値で、推定の場合はその旨を表示と `structuredContent`（`diameter_is_estimate`）に残します。**接近時刻は TDB**（力学時）で、`t_sigma_f`（3σ の不確かさ）も返します。`neo_today` との違いは「今日だけ・api.nasa.gov のキー枠」ではなく、**任意の期間・距離**を扱えることです。
+- **`impact_risk`** — Sentry の**衝突確率の推算**です（進路が確定した衝突予報ではありません）。`min_probability`（既定 1e-3 = 0.1%）以上の天体を確率の高い順に返し、`designation` を指定すると1天体の詳細（累積確率・想定時期・仮想衝突(VI)・観測弧・パレルモスケール）を返します。`designation` は**仮符号または番号**（例 `"2024 YR4"` / `"2000 SG344"` / `"99942"`）で、**和名・愛称は JPL 側が受け付けません**（推測せず指定方法を案内します）。**確率が 0 になった天体は Sentry から削除され、HTTP 200 + `error` で返る**ため、それを検査して「リスクなし（監視対象から外れた）」を意味しうる旨を案内します。
+- **数値の読み方** — 衝突エネルギーは**広島型原爆（約15kt）との比**、距離は**月距離**、直径は**推定であるかどうか**を必ず併記します（数値から生成し、書き手によって変わらないようにしています）。
+
+```text
+Q: 最近の火球は?                  A: fireball_reports(days=30)
+Q: 大きな火球だけ                   A: fireball_reports(days=365, min_impact_energy_kt=1)
+Q: 今週接近する小惑星               A: neo_close_approach(days=7)
+Q: 月距離以内に来る天体             A: neo_close_approach(days=30, max_distance_au=0.0026)
+Q: 危険な小惑星は?                  A: impact_risk()
+Q: 2024 YR4 の衝突リスク            A: impact_risk(designation="2024 YR4")
+```
+
+出典: NASA/JPL CNEOS（ssd-api.jpl.nasa.gov）/ Fireball Data API・SBDB Close-Approach Data API・Sentry
 
 ### 🌍 `stac_collections` / `stac_search` — AWS Earth Search STAC
 
@@ -870,7 +896,8 @@ src/space_finder_mcp/
 ├── power.py             # power_climate（NASA POWER 気候・太陽エネルギー統計）
 ├── eodashboard.py       # eodashboard_collections / detail（EO Dashboard, NASA/ESA/JAXA）
 ├── donki.py             # space_weather（NASA 宇宙天気 DONKI）
-├── swpc.py              # NOAA SWPC（宇宙天気のフォールバック・認証不要）
+├── swpc.py              # NOAA SWPC（宇宙天気のフォールバック・フレアイベント・認証不要）
+├── ssd.py               # fireball_reports / neo_close_approach / impact_risk（JPL CNEOS, 認証不要）
 ├── stac_search.py       # stac_collections / stac_search（AWS Earth Search STAC）
 ├── iss.py               # iss_now（ISS 現在位置, Open Notify）
 ├── oscar.py             # satellite_status（WMO OSCAR 衛星カタログ）

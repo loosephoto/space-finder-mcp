@@ -382,8 +382,9 @@ class RegressionTests(unittest.TestCase):
             swpc._get_json = old
         self.assertIn("xray", data["sections"])
         self.assertEqual(data["sections"]["xray"]["latest_class"], "B2.4")
-        # 失敗した6項目は failed に残る（静かに欠けさせない）
-        self.assertEqual(len(data["failed"]), 6)
+        # X線以外の全項目は failed に残る（静かに欠けさせない）。
+        # 項目数は「表示対象の一覧」から採る（セクションを足しても壊れないように）。
+        self.assertEqual(len(data["failed"]), len(swpc._SECTIONS_BY_KIND["all"]) - 1)
         self.assertTrue(all("simulated SWPC failure" in f for f in data["failed"]))
 
     def test_swpc_all_items_failed_returns_error_not_calm(self):
@@ -411,4 +412,5 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(result.structuredContent["error"], "no space weather data")
         self.assertNotIn("静穏", result.content[0].text)
         self.assertIn("取得できませんでした", result.content[0].text)
-        self.assertEqual(len(result.structuredContent["failed"]), 7)
+        self.assertEqual(len(result.structuredContent["failed"]),
+                         len(swpc._SECTIONS_BY_KIND["all"]))

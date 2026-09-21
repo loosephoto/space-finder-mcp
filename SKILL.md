@@ -1,6 +1,6 @@
 ---
 name: space-finder-mcp
-description: 宇宙・天文・地球観測データを横断検索するMCPサーバー。NASA/ESA/JAXA/ISRO/CSA/INPE/UK/CNSA/CelesTrak/JPL/Wikidata/Open-Meteo と MAST（JWST・ハッブル等の観測アーカイブ）・NASA GCN（過渡天体速報）を統合した53ツール。衛星画像・軌道マップ・日食パネル・月齢マップを画像で返し、構造化JSONも同時に提供。
+description: 宇宙・天文・地球観測データを横断検索するMCPサーバー。NASA/ESA/JAXA/ISRO/CSA/INPE/UK/CNSA/CelesTrak/JPL/Wikidata/Open-Meteo と MAST（JWST・ハッブル等の観測アーカイブ）・NASA GCN（過渡天体速報）・JPL CNEOS（火球・小惑星接近・衝突リスク）を統合した56ツール。衛星画像・軌道マップ・日食パネル・月齢マップを画像で返し、構造化JSONも同時に提供。
 category: space
 ---
 
@@ -21,11 +21,11 @@ category: space
 ## 対応データソース
 
 - 宇宙機関: NASA（APOD/NEO/DONKI/POWER/Image&Video Library）、ESA Copernicus、JAXA Earth、ISRO、CSA、INPE、UK EO DataHub、CNES、CNSA（NSMC/CNSA-GEO/CRESDA）、EO Dashboard（NASA×ESA×JAXA）
-- 天文・軌道: JPL（DE421暦/SBDB/Horizons）、CelesTrak（NORAD TLE）、WMO OSCAR、ESO ASM、ALMA Science Archive、CADC、TART、Wikidata（SPARQL）、Open-Meteo、NASA MMGIS / NASA Trek（天体地図）
+- 天文・軌道: JPL（DE421暦/SBDB/Horizons）、JPL CNEOS（火球・小惑星接近・Sentry 衝突リスク / ssd-api.jpl.nasa.gov）、CelesTrak（NORAD TLE）、WMO OSCAR、ESO ASM、ALMA Science Archive、CADC、TART、Wikidata（SPARQL）、Open-Meteo、NASA MMGIS / NASA Trek（天体地図）
 - 打ち上げ: Launch Library 2
 - 図法・画像素材: NASA Blue Marble、NASA Trek WMTS（月・火星・水星・タイタン・ベスタ・ケレス）
 
-## ツール一覧（53種）
+## ツール一覧（56種）
 
 | ツール | できること | データ源 | 認証 |
 |:--|:--|:--|:--|
@@ -71,7 +71,10 @@ category: space
 | `calendar_event_remove` | 予定の削除（冪等・同名複数は候補提示で停止） | ローカル | 不要 |
 | `eodashboard_collections` | EO Dashboard（NASA×ESA×JAXA共同）の173データセットをテーマ・機関・キーワードで検索 | EO Dashboard (GitHub catalog) | 不要 |
 | `eodashboard_detail` | EO Dashboardの1データセットの詳細（衛星・センサー・説明・画像・参照リンク） | EO Dashboard (GitHub catalog) | 不要 |
-| `space_weather` | 宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象）。**NASA が枠切れ/障害なら認証不要の NOAA SWPC へ自動切替**（Kp・NOAAスケール・GOES X線・太陽風・陽子・警報・黒点。出典と切替理由を明記） | NASA DONKI → **NOAA SWPC** | 不要（SWPC）/キー任意（DONKI） |
+| `space_weather` | 宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象）。**NASA が枠切れ/障害なら認証不要の NOAA SWPC へ自動切替**（Kp・NOAAスケール・GOES X線・フレアイベント（直近7日）・太陽風・陽子・警報・黒点。出典と切替理由を明記） | NASA DONKI → **NOAA SWPC** | 不要（SWPC）/キー任意（DONKI） |
+| `fireball_reports` | **火球（大気圏突入）の観測記録**（`days` 1〜1825・`min_impact_energy_kt`・`limit`・`require_location`）。緯度経度・突入高度・衝突エネルギー(kt)・放射エネルギー(10^10 J)・突入速度（vx,vy,vz から算出）。広島型原爆(約15kt)との比を併記。⚠️ 隕石の回収ではなく**突入の観測** | NASA/JPL CNEOS Fireball Data | 不要 |
+| `neo_close_approach` | **小惑星・彗星の地球接近**（`days` 1〜365・`max_distance_au`・`hazardous_only`）。地心距離を au / km / 月距離(LD) で併記、既知の直径（無ければ H とアルベド0.14 から**推定**）と不確かさ(3σ)。⚠️ 接近≠衝突 | NASA/JPL CNEOS SBDB CAD | 不要 |
+| `impact_risk` | **将来の衝突リスク**（JPL Sentry）。`min_probability` 以上の天体を確率順に（確率＋「何回に1回」・パレルモスケール・想定時期）。`designation`（**仮符号/番号のみ・和名は400で拒否**）で VI 一覧まで。**削除済みは HTTP 200 + `error`** | NASA/JPL CNEOS Sentry | 不要 |
 | `stac_collections` | AWS Earth Searchの衛星データコレクション一覧 | AWS Earth Search STAC | 不要 |
 | `stac_search` | Sentinel-2 / Landsat / NAIP / DEM をSTAC検索（場所・日時・雲量） | AWS Earth Search STAC | 不要 |
 | `iss_now` | ISS（国際宇宙ステーション）の現在位置を取得し Googleマップリンクで表示 | Open Notify | 不要 |
@@ -154,6 +157,9 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 「東京の今夜の空に何が見える？」              → sky_map_with_satellites(place="東京")
 「いま宇宙天気はどう？」                      → space_weather()  # NASA が枠切れなら NOAA SWPC に自動切替（出典が変わる）
 「最近の太陽フレアは？」                      → space_weather(kind="flare")
+「最近の火球は？」                            → fireball_reports(days=30)
+「今週地球に接近する小惑星は？」              → neo_close_approach(days=7)
+「衝突確率の高い小惑星は？」                  → impact_risk()
 「ロシアの気象衛星の運用状況は？」            → satellite_status(query="meteor")  # 全件走査＋一致度順で Meteor-M が上位に来る
 「火星の画像を見せて」                        → search_space_images(query="mars")
 「米国初の宇宙望遠鏡は？」                    → reverse_lookup(category="宇宙望遠鏡", country="United States")
@@ -194,7 +200,7 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 - 応答の`content`には、インライン画像を描画できないクライアント向けに
   `🖼️ [生成した画像を開く](file:///…)` のリンクが先頭に入ります（回答時はそのまま提示）。
 
-実装メモ（このサーバーを改修する場合）: 全53ツールは `server.py` の `_reg()` で登録し、
+実装メモ（このサーバーを改修する場合）: 全56ツールは `server.py` の `_reg()` で登録し、
 本体は `anyio.to_thread` のワーカースレッドで実行します（元の同期関数は
 `tool.fn.sync_fn` に残るので、検証スクリプトは同期呼び出しのまま使えます）。検査は
 `scripts/check-tools.py --concurrency`（single-flight・スレッド逃がし・混在並列）と
@@ -231,7 +237,7 @@ uv run python scripts/check-tools.py --figures        # 描画系の図の注記
 uv run python scripts/check-tools.py --media-links    # 画像/音声/動画の「リンク先行」を検査
 uv run python scripts/check-tools.py --concurrency    # 並列ツール呼び出し（single-flight・スレッド逃がし）を検査
 uv run python scripts/check-tools.py --stdio          # 実クライアント経路(stdio)で代表ツールが応答するか検査
-uv run python scripts/check-tools.py                  # 全53ツール実呼び出し（数分、exit 1 で失敗）
+uv run python scripts/check-tools.py                  # 全56ツール実呼び出し（数分、exit 1 で失敗）
 ```
 
 **MCPサーバーはホットリロードなし** — `src/` 変更後はクライアント再起動が必要です。
@@ -279,6 +285,7 @@ uv run python scripts/check-tools.py                  # 全53ツール実呼び�
 
 ## 更新履歴
 
+- v0.33.0 — **天体異常系（火球・接近・衝突リスク）を追加（53→56ツール）**: `fireball_reports`（JPL CNEOS Fireball・衝突エネルギー kt／放射エネルギー 10^10 J／広島型原爆との比）・`neo_close_approach`（SBDB CAD・au/km/月距離・H からの推定直径・PHA 絞り込み）・`impact_risk`（Sentry・確率＋何回に1回・パレルモスケール・VI 一覧・和名は400で拒否）。**3ツールとも APIキー不要**で DEMO_KEY の 30 req/h/IP の枠を消費しない（`ssd-api.jpl.nasa.gov`）。`space_weather` の SWPC フォールバックに **GOES フレアイベント（直近7日・発生時刻と級の内訳・空配列＝静穏）** を追加し、M級以上は助言にも反映。実測の癖（0件では `data` キーが無い／`fields` の順序に依存しない／Sentry は 200 + `error`）を回帰テスト28件で固定。
 - v0.32.1 — **画像内の日本語フォントを OS 非依存で解決（豆腐=□の修正）**: `img_common.load_font()` の探索を *環境変数 `SPACE_FINDER_FONT`(`_BOLD`) → OS 標準パス（Windows メイリオ / macOS ヒラギノ W3・W6 / Linux Noto CJK・IPAex・IPA・VL・Takao）→ 標準フォントディレクトリの走査* に拡張し、採用前に **cmap を読んで日本語グリフの有無を検証**（`_cmap_has_glyphs`・追加依存なし。名前では判定できない）。matplotlib 経路は `apply_matplotlib_cjk_font()`（rcParams に候補チェーンを設定・pyplot 非依存）。`font_status()` と新ゲート `--fonts`、回帰テスト8件を追加。検証: 全53ツール実呼び出し exit 0／--dead-code 0／--fuzz 312組合せ 例外漏れ0／--offline exit 0／--figures 描画系9 問題0／--media-links 問題0／--concurrency 3/3／--stdio 6/6／unittest 94件 OK。
 - v0.32.0 — **観測アーカイブ・速報・国内イベントの3層を追加（52→53ツール）**: `mast_observations`（MAST: JWST/ハッブル/TESS の観測アーカイブ・`preview_image` でプレビュー画像をインライン表示・`include_products` で FITS のDL URL）・`gcn_alerts`（NASA GCN の過渡天体速報 Circulars・HTML 主経路＋JSON フォールバック・`circular_id` で本文）・カレンダーへの **JAXA 施設公開**（fanfun/ISAS・告知済みのみ・取得日を窓に毎日更新・休館/見学規制は除外）。検証: 全53ツール実呼び出し exit 0／--dead-code 0／--fuzz 312組合せ 例外漏れ0／--offline exit 0／--figures 描画系9／--media-links 13経路 問題0／--concurrency 3/3／--stdio 6/6／unittest 84件 OK。
 - v0.31.1 — **蓄積ストアの保持期限を全経路で適用**: `calendar_events`（一覧の軽い経路）でも prune するようにし、`calendar_store.KEEP_PAST_DAYS`（45日）を単一の出典にした。有効なユーザー予定は保持期限の対象外（削除は tombstone）。`figure.notes` と一覧の説明に保持期限を定数から生成して明示。検証: 全51ツール実呼び出し／--dead-code 0／--fuzz 288組合せ 例外漏れ0／--offline exit 0／--figures 描画系9／--media-links 12ツール 問題0／--concurrency 3/3／--stdio 6/6／unittest 49件 OK。ゲートは予定系ツールに専用引数を与え、書き込みを一時ストアへ逃がして4ツールすべてを実経路で検証する。
