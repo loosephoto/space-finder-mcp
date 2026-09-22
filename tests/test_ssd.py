@@ -9,13 +9,38 @@
 - `limit` は CAD/Fireball にはあるが **Sentry（summary）には無い** → 自分で切る
 - SWPC の `xray-flares-7-day.json` はフレアごとに1行。**空配列は「フレアなし」**
 """
+import os
+import shutil
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
 import requests
 
 sys.path.insert(0, "src")
+
+
+_TMP_DIR = None
+_OLD_STORE = None
+
+
+def setUpModule():
+    """ツールはカレンダーの蓄積ストアへ書くので、テストでは実ストアに触らない。"""
+    global _TMP_DIR, _OLD_STORE
+    from space_finder_mcp import calendar_store as store
+    _TMP_DIR = tempfile.mkdtemp(prefix="ssd_test_store_")
+    _OLD_STORE = (store.STORE_DIR, store.STORE_PATH)
+    store.STORE_DIR = _TMP_DIR
+    store.STORE_PATH = os.path.join(_TMP_DIR, "calendar_store.json")
+
+
+def tearDownModule():
+    from space_finder_mcp import calendar_store as store
+    if _OLD_STORE:
+        store.STORE_DIR, store.STORE_PATH = _OLD_STORE
+    if _TMP_DIR:
+        shutil.rmtree(_TMP_DIR, ignore_errors=True)
 
 
 def _resp(payload, status=200):
@@ -383,3 +408,88 @@ class SwpcFlaresTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class AnomalyCalendarStoreTests(unittest.TestCase):
+    """天体異常系の呼び出し結果がカレンダーの蓄積ストアへ反映される（v0.34.0）。"""
+
+    def setUp(self):
+        from space_finder_mcp import calendar_store as store
+        from space_finder_mcp import ssd
+        self.store, self.ssd = store, ssd
+        store.save(store._blank())                      # 各テストは空のストアから始める
+
+    def test_event_time_parses_both_jpl_formats(self):
+        """CAD は英語月名・Fireball は数字（秒あり）。ロケール非依存で解く。"""
+        cad = self.ssd._parse_event_time("2026-Sep-21 01:02")
+        num = self.ssd._parse_event_time("2026-09-15 11:26:13")
+        self.assertEqual((cad.year, cad.month, cad.day, cad.hour, cad.minute),
+                         (2026, 9, 21, 1, 2))
+        self.assertEqual(num.strftime("%Y-%m-%d %H:%M:%S"), "2026-09-15 11:26:13")
+        for junk in ("", None, "not a date", "2026-13-45 99:99", "20260915", "2026-Xxx-01 00:00"):
+            self.assertIsNone(self.ssd._parse_event_time(junk))
+
+    def test_fireball_call_stores_records(self):
+        with mock.patch.object(self.ssd, "_get_json", return_value=FIREBALL_PAYLOAD):
+            res = self.ssd.fireball_reports.__wrapped__(days=30)
+        self.assertEqual(res.structuredContent["calendar_stored"], 2)
+        recs = self.store.records(kinds={"fireball"})
+        self.assertEqual(len(recs), 2)
+        self.assertEqual(recs[0]["start_utc"], "2026-09-15T11:26:13Z")   # UTC のまま蓄積
+        self.assertIn("過去の観測記録", recs[0]["detail"])
+        self.assertIn("落下地点ではない", recs[0]["detail"])
+        self.assertIn("fireball_reports の呼び出しで蓄積", recs[0]["source"])   # 来歴
+
+    def test_neo_call_stores_records_with_tdb_note(self):
+        with mock.patch.object(self.ssd, "_get_json", return_value=CAD_PAYLOAD):
+            res = self.ssd.neo_close_approach.__wrapped__(days=7)
+        self.assertEqual(res.structuredContent["calendar_stored"], 2)
+        recs = self.store.records(kinds={"neo"})
+        self.assertEqual(len({r["key"] for r in recs}), 2)            # キーが衝突しない
+        self.assertTrue(all(r["key"].startswith("neo:") for r in recs))
+        self.assertTrue(all(r["start_utc"].endswith("Z") for r in recs))
+        self.assertIn("TDB", recs[0]["detail"])
+        self.assertIn("接近 ≠ 衝突", recs[0]["detail"])
+        self.assertIn("neo_close_approach の呼び出しで蓄積", recs[0]["source"])
+
+    def test_unparsable_rows_are_skipped_not_crashed(self):
+        payload = {"fields": ["des", "cd", "dist"], "data": [["X", "いつか", "0.01"]]}
+        recs = self.ssd._neo_calendar_records(
+            [{"designation": "X", "close_approach": "いつか"}], days=7, dist=0.05)
+        self.assertEqual(recs, [])
+        self.assertEqual(payload["fields"][0], "des")                 # 入力は壊さない
+
+    def test_errors_are_not_stored(self):
+        with mock.patch.object(self.ssd, "_get_json",
+                               side_effect=requests.ConnectionError("boom")):
+            res = self.ssd.fireball_reports.__wrapped__(days=30)
+        self.assertIn("error", res.structuredContent)
+        self.assertEqual(self.store.records(), [])                    # エラーは蓄積しない
+
+    def test_zero_results_keeps_provenance_only(self):
+        with mock.patch.object(self.ssd, "_get_json", return_value=FIREBALL_EMPTY):
+            res = self.ssd.fireball_reports.__wrapped__(days=30)
+        self.assertEqual(res.structuredContent["calendar_stored"], 0)
+        self.assertEqual(self.store.records(), [])
+        self.assertIn("cneos-fireball", self.store.stats()["sources"])   # 0件でも来歴は残す
+
+    def test_impact_risk_stores_nothing(self):
+        """Sentry の衝突確率は日付が無い（数十年〜百年の幅）→ カレンダーに置かない。"""
+        with mock.patch.object(self.ssd, "_get_json", return_value=SENTRY_SUMMARY):
+            self.ssd.impact_risk.__wrapped__()
+        self.assertEqual(self.store.records(), [])
+
+    def test_store_failure_is_reported_not_raised(self):
+        with mock.patch.object(self.ssd, "_get_json", return_value=FIREBALL_PAYLOAD),                 mock.patch("space_finder_mcp.calendar_store.upsert", side_effect=OSError("disk")):
+            res = self.ssd.fireball_reports.__wrapped__(days=30)
+        self.assertEqual(res.structuredContent["calendar_stored"], 0)
+        self.assertIn("カレンダーへの蓄積はできませんでした", res.content[0].text)
+        self.assertEqual(res.structuredContent["shown"], 2)          # 本体の結果は返る
+
+    def test_calendar_kinds_include_anomalies(self):
+        """図の凡例・notes・kinds 検証は KIND_ORDER / KINDS の1表から出る（色は重複させない）。"""
+        for key in ("neo", "fireball"):
+            self.assertIn(key, self.store.KIND_ORDER)
+            self.assertIn(key, self.store.KINDS)
+        colors = [self.store.KINDS[k][1] for k in self.store.KIND_ORDER]
+        self.assertEqual(len(colors), len(set(colors)))
+

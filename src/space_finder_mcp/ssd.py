@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import math
+import re
 import threading
 import time
 from typing import Optional
@@ -301,6 +302,145 @@ def _error_result(text: str, **extra) -> CallToolResult:
     return CallToolResult(content=[TextContent(type="text", text=text)], structuredContent=payload)
 
 
+# ---- カレンダーへの蓄積（呼び出した結果を後日の space_calendar に反映する）--------
+# カレンダー側は「自分で取得」しない（API を叩くのは本モジュールのツールだけ）。
+# 本モジュールのツールが蓄積ストアへ書いたレコードを space_calendar / calendar_events が
+# 表示する。どのツールの結果かはレコードの source に来歴として残す。
+SOURCE_NEO = "cneos-neo"
+SOURCE_FIREBALL = "cneos-fireball"
+
+# JPL の時刻文字列は2形式（CAD は英語月名・火球は数字）。strptime の '%b' はロケール依存なので自前で解く。
+_NUM_TIME_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?")
+_NAME_TIME_RE = re.compile(r"^(\d{4})-([A-Za-z]{3})-(\d{1,2})[ T](\d{2}):(\d{2})(?::(\d{2}))?")
+_MONTH_NUM = {m: i + 1 for i, m in enumerate(
+    ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"))}
+
+
+def _parse_event_time(value) -> Optional[_dt.datetime]:
+    """JPL の時刻文字列を datetime にする（解釈できない書式は None＝呼び出し側が捨てる）。"""
+    text = str(value or "").strip()
+    match = _NUM_TIME_RE.match(text)
+    if match:
+        parts = [int(match.group(i)) for i in (1, 2, 3, 4, 5)] + [int(match.group(6) or 0)]
+    else:
+        match = _NAME_TIME_RE.match(text)
+        if not match:
+            return None
+        mon = _MONTH_NUM.get(match.group(2).lower())
+        if mon is None:
+            return None
+        parts = [int(match.group(1)), mon, int(match.group(3)), int(match.group(4)),
+                 int(match.group(5)), int(match.group(6) or 0)]
+    try:
+        return _dt.datetime(*parts)
+    except ValueError:
+        return None
+
+
+def _iso_z(moment: _dt.datetime) -> str:
+    """UTC の ISO8601（末尾 Z）。蓄積ストアはこの形式だけを受け取る。"""
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _store_events(rows: list, source: str, window: str) -> int:
+    """レコードをカレンダーの蓄積ストアへ入れる（best-effort）。
+
+    蓄積の失敗でツールを落とさない（規約1）。calendar_store は標準ライブラリのみなので
+    起動時の負担は無視できる。戻り: 入った件数。
+    """
+    try:
+        from . import calendar_store as store
+        return store.upsert(rows, source, window=window, complete=True,
+                            ttl=store.TTL_ANOMALY)
+    except Exception:
+        return 0
+
+
+def _neo_calendar_records(results: list, *, days: int, dist: float) -> list:
+    """`neo_close_approach` の結果を蓄積ストア用レコード（kind="neo"）にする。
+
+    接近は日時が確定した計算値なので日付セルに置ける。数値は応答とまったく同じものを使い、
+    図・一覧と本文が食い違わないようにする（時刻は TDB である旨も本文に入れる）。
+    """
+    out = []
+    for row in results:
+        when = _parse_event_time(row.get("close_approach"))
+        if when is None:
+            continue
+        des = str(row.get("designation") or "?").strip() or "?"
+        lunar = row.get("distance_lunar")
+        title = ("{} 接近（{:.1f} 月距離）".format(des, lunar) if lunar is not None
+                 else "{} 接近".format(des))
+        bits = []
+        if row.get("distance_au") is not None:
+            bits.append("地心距離 {} au（{:,.0f} km・{:.2f} 月距離）".format(
+                _fmt_num(row.get("distance_au"), digits=5), row.get("distance_km") or 0.0,
+                lunar or 0.0))
+        if row.get("relative_velocity_km_s") is not None:
+            bits.append("相対速度 {} km/s".format(
+                _fmt_num(row.get("relative_velocity_km_s"))))
+        if row.get("estimated_diameter_m") is not None:
+            bits.append("{} 約 {:.3g} m".format(
+                "推定直径" if row.get("diameter_is_estimate") else "既知の直径",
+                row["estimated_diameter_m"]))
+        if row.get("h") is not None:
+            bits.append("H={}".format(_fmt_num(row.get("h"), digits=4)))
+        bits.append("接近時刻の不確かさ {}".format(row.get("uncertainty") or "不明"))
+        bits.append("**接近 ≠ 衝突**")
+        bits.append("接近時刻は TDB（UTC とは最大約1分差）")
+        bits.append("蓄積元: neo_close_approach（JPL CNEOS CAD・{}日/{} au 以内の照会）".format(
+            days, "{:g}".format(dist)))
+        out.append({
+            "key": "neo:{}:{}".format(des, when.strftime("%Y%m%dT%H%M")),
+            "kind": "neo", "title": title, "detail": "／".join(bits),
+            "start_utc": _iso_z(when), "solid": True,
+            "source": "JPL CNEOS (CAD)／neo_close_approach の呼び出しで蓄積",
+            "url": row.get("url") or "", "certainty": "computed",
+        })
+    return out
+
+
+def _fireball_calendar_records(results: list, *, days: int) -> list:
+    """`fireball_reports` の結果を蓄積ストア用レコード（kind="fireball"）にする。
+
+    火球は**過去の観測記録**であることを title/detail に明示する（予定として読まれないように）。
+    """
+    out = []
+    for row in results:
+        when = _parse_event_time(row.get("date_utc"))
+        if when is None:
+            continue
+        kt = row.get("impact_energy_kt")
+        bits = []
+        if kt is not None:
+            bits.append("衝突エネルギー {} kt{}".format(_fmt_num(kt), _energy_compare(kt)))
+        if row.get("radiated_energy_j") is not None:
+            bits.append("放射エネルギー {:,.1e} J（TNT 換算 約 {:.3g} t）".format(
+                row["radiated_energy_j"], row["radiated_energy_j"] / J_PER_TON))
+        if row.get("altitude_km") is not None:
+            bits.append("最大光度点の高度 {} km".format(_fmt_num(row.get("altitude_km"))))
+        if row.get("latitude") is not None and row.get("longitude") is not None:
+            bits.append("観測位置 {}°{} {}°{}（最大光度時点・落下地点ではない）".format(
+                "{:.1f}".format(row["latitude"]), row.get("latitude_dir") or "",
+                "{:.1f}".format(row["longitude"]), row.get("longitude_dir") or ""))
+        else:
+            bits.append("観測位置は未報告")
+        if row.get("entry_speed_km_s") is not None:
+            bits.append("突入速度 約 {:.1f} km/s".format(row["entry_speed_km_s"]))
+        bits.append("**過去の観測記録**（隕石の落下地点・落下物の推定ではない）")
+        bits.append("蓄積元: fireball_reports（JPL CNEOS Fireball・直近{}日の照会）".format(days))
+        out.append({
+            "key": "fireball:{}".format(when.strftime("%Y%m%dT%H%M%S")),
+            "kind": "fireball",
+            "title": ("火球（{:.3g} kt）".format(kt) if kt else "火球（観測）"),
+            "detail": "／".join(bits),
+            "start_utc": _iso_z(when), "solid": True,
+            "source": "JPL CNEOS (Fireball)／fireball_reports の呼び出しで蓄積",
+            "url": "https://cneos.jpl.nasa.gov/fireballs/", "certainty": "observed",
+        })
+    return out
+
+
 @ttl_cache(TTL_HOURLY, maxsize=32, skip_if=is_error_result)
 def fireball_reports(days: int = 30, min_impact_energy_kt: Optional[float] = None,
                      limit: int = 10, require_location: bool = False) -> CallToolResult:
@@ -385,6 +525,10 @@ def fireball_reports(days: int = 30, min_impact_energy_kt: Optional[float] = Non
             "location_reported": bool(rec.get("lat-dir") and rec.get("lon-dir")),
         })
 
+    # 呼び出した結果をカレンダーの蓄積ストアへ入れる（後日の space_calendar / calendar_events に出る）
+    stored = _store_events(_fireball_calendar_records(results, days=days), SOURCE_FIREBALL,
+                           "fireball_reports:{}:days={}".format(today.isoformat(), days))
+
     head = "🪨 **JPL CNEOS 火球（大気圏突入）観測** 直近{}日（{}〜{} UTC）: {}件".format(
         days, start.isoformat(), today.isoformat(), len(results))
     if min_kt is not None:
@@ -396,6 +540,10 @@ def fireball_reports(days: int = 30, min_impact_energy_kt: Optional[float] = Non
         "ℹ️ 緯度経度・高度は**最大光度（ピーク）時点**の値で、落下地点ではありません。",
         "ℹ️ 元データは NASA/JPL CNEOS Fireball Data（米国政府センサ・地上観測の報告）。"
         "位置が未報告の記録は「位置不明」とし、突入速度は速度成分が揃った記録のみ算出します。",
+        ("ℹ️ この結果 {} 件をカレンダーの蓄積ストアへ反映しました"
+         "（`space_calendar` / `calendar_events` に表示されます）".format(stored)
+         if stored else
+         "ℹ️ カレンダーへの蓄積はできませんでした（蓄積ストアに書き込めませんでした）"),
         "出典: NASA/JPL CNEOS（ssd-api.jpl.nasa.gov）",
     ]
     if not results:
@@ -405,7 +553,8 @@ def fireball_reports(days: int = 30, min_impact_energy_kt: Optional[float] = Non
         structuredContent={
             "source": "NASA/JPL CNEOS Fireball Data API",
             "days": days, "start_date": start.isoformat(), "end_date": today.isoformat(),
-            "min_impact_energy_kt": min_kt, "shown": len(results), "results": results,
+            "min_impact_energy_kt": min_kt, "shown": len(results),
+            "calendar_stored": stored, "results": results,
         })
 
 
@@ -506,6 +655,12 @@ def neo_close_approach(days: int = 7, max_distance_au: float = 0.05, limit: int 
             "url": _sbdb_url(des),
         })
 
+    # 呼び出した結果をカレンダーの蓄積ストアへ入れる（後日の space_calendar / calendar_events に出る）
+    stored = _store_events(_neo_calendar_records(results, days=days, dist=dist), SOURCE_NEO,
+                           "neo_close_approach:{}:days={}:dist={:g}au".format(
+                               _dt.datetime.now(_dt.timezone.utc).date().isoformat(),
+                               days, dist))
+
     head = "☄️ **JPL CNEOS 小惑星・彗星の地球接近** {}日以内・{} au 以内: 全{}件中{}件".format(
         days, "{:g}".format(dist), total, len(results))
     notes = [
@@ -515,6 +670,10 @@ def neo_close_approach(days: int = 7, max_distance_au: float = 0.05, limit: int 
         "ℹ️ 直径は観測からの**推定**です（既知の直径があればそれを、無ければ絶対等級 H と"
         "アルベド{} の仮定から換算）。接近時刻は TDB（力学時）で表示しています。".format(
             ALBEDO_ASSUMED),
+        ("ℹ️ この結果 {} 件をカレンダーの蓄積ストアへ反映しました"
+         "（`space_calendar` / `calendar_events` に表示されます）".format(stored)
+         if stored else
+         "ℹ️ カレンダーへの蓄積はできませんでした（蓄積ストアに書き込めませんでした）"),
         "出典: NASA/JPL CNEOS（ssd-api.jpl.nasa.gov）／ 各天体の詳細は JPL SBDB で確認できます。",
     ]
     if not results:
@@ -526,7 +685,8 @@ def neo_close_approach(days: int = 7, max_distance_au: float = 0.05, limit: int 
             "source": "NASA/JPL CNEOS SBDB Close-Approach Data API",
             "days": days, "max_distance_au": dist, "hazardous_only": hazardous_only,
             "total": total, "shown": len(results),
-            "truncated": total > len(results), "results": results,
+            "truncated": total > len(results),
+            "calendar_stored": stored, "results": results,
         })
 
 
@@ -566,6 +726,11 @@ def impact_risk(designation: Optional[str] = None, min_probability: float = 1e-3
             **和名・愛称は JPL 側が受け付けません**。推測せず仮符号で指定してください。
         min_probability: 一覧の下限（累積衝突確率 ip。既定 1e-3 = 0.1%）。1e-10〜1。
         limit: 一覧で表示する最大件数（1〜50、既定 10）。確率の高い順。
+
+    **このツールの結果はカレンダーに置きません**: Sentry の衝突確率は特定の日付ではなく
+    数十年〜百年の幅（`range`）に対する確率で、日付セルに置くと架空の予定になるためです
+    （日付のある接近・火球は `neo_close_approach` / `fireball_reports` が蓄積し、
+    `space_calendar` に反映されます）。
 
     出典: NASA/JPL CNEOS Sentry（ssd-api.jpl.nasa.gov）
     """

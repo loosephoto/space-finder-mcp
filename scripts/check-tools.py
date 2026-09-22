@@ -53,7 +53,8 @@ GATE_ARGS = {
     "calendar_event_remove": {"id": "user:gate-does-not-exist"},
 }
 # カレンダーのストアに書き込むツールは、ゲートでは一時ストアへ逃がす（利用者の実データを汚さない）
-STORE_WRITE_TOOLS = ("calendar_event_add",)
+# 天体異常系（fireball_reports / neo_close_approach）は呼び出し結果を蓄積するのでここに含める。
+STORE_WRITE_TOOLS = ("calendar_event_add", "fireball_reports", "neo_close_approach")
 
 
 def _fill_kwargs(fn) -> dict:

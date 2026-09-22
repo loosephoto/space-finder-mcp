@@ -104,10 +104,17 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 - **☀️ `space_weather` の SWPC フォールバックにフレアイベント（直近7日）を追加** — X線クラスに加えて、**フレアごとの発生時刻（開始/最大/終了）と級の内訳**を返します（`xray-flares-7-day.json`。**空配列は「フレアなし＝静穏」**として扱い、取得失敗 `failed` と区別）。M級以上なら AI 助言と `_advice` にも反映します。
 - **🧪 検証** — 実測に基づく回帰テスト28件を追加（`energy` の単位は **10^10 J** で kt は `impact-e` だけ／0件では **`data` キー自体が来ない**／`fields` の並びに依存しない／Sentry の **200 + `error`**／和名は 400 で拒否／SWPC の空配列は静穏）。
 
+**v0.34.0 — 天体異常系の結果をカレンダーへ蓄積（後日 `space_calendar` / `calendar_events` に反映）**
+
+- **📥 `neo_close_approach` / `fireball_reports` を呼ぶと結果が蓄積ストアに入ります**（`calendar_store.KINDS` に **`neo`（小惑星接近）** と **`fireball`（火球観測）** を追加）。カレンダー側は **JPL を叩きません**（取得するのはこの2ツールだけ）＝呼んだ月ぶんだけ出るので、**未蓄積の月は「イベントが無い」ではなく「まだ調べていない」**。「小惑星接近 N 件・火球 N 件」のように件数を注記へ数値で出し、fireball は**過去の観測記録**（落下地点ではない）である旨を必ず併記します。
+- **🚫 `impact_risk` はカレンダーに置きません** — Sentry の衝突確率は特定の日付ではなく**数十年〜百年の幅**に対する確率で、日付セルに置くと架空の予定になるためです（docstring にも明記）。
+- **🧪 検証** — 回帰テスト12件を追加（CAD の `2026-Sep-21 01:02` と 火球の `2026-09-15 11:26:13` の**2書式をロケール非依存で解釈**・エラーは蓄積しない・0件でも来歴は残す・蓄積失敗はツールを落とさず注記に出す・UTC→現地時刻の変換・`kinds=neo` で絞れる）。テストは蓄積ストアを一時ファイルへ逃がして実行します。
+
 登録ツールは **56本**。
 
 ### 以前の更新
 
+- **v0.33.0** — **天体異常系（火球・小惑星接近・衝突リスク）3ツール**（JPL CNEOS・認証不要＝api.nasa.gov の共有枠を消費しない）。`space_weather` の SWPC 経路に GOES フレアイベント（直近7日）も追加。
 - **v0.32.1** — **画像内の日本語フォントを OS 非依存で解決（豆腐=□の修正）**: `img_common.load_font()` の探索を *環境変数 → OS 標準パス（Windows メイリオ / macOS ヒラギノ / Linux Noto CJK・IPA・VL・Takao）→ 標準フォントディレクトリの走査* に拡張し、採用前に **cmap で日本語グリフの有無を検証**（追加依存なし）。matplotlib 経路は `apply_matplotlib_cjk_font()`。新ゲート `--fonts` と回帰テスト8件（計94件）。
 - **v0.32.0** — **観測アーカイブ・速報・国内イベントの3層を追加（52→53ツール）**: `mast_observations`（MAST・プレビュー画像をインライン表示）・`gcn_alerts`（GCN Circulars・HTML 主経路）・カレンダーへの **JAXA 施設公開**（告知済みのみ・取得日を窓に毎日更新）。
 - **v0.31.1** — **蓄積ストアの保持期限を全経路で適用**（`calendar_events` でも prune・`KEEP_PAST_DAYS` を単一出典・有効なユーザー予定は対象外）。`figure.notes` に保持期限を定数から生成。ゲートは予定系4ツールに専用引数を与え、書き込みを一時ストアへ逃がして実経路を検証（計49件）。
@@ -304,9 +311,9 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `eodashboard_collections` | EO Dashboard（NASA×ESA×JAXA共同）の173データセットをテーマ・機関・キーワードで検索 | EO Dashboard (GitHub catalog) | 不要 |
 | `eodashboard_detail` | EO Dashboardの1データセットの詳細（衛星・センサー・説明・画像・参照リンク） | EO Dashboard (GitHub catalog) | 不要 |
 | `space_weather` | 宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象）。**NASA が枠切れ・障害のときは認証不要の NOAA SWPC（Kp・NOAAスケール・GOES X線・フレアイベント（直近7日）・太陽風・陽子・警報・黒点）へ自動切替**（出典を明記） | NASA DONKI → **NOAA SWPC（フォールバック）** | 不要（SWPC）/キー任意（DONKI） |
-| `fireball_reports` | **火球（大気圏突入）の観測記録**（直近1〜1825日・衝突エネルギーの下限指定可）。緯度経度・突入高度・**衝突エネルギー(kt)**・放射エネルギー(J)・突入速度（成分から算出）。広島型原爆（約15kt）との比を併記。⚠️ 隕石の回収情報ではなく**大気圏突入の観測** | NASA/JPL CNEOS Fireball Data | 不要 |
-| `neo_close_approach` | **小惑星・彗星の地球接近**（1〜365日先・距離上限 au）。地心距離を **au / km / 月距離**で併記し、既知の直径（無ければ絶対等級 H から**推定**・アルベド0.14 仮定）と接近時刻の不確かさを返す。`hazardous_only` で PHA のみ。⚠️ 接近は衝突ではない | NASA/JPL CNEOS SBDB CAD | 不要 |
-| `impact_risk` | **将来の衝突リスク**（JPL Sentry）。累積衝突確率を**確率＋「何回に1回」**で表示し、パレルモスケール・想定時期・想定衝突数を返す。`designation`（**仮符号/番号のみ・和名不可**）を指定すると仮想衝突(VI)の一覧まで | NASA/JPL CNEOS Sentry | 不要 |
+| `fireball_reports` | **火球（大気圏突入）の観測記録**（直近1〜1825日・衝突エネルギーの下限指定可）。緯度経度・突入高度・**衝突エネルギー(kt)**・放射エネルギー(J)・突入速度（成分から算出）。広島型原爆（約15kt）との比を併記。⚠️ 隕石の回収情報ではなく**大気圏突入の観測**。**呼ぶと結果がカレンダーの蓄積ストアに入り、後日 `space_calendar` / `calendar_events` に出ます**（`calendar_stored` に件数） | NASA/JPL CNEOS Fireball Data | 不要 |
+| `neo_close_approach` | **小惑星・彗星の地球接近**（1〜365日先・距離上限 au）。地心距離を **au / km / 月距離**で併記し、既知の直径（無ければ絶対等級 H から**推定**・アルベド0.14 仮定）と接近時刻の不確かさを返す。`hazardous_only` で PHA のみ。⚠️ 接近は衝突ではない。**呼ぶと結果がカレンダーに蓄積され、後日 `space_calendar` / `calendar_events` に反映されます**（接近時刻は TDB・UTC とは最大約1分差） | NASA/JPL CNEOS SBDB CAD | 不要 |
+| `impact_risk` | **将来の衝突リスク**（JPL Sentry）。累積衝突確率を**確率＋「何回に1回」**で表示し、パレルモスケール・想定時期・想定衝突数を返す。`designation`（**仮符号/番号のみ・和名不可**）を指定すると仮想衝突(VI)の一覧まで。⚠️ 確率は特定の日付ではなく**数十年〜百年の幅**に対する値なので**カレンダーには置きません** | NASA/JPL CNEOS Sentry | 不要 |
 | `stac_collections` | AWS Earth Searchの衛星データコレクション一覧 | AWS Earth Search STAC | 不要 |
 | `stac_search` | Sentinel-2 / Landsat / NAIP / DEM をSTAC検索（場所・日時・雲量） | AWS Earth Search STAC | 不要 |
 | `iss_now` | ISS（国際宇宙ステーション）の現在位置を取得し Googleマップリンクで表示 | Open Notify | 不要 |
@@ -314,8 +321,8 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `planetary_orbiter_track` | 任意の天体（月・火星・水星・タイタン等）を周回する探査機の現在位置と軌道トレイルを、その天体の地図にプロットした画像を返す。JPL Horizons の状態ベクトルを IAU 自転モデルで天体固定座標（緯度経度・高度）に変換し、NASA Trek の等角図法地図に重ねる。`span_deg=360`で天体全面表示にも対応。**過去機（かぐや等）は運用終了を案内し、落点が公表されている機体は落点を地点マーカーで描いた地図（`figure.kind="impact_site_map"`）を返す**。`sites="apollo"`（または `"apollo11"`〜`"apollo17"`, `"all"`）で **地点マーカー図**（`figure.kind="landing_site_map"`／木星は `impact_site_map`）も返す。**全球等角図がある天体（月・火星・水星・タイタン・ベスタ・ケレス）は地形画像の上に、無い天体（木星・土星・冥王星・金星・ガリレオ衛星など）は緯度経度グリッドの上に**公表座標を描く | JPL Horizons + NASA Trek / NASA NSSDC / PDS | 不要 |
 | `planetary_rover_location_map` | 任意の天体面を移動する探査ローバーの現在地をその天体の地図中心に示した画像（走行経路・着陸点）。NASA MMGIS の位置データと NASA Trek の等角地図を合成。現状データは火星ローバー（Perseverance/Curiosity） | NASA MMGIS + Trek WMTS | 不要 |
 | `weather_satellite_now` | GEO/LEO気象衛星19機（ひまわり9号・GOES-18/19・Meteosat・FY・GK-2A・INSAT・NOAA-20/-21・SNPP・Metop-B/C・FY-3D）の公開画像。GEOは最新フレーム、LEOは日次全球合成。取得不可は `restricted`/`unavailable`/`non_image_product` の理由コードで返す | JMA(himawari.asia)/NOAA STAR/EUMETSAT WMS/CMA-NSMC/KMA/IMD/NASA GIBS | 不要 |
-| `space_calendar` | **宇宙・天文イベントカレンダー**（月グリッド図＋JSON）。打ち上げ（LL2 の月範囲クエリ・日付精度 `net_precision` が Day/Hour/Minute/Second の行だけを日付セルに配置）・天文現象（Skyfield のローカル計算: 月相・二十四節気・惑星の衝/合/内合・最大離角・日食月食・流星群）・公開イベント（国立天文台＋**JAXA の施設一般公開・特別公開**＝ファン!ファン!JAXA! の施設見学ページと宇宙科学研究所のイベント表。告知済みのみを載せ、取得日を窓にして毎日取り直します）・自分の予定を重ねて描く。取得結果は**蓄積ストア**に溜め、要求月 M に対して窓 [M-1, M+2] を確保し**未取得・期限切れの月だけ**取りに行く（2回目は API 0 回）。NASA の公式リスト（WP REST）と照合した行には公式URLを付与 | Launch Library 2 + JPL DE421/Skyfield + 国立天文台 + JAXA + nasa.gov | 不要 |
-| `calendar_events` | 蓄積済みイベントの一覧（**図を描かず外部APIも呼ばない**軽い経路）。打ち上げ・天文現象・公開イベント・自分の予定を日付順に返す | 蓄積ストア（ローカル） | 不要 |
+| `space_calendar` | **宇宙・天文イベントカレンダー**（月グリッド図＋JSON）。打ち上げ（LL2 の月範囲クエリ・日付精度 `net_precision` が Day/Hour/Minute/Second の行だけを日付セルに配置）・天文現象（Skyfield のローカル計算: 月相・二十四節気・惑星の衝/合/内合・最大離角・日食月食・流星群）・公開イベント（国立天文台＋**JAXA の施設一般公開・特別公開**＝ファン!ファン!JAXA! の施設見学ページと宇宙科学研究所のイベント表。告知済みのみを載せ、取得日を窓にして毎日取り直します）・**小天体イベント（小惑星接近・火球観測。`neo_close_approach` / `fireball_reports` の呼び出し結果を蓄積したもの＝カレンダー自身は JPL を叩かないので未蓄積の月は空）**・自分の予定を重ねて描く。取得結果は**蓄積ストア**に溜め、要求月 M に対して窓 [M-1, M+2] を確保し**未取得・期限切れの月だけ**取りに行く（2回目は API 0 回）。NASA の公式リスト（WP REST）と照合した行には公式URLを付与 | Launch Library 2 + JPL DE421/Skyfield + 国立天文台 + JAXA + nasa.gov | 不要 |
+| `calendar_events` | 蓄積済みイベントの一覧（**図を描かず外部APIも呼ばない**軽い経路）。打ち上げ・天文現象・**小惑星接近・火球観測（`neo_close_approach` / `fireball_reports` の呼び出しで蓄積されたぶん）**・公開イベント・自分の予定を日付順に返す | 蓄積ストア（ローカル） | 不要 |
 | `calendar_event_add` | **自分の予定をカレンダーに追加**（ローカル保存・外部送信なし）。日付は `2026-10-24` / `10月24日` 形式、時刻・終了日・繰り返し（毎日/毎週/毎月/毎年）対応。**フローティングなローカル日時**なので `place` を変えても予定の日付は動かない | ローカル（`%LOCALAPPDATA%\space-finder-mcp`） | 不要 |
 | `calendar_event_remove` | 自分の予定を削除（id か title[+date]）。冪等（既に無ければエラーにしない）。同名が複数あるときは**削除せず候補を提示**して停止 | ローカル | 不要 |
 | `satellite_status` | 世界中の気象・地球観測衛星の運用ステータス・軌道・打ち上げ日（Roscosmos等）。**カタログ全1,000件超を走査**し、query は一致度順（acronym 完全/前方一致 → 名称の語境界 → 部分一致のみ）で提示 | WMO OSCAR | 不要 |
@@ -554,6 +561,8 @@ A: space_weather() → フレア・CME・地磁気嵐・粒子現象をまとめ
 
 - **`fireball_reports`** — 火球（fireball）は**大気圏に突入して光った現象**の観測記録です（米国政府センサ・地上観測の報告）。`days`（1〜1825）・`min_impact_energy_kt`（kt TNT 換算の下限）・`limit`（1〜50）・`require_location`（位置が報告された記録のみ）を指定できます。火球の**ゼロ件**は `data` キー自体が返らない（`count: 0` のみ）ため、その場合も「該当なし」として扱います。**隕石の回収・落下物の推定はしません**（落下物の情報が欲しい場合は別の情報源が必要です）。
 - **`neo_close_approach`** — `days`（1〜365）・`max_distance_au`（既定 0.05 ≒ 19.5 月距離。1 LD ≒ 0.00256 au）・`limit`・`hazardous_only`（PHA のみ）。距離は **au / km / 月距離(LD)** の3通りで併記します。直径は**既知の値があればそれを、無ければ絶対等級 H とアルベド 0.14 の仮定から換算**した推定値で、推定の場合はその旨を表示と `structuredContent`（`diameter_is_estimate`）に残します。**接近時刻は TDB**（力学時）で、`t_sigma_f`（3σ の不確かさ）も返します。`neo_today` との違いは「今日だけ・api.nasa.gov のキー枠」ではなく、**任意の期間・距離**を扱えることです。
+- **カレンダーへの反映（v0.34.0）** — `neo_close_approach` / `fireball_reports` を呼ぶと、返した行がそのまま**蓄積ストア**（`%LOCALAPPDATA%\space-finder-mcp\calendar_store.json`）の `neo` / `fireball` レコードになり、**後日 `space_calendar` / `calendar_events` に表示**されます（`structuredContent.calendar_stored` に件数、`content` にも「◯件を反映しました」と出ます。書けなかった場合はその旨を出し、例外にはしません）。接近は**日付セルに置ける**（時刻が確定した計算値。蓄積時に TDB である旨を併記）一方、火球は**過去の観測記録**として置き、落下地点ではない旨を併記します。**`impact_risk` は日付が無い**（数十年〜百年の幅の確率）ため蓄積しません。保持期限は既存の規則どおり **45日**（古い API 由来レコードは prune。ユーザー予定は対象外）。
+
 - **`impact_risk`** — Sentry の**衝突確率の推算**です（進路が確定した衝突予報ではありません）。`min_probability`（既定 1e-3 = 0.1%）以上の天体を確率の高い順に返し、`designation` を指定すると1天体の詳細（累積確率・想定時期・仮想衝突(VI)・観測弧・パレルモスケール）を返します。`designation` は**仮符号または番号**（例 `"2024 YR4"` / `"2000 SG344"` / `"99942"`）で、**和名・愛称は JPL 側が受け付けません**（推測せず指定方法を案内します）。**確率が 0 になった天体は Sentry から削除され、HTTP 200 + `error` で返る**ため、それを検査して「リスクなし（監視対象から外れた）」を意味しうる旨を案内します。
 - **数値の読み方** — 衝突エネルギーは**広島型原爆（約15kt）との比**、距離は**月距離**、直径は**推定であるかどうか**を必ず併記します（数値から生成し、書き手によって変わらないようにしています）。
 

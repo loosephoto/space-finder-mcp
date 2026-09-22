@@ -9,6 +9,7 @@
 | 公開・イベント | 国立天文台（NINS のイベント一覧） | HTML（構造化された `news-item` ブロック。開催日の範囲が取れる） |
 | JAXA 施設公開 | ファン!ファン!JAXA!（施設見学）＋ 宇宙科学研究所のイベント表 | HTML（`<li>` / `<tr>` 単位の小さな正規表現）。**告知済みのみ**のスナップショット（アーカイブ無し）なので、取得日を窓にして毎日取り直す |
 | ユーザー予定 | ローカルの蓄積ストア | `calendar_event_add` / `remove` / `events` |
+| 小天体イベント | JPL CNEOS（火球・地球接近） | **蓄積のみ**（`neo_close_approach` / `fireball_reports` を呼ぶと結果が蓄積され、この図に出る。カレンダー自身は取得しない＝未取得の月は空） |
 
 蓄積（`calendar_store.py`）を一次ソースにした **read-through**: 要求月 M に対して窓 [M-1, M+2] を確保し、
 未取得・期限切れの月だけ取りに行く（月が進むと差分は1ヶ月になる）。計算値は決定的なので月をキーに
@@ -19,7 +20,8 @@
 
 図は `structuredContent.figure`（schema: figure/1）を返し、`figure.notes` は**要約せず引用**してください。
 出典: Launch Library 2 (thespacedevs.com) ／ JPL DE421 + Skyfield ／ 国立天文台 イベント情報 ／
-JAXA（ファン!ファン!JAXA!・宇宙科学研究所） ／ nasa.gov。
+JAXA（ファン!ファン!JAXA!・宇宙科学研究所） ／ nasa.gov ／ JPL CNEOS（火球・地球接近。
+`neo_close_approach` / `fireball_reports` の呼び出し結果を蓄積したもの）。
 """
 from __future__ import annotations
 
@@ -572,7 +574,10 @@ def space_calendar(year: Optional[int] = None, month: Optional[int] = None, plac
         year: 対象年（既定: 観測地の今年）。
         month: 対象月 1〜12（既定: 観測地の今月）。
         place: 基準地（既定 東京）。任意の地名をジオコーダで解決し、その現地時刻で描きます。
-        kinds: 表示するカテゴリ（カンマ区切り）: user/launch/sky/public/holiday。all で全部。
+        kinds: 表示するカテゴリ（カンマ区切り）: user/launch/sky/neo/fireball/public/holiday。
+            all で全部。**neo（小惑星接近）と fireball（火球観測）は、`neo_close_approach` /
+            `fireball_reports` を呼んで蓄積されたぶんだけ表示されます**（カレンダー自身は
+            JPL を叩かないので、未取得の月は「イベントが無い」のではなく「まだ蓄積が無い」）。
         lat: 緯度（place の代わりに数値で指定）。
         lon: 経度（同上）。
     """
@@ -622,7 +627,12 @@ def space_calendar(year: Optional[int] = None, month: Optional[int] = None, plac
         "自動削除する（有効なユーザー予定は対象外・削除した予定は tombstone として残る）".format(
             store.KEEP_PAST_DAYS),
         "出典: Launch Library 2 (thespacedevs.com) ／ JPL DE421 + Skyfield ／ 国立天文台 イベント情報"
-        " ／ JAXA（ファン!ファン!JAXA!・宇宙科学研究所） ／ nasa.gov（照合用）",
+        " ／ JAXA（ファン!ファン!JAXA!・宇宙科学研究所） ／ nasa.gov（照合用）"
+        " ／ JPL CNEOS（火球・地球接近のみ。呼び出し結果の蓄積）",
+        "小天体イベント（小惑星接近 {} 件・火球 {} 件）は `neo_close_approach` / "
+        "`fireball_reports` の呼び出しで蓄積したレコード（カレンダー自身は JPL を叩かないため、"
+        "未蓄積の月は空＝イベントが無いわけではない。接近時刻は TDB・火球は観測記録）".format(
+            counts["neo"], counts["fireball"]),
     ])
     fig = figure_payload(
         kind="calendar", title="{}年{}月 宇宙・天文イベントカレンダー".format(year_i, month_i),
@@ -763,7 +773,9 @@ def calendar_events(year: Optional[int] = None, month: Optional[int] = None, pla
         year: 対象年（既定: 基準地の今年）。
         month: 対象月（既定: 基準地の今月）。
         place: タイムゾーン決定のための基準地（既定 東京）。
-        kinds: カテゴリの絞り込み: user/launch/sky/public/holiday（カンマ区切り）。all で全部。
+        kinds: カテゴリの絞り込み: user/launch/sky/neo/fireball/public/holiday（カンマ区切り）。
+            all で全部。neo / fireball は `neo_close_approach` / `fireball_reports` の呼び出しで
+            蓄積されたレコードだけが出ます。
     """
     res = _resolve_place(place, None, None)
     if res is None:
@@ -791,7 +803,8 @@ def calendar_events(year: Optional[int] = None, month: Optional[int] = None, pla
         lines += ["", "日付が確定していない打ち上げ（{} 件）:".format(len(tray))]
         lines += ["- {}（{}）".format(e["title"], e["detail"] or "日付未定") for e in tray]
     lines.append("")
-    lines.append("出典: Launch Library 2 ／ JPL DE421 + Skyfield ／ 国立天文台 イベント情報（カテゴリ別 {}）"
+    lines.append("出典: Launch Library 2 ／ JPL DE421 + Skyfield ／ 国立天文台 イベント情報 ／ "
+                 "JPL CNEOS（火球・地球接近。ssd のツール呼び出しで蓄積）（カテゴリ別 {}）"
                  .format("、".join("{} {} 件".format(store.KINDS[k][0], counts[k]) for k in store.KIND_ORDER)))
     return CallToolResult(
         content=[TextContent(type="text", text="\n".join(lines))],

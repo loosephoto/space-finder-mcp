@@ -32,6 +32,9 @@ TTL_LAUNCH_FUTURE = 6 * 3600
 TTL_PUBLIC = 24 * 3600
 TTL_NASA_LIST = 24 * 3600
 TTL_NEVER = None          # 計算値は決定的なので期限なし（キーに年月が入る）
+# 天体異常系（火球・地球接近）の蓄積レコード。呼び出し時に入るが、接近は観測が進むと
+# 予報が更新されるので、1日で「要再確認」として扱う（カレンダー側は取得しない）。
+TTL_ANOMALY = 24 * 3600
 # 過去日の API 由来レコードを保持する日数（これを過ぎたら prune で消える）。
 # 有効なユーザー予定はこの対象外（永久に残す）。
 KEEP_PAST_DAYS = 45
@@ -41,10 +44,13 @@ KINDS = {
     "user":    ("ユーザー予定", (255, 138, 196)),
     "launch":  ("打ち上げ", (110, 168, 254)),
     "sky":     ("天文現象", (245, 200, 107)),
+    # 天体異常系（ssd.py のツール呼び出しで蓄積。カレンダー自身は取得しない）
+    "neo":     ("小惑星接近", (255, 138, 74)),
+    "fireball": ("火球観測", (236, 92, 92)),
     "public":  ("公開・イベント", (126, 224, 168)),
     "holiday": ("暦・祝日", (154, 164, 178)),
 }
-KIND_ORDER = ("user", "launch", "sky", "public", "holiday")
+KIND_ORDER = ("user", "launch", "sky", "neo", "fireball", "public", "holiday")
 
 _LOCK = threading.RLock()
 _REPEATS = ("none", "daily", "weekly", "monthly", "yearly")

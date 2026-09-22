@@ -342,3 +342,59 @@ class Ll2BudgetTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class CalendarAnomalyTests(unittest.TestCase):
+    """ssd のツール（火球・地球接近）が蓄積したレコードがカレンダーに出る（v0.34.0）。"""
+
+    def setUp(self):
+        from space_finder_mcp import calendar_store as store
+        from space_finder_mcp import space_calendar as cal
+        self.store, self.cal = store, cal
+        self._old = store.STORE_PATH
+        fd, path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        os.remove(path)
+        store.STORE_PATH = path
+        self.path = path
+
+    def tearDown(self):
+        self.store.STORE_PATH = self._old
+        if os.path.exists(self.path):
+            os.remove(self.path)
+
+    def _put_anomalies(self):
+        self.store.upsert([
+            {"key": "neo:2026 SM9:20260921T0102", "kind": "neo",
+             "title": "2026 SM9 接近（2.5 月距離）", "detail": "接近 ≠ 衝突／TDB",
+             "start_utc": "2026-09-21T01:02:00Z", "solid": True, "certainty": "computed",
+             "source": "JPL CNEOS (CAD)／neo_close_approach の呼び出しで蓄積", "url": ""},
+            {"key": "fireball:20260915T112613", "kind": "fireball",
+             "title": "火球（0.079 kt）", "detail": "過去の観測記録",
+             "start_utc": "2026-09-15T11:26:13Z", "solid": True, "certainty": "observed",
+             "source": "JPL CNEOS (Fireball)／fireball_reports の呼び出しで蓄積", "url": ""},
+        ], "cneos-mixed", window="lookup", complete=True, ttl=self.store.TTL_ANOMALY)
+
+    def test_anomaly_records_land_in_cells_with_local_time(self):
+        self._put_anomalies()
+        drawn, tray = self.cal._assemble(2026, 9, 9.0, {"neo", "fireball"}, {})
+        self.assertEqual(tray, [])
+        self.assertEqual({e["kind"] for e in drawn}, {"neo", "fireball"})
+        neo = [e for e in drawn if e["kind"] == "neo"][0]
+        self.assertEqual(neo["dt"].strftime("%Y-%m-%d %H:%M"), "2026-09-21 10:02")   # UTC+9
+        self.assertIn("呼び出しで蓄積", neo["source"])          # 来歴が一覧にも出る
+
+    def test_kinds_filter_can_select_anomalies(self):
+        self._put_anomalies()
+        only_neo, _ = self.cal._assemble(2026, 9, 9.0, {"neo"}, {})
+        self.assertEqual({e["kind"] for e in only_neo}, {"neo"})
+        kinds, err = self.cal._parse_kinds("neo,fireball")
+        self.assertIsNone(err)
+        self.assertEqual(kinds, {"neo", "fireball"})
+        self.assertIsNotNone(self.cal._parse_kinds("fireballs")[1])   # 未知の値は案内して停止
+
+    def test_no_stored_anomalies_means_empty_not_fabricated(self):
+        """カレンダーは JPL を叩かない＝未蓄積の月は空（架空の接近を描かない）。"""
+        drawn, tray = self.cal._assemble(2026, 9, 9.0, {"neo", "fireball"}, {})
+        self.assertEqual(drawn, [])
+        self.assertEqual(tray, [])
+
