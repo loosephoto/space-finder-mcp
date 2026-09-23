@@ -620,6 +620,83 @@ class OrbitRouteTests(unittest.TestCase):
         self.assertTrue(any("誇張した太陽マーカー" in n for n in fig.get("notes", [])))
 
 
+class OrbitRouteNbodyPerihelionTests(unittest.TestCase):
+    """通過経路の近日点日付は SBDB の2体近似だけでは足りない（n 体解を併記する）回帰テスト。
+
+    実測 1P/Halley: 次回近日点は SBDB の2体近似で 2062-01-08、JPL Horizons の n 体解で
+    2061-07-28（163.8 日の差）。SBDB の要素は古いエポックの接触軌道なので、摂動の大きい
+    彗星では2体近似が数か月ずれる。片方だけ出すと「図の日付＝実際の回帰」と誤読される。
+    """
+
+    def _patch(self):
+        """SBDB / Horizons をネットワークなしの固定値に差し替える（元へ戻す関数を返す）。"""
+        import math
+
+        from space_finder_mcp import solar_system as ss
+
+        el = {"e": 0.9679359956953211, "i": math.radians(162.1905300439129),
+              "node": math.radians(59.09894720612437),
+              "argp": math.radians(112.2414314637764),
+              "a": 17.834, "epoch": 2439875.5, "fullname": "1P/Halley",
+              "q": 0.5748638313743413, "tp": 2446469.9736161465,
+              # ma はラジアン・n は度/日（_sbdb_elements が変換して返す形に合わせる。
+              # これが無いと現在位置のケプラー伝播が KeyError になり、経路が作られない）
+              "ma": 6.0206, "n": 0.012984,
+              "period_days": 27728.04608790421, "kind": "cn"}
+        old = (ss._sbdb_elements, ss._horizons_cmd_for, ss._horizons_perihelion_jd)
+        ss._sbdb_elements = lambda sstr: dict(el)
+        ss._horizons_cmd_for = lambda cid: "DES={};CAP".format(cid)
+
+        def restore():
+            (ss._sbdb_elements, ss._horizons_cmd_for, ss._horizons_perihelion_jd) = old
+
+        return ss, restore
+
+    def test_route_shows_nbody_perihelion_alongside_two_body(self):
+        ss, restore = self._patch()
+        ss._horizons_perihelion_jd = lambda cmd, jd: 2474034.209248025   # 2061-07-28（n 体解）
+        try:
+            result = ss.solar_system_now(comet="ハレー彗星", route=True)
+        finally:
+            restore()
+
+        sc = result.structuredContent
+        mark = sc["comet_routes"]["ハレー彗星"]["marks"][0]
+        self.assertEqual(mark["date"], "2062-01-08")                 # SBDB の2体近似
+        self.assertEqual(mark["date_nbody"], "2061-07-28")           # Horizons の n 体解
+        self.assertAlmostEqual(mark["nbody_diff_days"], -163.8, delta=0.2)
+        self.assertEqual(sc["comet_routes"]["ハレー彗星"]["tp_nbody_date"],
+                         "2061-07-28")
+        notes = "\n".join(sc["figure"]["notes"])
+        self.assertIn("2061-07-28", notes)
+        self.assertIn("差 163.8 日", notes)
+        self.assertIn("2061-07-28（Horizons n 体解）", result.content[0].text)
+
+    def test_route_notes_say_nbody_unavailable_instead_of_silently_two_body(self):
+        # Horizons を引けないとき（遮断・応答異常）に2体近似だけを出すと、ずれを隠したまま
+        # 「実際の回帰」として読まれる。取得できなかった旨と理由を注記に残す。
+        ss, restore = self._patch()
+
+        def boom(cmd, jd):
+            raise ValueError("Horizons に接続できません")
+
+        ss._horizons_perihelion_jd = boom
+        try:
+            result = ss.solar_system_now(comet="ハレー彗星", route=True)
+        finally:
+            restore()
+
+        sc = result.structuredContent
+        rtout = sc["comet_routes"]["ハレー彗星"]
+        self.assertIsNone(rtout["tp_nbody_jd"])
+        self.assertEqual(rtout["tp_nbody_date"], "-")            # 日付は無い（捏造しない）
+        self.assertNotIn("date_nbody", rtout["marks"][0])
+        notes = "\n".join(sc["figure"]["notes"])
+        self.assertIn("n 体解を取得できなかった", notes)
+        self.assertIn("Horizons に接続できません", notes)
+        self.assertNotIn("date_nbody", str(sc["comet_routes"]))
+
+
 class RangeAuTests(unittest.TestCase):
     """太陽系俯瞰図の表示範囲指定（range_au）。土星より内側だけを拡大して見るための回帰テスト。"""
 

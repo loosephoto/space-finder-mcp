@@ -567,6 +567,15 @@ def _comet_route(name, jd):
             tp_next = peri_times(nel, jd)[1] if e < 1.0 else tp
     except Exception:
         tp_next = tp
+    # 近日点通過時刻を JPL Horizons の n 体解でも求め、2体近似との差を注記に出す。
+    # SBDB の要素は古いエポックの接触軌道なので、ハレー彗星のように摂動の大きい彗星では
+    # 2体近似が数か月ずれる。取得できないとき（遮断・応答異常）は黙って 2体近似だけを返す。
+    tp_nbody, nbody_error = None, None
+    if e < 1.0 and tp_next and (el.get("typ") or "sbdb") == "sbdb":
+        try:
+            tp_nbody = _horizons_perihelion_jd(_horizons_cmd_for(cid), float(tp_next))
+        except Exception as ex:
+            tp_nbody, nbody_error = None, str(ex)[:120]
     marks = [{"id": "perihelion", "label": "近日点", "r_au": rs[i_p],
               "proj_au": math.hypot(pts[i_p][0], pts[i_p][1]),
               "lon_deg": math.degrees(math.atan2(pts[i_p][1], pts[i_p][0])) % 360.0,
@@ -578,9 +587,17 @@ def _comet_route(name, jd):
                       "lon_deg": math.degrees(math.atan2(pts[i_a][1], pts[i_a][0])) % 360.0,
                       "jd": (tp_next + per / 2.0) if (tp_next and per) else None,
                       "date": _jd_date((tp_next + per / 2.0) if (tp_next and per) else None)})
+    if tp_nbody is not None:
+        marks[0].update({"jd_nbody": tp_nbody, "date_nbody": _jd_date(tp_nbody),
+                         "nbody_diff_days": round(tp_nbody - float(tp_next), 1)})
     return {"name": nel.get("fullname") or cid, "color": _COMET_COLOR, "points": pts,
             "marks": marks, "period_days": per, "e": e, "q_au": q,
             "closed": e < 1.0, "r_cap_au": None if e < 1.0 else r_cap,
+            # 近日点通過時刻の n 体解（Horizons）と、取得できなかった理由
+            "tp_nbody_jd": tp_nbody, "tp_nbody_date": _jd_date(tp_nbody),
+            "nbody_error": nbody_error,
+            # 要素の出所（"sbdb"=2体近似 / "horizons"=n 体解の接触軌道）。注記の文言を分ける
+            "typ": el.get("typ") or "sbdb",
             # 経路の最大半径（表示範囲に収まるかの判定に使う）と、既存の ±45AU 判定
             "r_max_au": max(max(abs(q[0]), abs(q[1])) for q in pts),
             "out_of_frame": bool(max(max(abs(q[0]), abs(q[1])) for q in pts) > 43.0)}
@@ -1420,6 +1437,24 @@ def _au_fmt(v):
     return fmt.format(v).rstrip("0").rstrip(".")
 
 
+def _mark_txt(m, with_proj=True):
+    """経路の◇（近日点・遠日点）の1行表記を作る（本文と figure.notes で共有）。
+
+    JPL Horizons の n 体解で近日点通過時刻が取れたときは並記する（SBDB の 2体近似だけを
+    出して実際の回帰との差を隠さない）。黄道面投影距離は 5‰以上差があるときだけ出す
+    （with_proj）。
+    """
+    r_t, r_p = m.get("r_au"), m.get("proj_au")
+    extra = ""
+    if (with_proj and r_t and r_p
+            and abs(float(r_p) - float(r_t)) / max(float(r_t), 1e-9) > 0.005):
+        extra = "・黄道面投影 {} AU".format(_au_fmt(r_p))
+    dat = m.get("date") or "-"
+    if m.get("date_nbody"):
+        dat = "{}（SBDB 2体近似）／{}（Horizons n 体解）".format(dat, m["date_nbody"])
+    return "{} {} AU{}（{}）".format(m.get("label"), _au_fmt(r_t), extra, dat)
+
+
 @ttl_cache(TTL_DAILY, maxsize=64)
 def _horizons_elements(cmd):
     """JPL Horizons の円錐曲線要素（太陽中心・黄道面基準）を取得（認証不要）。
@@ -1437,9 +1472,17 @@ def _horizons_elements(cmd):
         "CSV_FORMAT": "'YES'",
     }
     r = requests.get("https://ssd.jpl.nasa.gov/api/horizons.api", params=params,
-                     headers=UA, timeout=30)
+                     headers=UA, timeout=(10, 30))
     r.raise_for_status()
-    txt = r.text
+    return _parse_hz_elements(r.text)
+
+
+def _parse_hz_elements(txt):
+    """Horizons の ELEMENTS 応答（CSV）から1行目の要素を取り出す。
+
+    `_horizons_elements`（C/彗星の軌道）と `_horizons_perihelion_jd`（n 体解の近日点通過
+    時刻）で共有する。列は JDTDB, 日付, EC, QR, IN, OM, W, Tp, N, MA, TA, A, AD, PR。
+    """
     i, j = txt.find("$$SOE"), txt.find("$$EOE")
     if i < 0 or j < 0:
         raise ValueError("Horizons 応答に要素ブロックがありません")
@@ -1447,10 +1490,46 @@ def _horizons_elements(cmd):
     if not rows:
         raise ValueError("Horizons の要素が空です")
     c = [v.strip() for v in rows[0].split(",")]
-    # 列: JDTDB, 日付, EC, QR, IN, OM, W, Tp, N, MA, TA, A, AD, PR
+    if len(c) < 14:
+        raise ValueError("Horizons 要素の列数が不足しています（{} 列）".format(len(c)))
     return {"e": float(c[2]), "q": float(c[3]), "i_deg": float(c[4]),
             "node_deg": float(c[5]), "argp_deg": float(c[6]), "tp_jd": float(c[7]),
             "a": float(c[11]), "period_days": float(c[13])}
+
+
+@ttl_cache(TTL_DAILY, maxsize=64)
+def _horizons_perihelion_jd(cmd, jd_guess):
+    """JPL Horizons の n 体解による近日点通過時刻（JD）を返す（認証不要）。
+
+    周期彗星の SBDB 要素は古いエポックの接触軌道なので、そこから2体近似で出した近日点は
+    実際の回帰と大きくずれることがある（実測 1P/Halley: SBDB の2体解 2062-01-08 に対し、
+    Horizons の n 体解は 2061-07-28.7 ＝ 約164日の差）。
+
+    Horizons の ELEMENTS が出す Tp は「そのエポックでの接触軌道の近日点通過時刻」なので、
+    エポックを直前の Tp に置き直して反復すると真の通過時刻へ収束する（実測: エポック
+    2026-09-23 → 2061-08-04、エポック 2062-01-08 → 2061-07-28.7、次の反復で 0.01 日以内に
+    安定）。無限ループにしないよう、反復は3回で打ち切る。
+    """
+    jd = float(jd_guess)
+    tp = jd
+    for _ in range(3):
+        params = {
+            "format": "text", "COMMAND": "'{}'".format(cmd), "OBJ_DATA": "'NO'",
+            "MAKE_EPHEM": "'YES'", "EPHEM_TYPE": "'ELEMENTS'", "CENTER": "'500@10'",
+            "START_TIME": "'JD{:.6f}'".format(jd), "STOP_TIME": "'JD{:.6f}'".format(jd + 10.0),
+            "STEP_SIZE": "'10d'", "REF_PLANE": "'ECLIPTIC'", "OUT_UNITS": "'AU-D'",
+            "CSV_FORMAT": "'YES'",
+        }
+        r = requests.get("https://ssd.jpl.nasa.gov/api/horizons.api", params=params,
+                         headers=UA, timeout=(10, 60))
+        r.raise_for_status()
+        tp = float(_parse_hz_elements(r.text)["tp_jd"])
+        if not (1000000.0 < tp < 4000000.0):
+            raise ValueError("Horizons の近日点通過時刻が暦の範囲外です（JD {}）".format(tp))
+        if abs(tp - jd) <= 0.01:                 # 同じ値を返すようになった＝収束
+            break
+        jd = tp
+    return tp
 
 
 def _hz_step(step_days):
@@ -2059,7 +2138,9 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
         days: view="apparition" の表示日数（1〜3650、既定 180）。今日の 30 日前から
             days 日後までを描く（直前に過ぎた近日点・最接近も見えるようにするため）。
         route: view="system" で、指定した彗星の**通過経路（軌道）を俯瞰図に重ねる**
-            （破線）。近日点・遠日点には◇と日付を添える。既定 False。
+            （破線）。近日点・遠日点には◇と日付を添える。**近日点の日付は SBDB の2体近似に
+            加えて JPL Horizons の n 体解も併記する**（2体近似はずれることがある。ハレー
+            彗星では約164日）。既定 False。
             線形の "accurate" では形は本当の軌道と一致するが、対数縮尺の "simple" では
             線の長さと曲率が実際の楕円と一致しない（その旨は figure.notes に入る）。
             形そのものを見たいときは view="comet_orbit"。
@@ -2242,9 +2323,7 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
             if rt.get("error"):
                 lines.append("- {}: 経路を取得できませんでした（{}）".format(n, rt["error"]))
                 continue
-            mk = "／".join("{} {} AU（{}）".format(m.get("label"), _au_fmt(m.get("r_au")),
-                                                m.get("date") or "-")
-                           for m in (rt.get("marks") or []))
+            mk = "／".join(_mark_txt(m, with_proj=False) for m in (rt.get("marks") or []))
             lines.append("- {}: {}周期 {} 日（{}）".format(
                 rt.get("name") or n, (mk + "・") if mk else "",
                 int(rt["period_days"]) if rt.get("period_days") else "-",
@@ -2275,20 +2354,32 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
             if rt.get("error"):
                 route_notes.append("{} の経路を取得できませんでした（{}）".format(n, rt["error"]))
                 continue
-            def _mk_txt(m):
-                r_t, r_p = m.get("r_au"), m.get("proj_au")
-                extra = ""
-                if r_t and r_p and abs(float(r_p) - float(r_t)) / max(float(r_t), 1e-9) > 0.005:
-                    extra = "・黄道面投影 {} AU".format(_au_fmt(r_p))
-                return "{} {} AU{}（{}）".format(m.get("label"), _au_fmt(r_t), extra,
-                                                m.get("date") or "-")
-            mks = "／".join(_mk_txt(m) for m in (rt.get("marks") or []))
+            mks = "／".join(_mark_txt(m) for m in (rt.get("marks") or []))
             if mks:
                 route_notes.append("経路の◇は{}".format(mks))
-                route_notes.append(
-                    "この日付は JPL SBDB の軌道要素（2体近似）から計算している。惑星の摂動で"
-                    "実際の回帰は数日ずれる（見え方チャートの近日点は Horizons の n 体解なので、"
-                    "同じ彗星でも日付が数日違うことがある）")
+                nb = [m for m in (rt.get("marks") or []) if m.get("date_nbody")]
+                if nb:
+                    route_notes.append(
+                        "◇の日付は JPL SBDB の軌道要素（2体近似）から計算したもの。{} の近日点は"
+                        " JPL Horizons の n 体解では {}（2体近似との差 {} 日）で、摂動の大きい"
+                        "彗星では2体近似がこのようにずれる（ずれの大きさは彗星ごとに異なる）。"
+                        "見え方チャートは距離の推移に Horizons の n 体解（位置）を使うが、"
+                        "そこに出る前回・次回の近日点は同じ SBDB の2体近似からの概算".format(
+                            rt.get("name") or n, nb[0].get("date_nbody") or "-",
+                            _au_fmt(abs(float(nb[0].get("nbody_diff_days") or 0.0)))))
+                elif rt.get("nbody_error"):
+                    route_notes.append(
+                        "◇の日付は JPL SBDB の軌道要素（2体近似）から計算している。JPL Horizons"
+                        " の n 体解を取得できなかったため（{}）、実際の回帰とのずれは示せない"
+                        "（ずれの大きさは彗星ごとに異なる）".format(rt["nbody_error"]))
+                elif (rt.get("typ") or "sbdb") != "horizons":
+                    route_notes.append(
+                        "◇の日付は JPL SBDB の軌道要素（2体近似）から計算している。惑星の摂動で"
+                        "実際の回帰はずれる（ずれの大きさは彗星ごとに異なる）")
+                else:
+                    route_notes.append(
+                        "◇の日付は JPL Horizons の要素（n 体解の接触軌道）から計算している"
+                        "（C/彗星は2体近似ではなく Horizons の要素を使っている）")
             if not rt.get("closed"):
                 route_notes.append(
                     "{} は閉じない軌道（e={:.4f}）のため、経路は太陽から {:.0f} AU までで"
