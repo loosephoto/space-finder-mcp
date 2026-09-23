@@ -1,6 +1,6 @@
 # AGENTS.md — Space Finder MCP Server（Codex / 汎用コーディングエージェント向け）
 
-宇宙・天文・地球観測の公開データを **56ツール**で横断検索する MCP サーバー（Python / uv 管理）。NASA・ESA・JAXA・ISRO・CSA・INPE・UK・CNSA・CelesTrak・JPL・Wikidata・Open-Meteo 等を統合し、画像（衛星軌道マップ・日食パネル・月齢マップ等）と構造化JSONを同時に返します。
+宇宙・天文・地球観測の公開データを **58ツール**で横断検索する MCP サーバー（Python / uv 管理）。NASA・ESA・JAXA・ISRO・CSA・INPE・UK・CNSA・CelesTrak・JPL・Wikidata・Open-Meteo 等を統合し、画像（衛星軌道マップ・日食パネル・月齢マップ等）と構造化JSONを同時に返します。
 
 `CLAUDE.md` は同じ内容を Claude Code 向けに書いたものです（本ファイルは Codex など AGENTS.md を読むエージェント向け）。詳細なツール仕様は `SKILL.md`、引数一覧は `README.md` を参照してください。
 
@@ -45,7 +45,7 @@ uv run python scripts/check-tools.py --fonts          # 日本語フォントの
 uv run python scripts/check-tools.py --concurrency    # 並列実行（single-flight・スレッド逃がし・例外漏れ）
 uv run python scripts/check-tools.py --stdio          # 実クライアント経路(stdio)で代表ツールが応答するか
 uv run python -m unittest discover -s tests          # 回帰テスト（対応済みの実バグの再発防止）
-uv run python scripts/check-tools.py                  # 全56ツール実呼び出し（数分・終了コード1で失敗）
+uv run python scripts/check-tools.py                  # 全58ツール実呼び出し（数分・終了コード1で失敗）
 ```
 
 - **MCP はホットリロードなし**。`src/` を変更したらクライアントを再起動。
@@ -84,7 +84,7 @@ uv run python scripts/check-tools.py                  # 全56ツール実呼び�
 
 ```
 src/space_finder_mcp/
-├── server.py        # FastMCP サーバー定義・56ツール登録
+├── server.py        # FastMCP サーバー定義・58ツール登録
 ├── cache.py         # キャッシュ基盤（TTLメモリ / ディスク資産）
 ├── img_common.py    # 画像共通（フォント探索 / JPEG化 / アンチメリジアン分割）
 ├── surface_map.py   # 天体面地図の共通描画（タイル合成 / 等角投影 / 地点マーカー / 画素検証）
@@ -99,7 +99,7 @@ src/space_finder_mcp/
 ├── ssd.py           # 天体異常系（火球・接近・衝突リスク: JPL CNEOS, 認証不要）
 ├── calendar_store.py # カレンダーの蓄積ストア（正規化レコード＋来歴 / ユーザー予定 / 月別TTL / prune / 天体異常系 neo・fireball）
 ├── space_calendar.py # space_calendar / calendar_events / calendar_event_add / calendar_event_remove
-└── <データ源>.py     # 各APIツール（nasa / launch / media / celestrak / jaxa / mast / gcn 等）
+└── <データ源>.py     # 各APIツール（nasa / launch / media / celestrak / jaxa / mast / gcn / literature 等）
 tests/                 # 回帰テスト（unittest discover -s tests）
 scripts/check-tools.py   # 回帰検証ゲート
 ```

@@ -53,6 +53,7 @@ from . import planetary_map as _pmap
 from . import satellite_map as _satmap
 from . import weather_sat as _wsat
 from . import space_calendar as _calendar
+from . import literature as _lit
 
 # ---- ネイティブ拡張は「起動前に」import しておく（重要） ----
 # numpy / matplotlib / skyfield を**ツール実行時**（イベントループが動き出した後）に import
@@ -126,6 +127,10 @@ _reg(_gcn.gcn_alerts)
 # ---- 電波天文 (ALMA Science Archive / TART, 認証不要) ----
 _reg(_alma.alma_search)
 _reg(_tart.radio_sources_now)
+
+# ---- 学術文献（惑星科学の根拠: OpenAlex / Crossref / NTRS / JAXAリポジトリ / J-STAGE / CiNii） ----
+_reg(_lit.space_literature_search)
+_reg(_lit.planetary_evidence)
 
 # ---- 星空マップ＋人工衛星オーバーレイ (matplotlib/Pillow 選択式, 認証不要) ----
 _reg(_skyover.sky_map_with_satellites)

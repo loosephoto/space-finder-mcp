@@ -51,6 +51,9 @@ COORDS = {"latitude": 35.68, "lat": 35.68, "longitude": 139.69, "lon": 139.69,
 GATE_ARGS = {
     "calendar_event_add": {"title": "ゲート検証用の予定", "date": "2026-10-24", "time": "19:30"},
     "calendar_event_remove": {"id": "user:gate-does-not-exist"},
+    # 学術文献は「実際に文献が返る」クエリで経路を検証する（sentinel では何も検証できない）
+    "space_literature_search": {"query": "Mars global dust storm", "limit": 3},
+    "planetary_evidence": {"object_name": "火星", "limit": 3},
 }
 # カレンダーのストアに書き込むツールは、ゲートでは一時ストアへ逃がす（利用者の実データを汚さない）
 # 天体異常系（fireball_reports / neo_close_approach）は呼び出し結果を蓄積するのでここに含める。

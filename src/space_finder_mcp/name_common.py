@@ -68,6 +68,14 @@ JA_ALIASES: dict = {
     # ---- 中国・その他（日本語で言及される機体） ----
     "天宮": ["tiangong"], "天和": ["tianhe"], "問天": ["wentian"], "夢天": ["mengtian"],
     "神舟": ["shenzhou"], "嫦娥": ["chang'e", "change-4"], "天問": ["tianwen"],
+    # ---- 太陽系天体（惑星・衛星・小天体。文献検索・アーカイブ検索の和名展開） ----
+    "太陽系": ["solar system"], "太陽": ["Sun"], "水星": ["Mercury"], "金星": ["Venus"],
+    "地球": ["Earth"], "火星": ["Mars"], "木星": ["Jupiter"], "土星": ["Saturn"],
+    "天王星": ["Uranus"], "海王星": ["Neptune"], "冥王星": ["Pluto"], "月": ["Moon"],
+    "エウロパ": ["Europa"], "ガニメデ": ["Ganymede"], "カリスト": ["Callisto"], "イオ": ["Io"],
+    "タイタン": ["Titan"], "エンケラドス": ["Enceladus"], "フォボス": ["Phobos"],
+    "ダイモス": ["Deimos"], "トリトン": ["Triton"], "ベスタ": ["Vesta"],
+    "リュウグウ": ["Ryugu"], "イトカワ": ["Itokawa"], "ベンヌ": ["Bennu"],
     # ---- 深宇宙天体: 銀河 ----
     "アンドロメダ銀河": ["Andromeda Galaxy", "M31"], "アンドロメダ": ["Andromeda Galaxy", "M31"],
     "ソンブレロ銀河": ["Sombrero Galaxy", "M104"], "ソンブレロ": ["Sombrero Galaxy"],

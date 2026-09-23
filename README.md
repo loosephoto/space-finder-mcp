@@ -94,39 +94,22 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 - **機械的に検査します** — `scripts/check-tools.py --media-links`（画像ブロックより前にアイコン付きリンクが無い／`structuredContent` にURL・保存パスが無い／`image_path` のファイルが存在しない場合は exit 1。実測: 画像を返す12ツールすべて OK）。生成系の docstring には「回答時はこのリンクをそのまま提示してください」と明記しています。
 - **複数の画像を続けて返すときは、caption とリンクの間を空行にします** — Markdown は同一段落内の単一改行をスペースに畳み込むため、単一改行で組むと隣り合う画像の caption / リンクが **1行に融合**します（1枚だけ返すときは段落が分かれるので気付きにくい。実測: `astronomy_weather` の気象庁画像2枚）。
 
-### 🆕 直近の更新内容（v0.36.0）
+### 🆕 直近の更新内容（v0.37.0）
 
-**「太陽系マップに彗星の通過経路（ルート）を重ねる（`solar_system_now(route=True)`）」**（v0.36.0）。
+**「惑星の記述を一次文献（DOI 付き）で裏づける学術文献ツールを追加（`space_literature_search` / `planetary_evidence`、56→58ツール）」**（v0.37.0）。
 
-- **☄️ 何を描くか** — `view="system"` の俯瞰図に、指定した彗星の**通過経路を破線で重ねます**（黄道面への正射影）。近日点・遠日点には◇と日付を添え、本文・`figure.notes` にも軌道要素から数値で出します。既定 `route=False` なので従来の図は変わりません。
-- **🔍 表示範囲を指定して内側を拡大（`range_au`）** — 線形版の縮尺は固定（実測 約12 px/AU）で、既定の ±45 AU には海王星・冥王星まで収める必要があるため、**内惑星は太陽マーカー（半径 1.7 AU 相当）と重なって潰れていました**。`range_au=10`（土星より内側）を指定すると `lim` が固定され、**px/AU が約4.5倍（約51 px/AU）**、太陽マーカーの誇張半径も 0.4 AU まで下がって水星〜土星が読める大きさになります（`figure.scale.px_per_AU` に実測値。`2`=火星まで／`5.2`=木星まで／`30`=海王星まで、0.5 AU 未満はエラー）。**範囲外の天体・目印・惑星軌道の円は描かず**、「表示範囲10 AU の外にあるため描いていない: 天王星 19.44 AU、海王星 29.88 AU、冥王星 35.6 AU」のように `figure.notes` と `structuredContent.out_of_range` へ数値付きで列挙します（黙って消さない）。経路が範囲外へ出る彗星（例: ハレー彗星 35 AU を `range_au=5`）は対数版へ自動で落とし、範囲外の目印も注記します。更に**太陽の描画マーカーも縮尺に合わせて小さくし**（`range_au=10` で半径 0.4 AU → 最内惑星の 45% 未満。既定の 1.7 AU のままだと水星 0.46 AU が隠れる）、`figure.verify` に**画素検証**を追加しました（範囲内の惑星はその天体色の画素が 20 px 以上あること＝ラベル箱に隠れていない／範囲外の惑星は画素 20 px 未満＝描いていない／太陽マーカーの誇張半径が最内惑星より小さいこと。実測値も併記）。併せて**内惑星のラベル箱（178×30 px / 半透明黒）が隣の惑星マーカーを覆っていた問題**を修正（実測: `range_au=10` で地球の画素 0 → 261 px。マーカーをラベルより上の zorder にし、ラベルは太陽から外向きに配置）。
-- **🤖 縮尺は LLM が天体名で選べる（`range_au` に名前・`"fit"` も可）** — 「火星まで」「木星まで」のように**天体名で表示範囲を指定できます**（`range_au="火星"` → 1.65 AU／`"木星まで"` → 5.62 AU／`"saturn"` → 10.35 AU／`"小惑星帯"`／`"内惑星"`／`"外惑星"`。名前は「その天体の軌道の円が入る」よう長半径×1.08 で解決し、2桁に丸めます）。`"fit"` は**その呼び出しで指定した小惑星・彗星・探査機・経路が全部入る範囲**を自動で選びます（最大値×1.10、下限 1.2 AU。例: `asteroid="イトカワ", range_au="fit"` → 1.52 AU）。決め方は `figure.notes` と `structuredContent.range_resolved` に「木星の軌道（長半径 5.20 AU × 1.08 = 5.62 AU）」の形で必ず出し（図と文を食い違わせない）、**解決できない名前は推測せず候補一覧（`range_targets`）つきでエラー**にします。この検証中に**描画順の実バグ3件**を修正: ①太陽のグロー（半径70px＋ぼかし30）をデータより後に描いていたため範囲指定時に水星の純色画素が1 pxまで落ち、経路の破線も代表点9点中2点が消えていた ②経路の破線が彗星のラベル箱（320×42 px・不透明）の下に描かれていた ③範囲外天体の画素検査がアンチエイリアスの混色を拾っていた（→**厳密一致**に変更）。
-- **📐 対数（simple）と線形（accurate）で意味が違う** — Pillow 版は対数縮尺なので**線の長さと曲率は実際の楕円と一致しません**（その旨を注記に自動生成）。`engine="accurate"`（線形）は経路が ±45 AU に収まる彗星なら自動で維持され、**形が本当の軌道**になります（収まらないときは対数版へ）。形だけを見たいときは `view="comet_orbit"`。
-- **🧭 描けないものは描けないと言う** — 近日点が**誇張した太陽の描画円盤**（半径26px＋グロー＝この図で約0.40 AU 相当）の内側に入るときは**目印を描かず**、「この縮尺では図から位置を確認できない（数値は 0.339 AU・2027-02-11）」を注記に数値から生成します（実測: エンケ彗星の近日点は中心から14.9 px）。◇は太陽のグローや彗星自身の尾に隠れないよう**最後に描き**、`verify` が**破線の代表点と◇の位置の画素**を測り直します（実測: 破線8/8点・◇60画素。線形版も保存画像中の目印座標を matplotlib の変換から求めて同じ画素検査を行います）。
-- **🔧 見つけて直した既存バグ（線形版の縮尺）** — 線形（`accurate`）は縮尺が固定で **実測 約12 px/AU**（海王星・冥王星までを ±45 AU に収めるため）。このとき **太陽マーカー（s=300）は半径 21 px ＝約1.7 AU 相当**あり、後に描いていたため**水星〜火星と経路の◇が完全に隠れていました**（実測: エンケ彗星の近日点 0.339 AU の◇は画素0）。太陽を最背面・◇を最前面にして修正し、`scale.exaggerated` と注記に「太陽の描画マーカーは半径 X AU 相当の誇張」を数値付きで出します（`--figures` の追加経路と回帰テストで固定）。
-- **🛠 重複実装を整理** — 要素の正規化（`norm_orbit_el`）と近日点通過の算出（`peri_times`）を `solar_system.py` へ集約し、見え方チャートと共有しました（**SBDB はラジアン・Horizons は度**という 57 倍ずれる罠を1箇所に閉じ込めています）。
-- **🧪 検証** — `--figures`（追加経路に route の3経路＝simple／accurate／近日点が太陽円盤の内側。全経路 `verify.ok=true`）／`--media-links`（15ツール・問題0）／`--dead-code`（0件）／`--fuzz`／`--stdio`／`--concurrency`／`--fonts`（すべて exit 0）／回帰テスト **148件 OK**（新規7件）。
+- **📚 何が変わるか** — これまで惑星・衛星の記述の根拠は Wikipedia / Wikidata と LLM の既存知識だけでした。**査読論文・技術報告そのものを DOI 付きで根拠として返せる**ようになります（実測: `planetary_evidence("火星")` は MOLA / OMEGA-Mars Express / ALH84001、「タイタン」は Cassini VIMS / MAG が上位）。
+- **🔀 横断するソース（8つ・すべて認証不要）** — OpenAlex（要旨の復元・被引用数・OAリンク）、Crossref、NASA NTRS（技術報告＋PDF）、JAXAリポジトリ（WEKO3）、**J-STAGE**、CiNii Research、Zenodo、DataCite。DOI/タイトルの重複は1件に統合し `also_in` に出典を残します。任意キー（`ADS_API_KEY` / `S2_API_KEY` / `WOS_API_KEY`）を設定すると NASA ADS・Semantic Scholar・Web of Science も加わります（**未設定でも全機能が動き、スキップ理由を返します**）。
+- **🇯🇵 日本語クエリの扱い** — **OpenAlex / Crossref は日本語クエリを解釈できません**（実測:「月 永久影 水氷」→ IPBES 生物多様性評価レポート、「火星 大気脱出」→ 草津白根火山）。語彙辞書＋和名テーブルで**英語語へ置換してから**英語圏ソースへ投げ、置換できないときは**英語圏ソースをスキップして理由を返します**（黙って投げて無関係な文献を「根拠」として出さない）。日本語文献は JAXAリポジトリ・J-STAGE・CiNii が得意です。
+- **🎯 精度（実測で3つ直した）** — ① OpenAlex の全文検索（`search=`）＋被引用数順は裸の "Mars" で **R 言語マニュアル**を1位にする → `title_and_abstract.search` ＋惑星科学概念（`planetary_only`）へ ② Crossref の `query.bibliographic` は1〜2語で無関係な高被引用論文を返す（"Mars" → 遺伝学論文、"Europa" → 心臓病の EUROPA 試験）→ **2語以下は `query.title`** ③ 各ソースを `limit` 件で切ってから統合すると正しい文献が消える（EUROPA 試験 1,541引用が上位を占めて惑星科学文献が全滅）→ 候補を広めに取って統合後に絞る。
+- **🧪 検証** — `--dead-code`（0件）／`--offline`／`--fuzz`（372組合せ・例外漏れ0）／`--media-links`（15ツール・0）／`--fonts`／`--concurrency`／`--stdio`（すべて exit 0）／回帰テスト **172件 OK**（新規14件）／全58ツール実呼び出し（52 OK・6 ERROR は既知の外部要因＝NASA DEMO_KEY 429・CelesTrak 遮断・TART タイムアウト）。新ツール2本はライブで応答を確認。
+- **✖ 実装しなかったもの（実測に基づく判断）** — **arXiv API は本環境から HTTP 406**（UA を変えても取得不可）、**JDreamIII は JST の有償サービス**（API も別契約）、**J-GLOBAL WebAPI も登録＋キー交付が必要**（素の GET は 404）。Web of Science Starter は無料枠が 50req/日・被引用数なしのため任意キー扱いです。
 
-登録ツールは **56本**（既存ツールへの引数追加なので本数は変わりません）。
+登録ツールは **58本**。
 
 ### 以前の更新
 
-- **v0.35.0** — **彗星の見え方チャートを追加（`solar_system_now(view="apparition")`）**: 地心距離 Δ・日心距離 r・予想光度 m1（SBDB の全光度の式）・太陽離角を横軸＝UTC の日付で描く3段パネル。`days`（既定180日）＋直前30日を描き、今日・近日点・地球最接近を縦線で示します。位置は **JPL Horizons の N 体解を ICRF で統一**（`REF_PLANE=FRAME`。`ECLIPTIC` と DE421 の地球位置を混ぜると Δ が 0.003 au ずれるのを実測で確認。ハレー彗星は `;CAP` で解決）、失敗時のみ SBDB の2体近似へ退避して精度差（実測 0.0249 au・最接近時刻1.2日）を注記。**期間の端で最小のときは「近日点/地球最接近」と呼ばず「r 最小/Δ 最小」へ切り替え**、曲線と重なるラベルは描かず `figure.notes` に列挙、`verify` は極値の画素・ラベル重なり・縦線3本の実在を測り直します。
-- **v0.34.1** — **画像を連続で返すときの改行崩れを修正（`astronomy_weather`）**: 原因は Markdown のソフト改行の畳み込み — Markdown は同一段落内の単一改行をスペースに畳み込むため、気象庁の雨雲・降水画像（2枚）を `caption` ＋単一改行＋ `🖼️ [◯◯を開く](URL)` の形で組んでいた箇所が **1行に融合**していました（1枚だけ返すときは段落が分かれて見えるので気付きにくい）。`caption` とリンクの間を**空行**にし、ブロック末尾にも改行を残して次のブロックと連結されないようにしました。
-- **🧪 検証** — 実呼び出しで `content` が `🌧 ラベル` ／ 空行 ／ `🖼️ [リンク](気象庁URL) ｜ 保存先: ...` の順になることを確認。`--media-links`（13ツール・問題0）／`--dead-code`（0件）／回帰テスト135件 OK。
-
-登録ツールは **56本**。
-
-- **v0.34.0** — **天体異常系の結果をカレンダーへ蓄積（後日 `space_calendar` / `calendar_events` に反映）**: `calendar_store.KINDS` に **`neo`（小惑星接近）/`fireball`（火球観測）** を追加し、`neo_close_approach` / `fireball_reports` の呼び出し結果をそのまま蓄積ストアへ書きます（`structuredContent.calendar_stored`・`content` にも件数）。カレンダー側は **JPL を叩かない**ため、**未蓄積の月は「イベントが無い」ではなく「まだ調べていない」**（件数を注記へ数値で出し、火球は**過去の観測記録**である旨を併記）。**`impact_risk` は日付が無い**（数十年〜百年の幅の確率）ので置きません。回帰テスト12件を追加（CAD の `2026-Sep-21 01:02` と 火球の `2026-09-15 11:26:13` の2書式をロケール非依存で解釈）。
-- **v0.33.0** — **天体異常系（火球・小惑星接近・衝突リスク）3ツールを追加（53→56ツール）**（JPL CNEOS・認証不要＝api.nasa.gov の共有枠を消費しない）。`space_weather` の SWPC 経路に GOES フレアイベント（直近7日）も追加。
-- **v0.32.1** — **画像内の日本語フォントを OS 非依存で解決（豆腐=□の修正）**: `img_common.load_font()` の探索を *環境変数 → OS 標準パス（Windows メイリオ / macOS ヒラギノ / Linux Noto CJK・IPA・VL・Takao）→ 標準フォントディレクトリの走査* に拡張し、採用前に **cmap で日本語グリフの有無を検証**（追加依存なし）。matplotlib 経路は `apply_matplotlib_cjk_font()`。新ゲート `--fonts` と回帰テスト8件（計94件）。
-- **v0.32.0** — **観測アーカイブ・速報・国内イベントの3層を追加（52→53ツール）**: `mast_observations`（MAST・プレビュー画像をインライン表示）・`gcn_alerts`（GCN Circulars・HTML 主経路）・カレンダーへの **JAXA 施設公開**（告知済みのみ・取得日を窓に毎日更新）。
-- **v0.31.1** — **蓄積ストアの保持期限を全経路で適用**（`calendar_events` でも prune・`KEEP_PAST_DAYS` を単一出典・有効なユーザー予定は対象外）。`figure.notes` に保持期限を定数から生成。ゲートは予定系4ツールに専用引数を与え、書き込みを一時ストアへ逃がして実経路を検証（計49件）。
-- **v0.31.0** — **宇宙・天文イベントカレンダー（4ツール）**。`space_calendar`（月グリッド＋`structuredContent.events`。打ち上げ=LL2・天文現象=DE421+Skyfield・公開イベント=国立天文台・自分の予定=ローカル）と `calendar_events` / `calendar_event_add` / `calendar_event_remove`。蓄積ストアを一次ソースにした read-through（窓 [M-1, M+2]・未取得の月だけ取得。初回 8〜11秒／2回目以降 API 0回・0.4秒）。
-- **v0.30.2** — LLM の並列ツール呼び出しへの対応（全47ツールを `anyio` のワーカースレッド実行・single-flight・`RENDER_LOCK`。実測 4並列 2.55s→2.47s）と、stdio 無応答（numpy の起動時 import）・外部API遮断での固まり（fail fast）・メディアリンク抜け・情報パネルが現在位置マーカーを隠す描画バグの修正。
-- **v0.30.1** — 衛星カタログの**全件走査と一致度順**、NASA 断時の**宇宙天気 SWPC フォールバック**（`source` で出典明示）。
-- **v0.30.0** — 気象庁の**雨雲・降水画像**（解析雨量・降水短時間予報＋ナウキャスト、雷活動度で警告）を `astronomy_weather` に統合し、日食ルーチンを応用した**月齢マップ `moon_phase_map`** を追加（47ツール）。
-- **v0.29.1** — 外部データの部分失敗・異常値を黙って落とさない修正と回帰テスト（ISS時刻の防御的変換、`neo_today` の content 側 redact、部分失敗の数値化）。
+- **v0.36.0** — **太陽系マップに彗星の通過経路（ルート）を重ねる（`solar_system_now(route=True)`）**と表示範囲の指定（`range_au`＝数値 AU・天体名・`"fit"`）。範囲外の天体は描かず `figure.notes` へ数値で列挙し、線形版の縮尺バグ（太陽マーカーが半径 約1.7 AU 相当で水星〜火星と◇を隠していた）を修正。全56ツール。
 
 ## 📦 インストール
 
@@ -272,7 +255,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 
 ## 🛠️ ツール一覧
 
-登録ツールは **56本**（宇宙・天文イベントカレンダー 4本（`space_calendar` / `calendar_events` / `calendar_event_add` / `calendar_event_remove`）＋ロケット打ち上げ・逆引き 4本＋NASA日次・宇宙天気 3本＋メディア 3本＋各国宇宙機関・地球観測 16本＋衛星・軌道 5本＋天体位置・画像合成 7本＋観測支援・天文データ 10本＋気象衛星リアルタイム画像 1本＋天体異常系 3本）。全56ツールを実呼び出しで検証済みです（外部APIの障害・レート制限時は、例外ではなく CallToolResult のエラーとして返します）。
+登録ツールは **58本**（宇宙・天文イベントカレンダー 4本（`space_calendar` / `calendar_events` / `calendar_event_add` / `calendar_event_remove`）＋ロケット打ち上げ・逆引き 4本＋NASA日次・宇宙天気 3本＋メディア 3本＋各国宇宙機関・地球観測 16本＋衛星・軌道 5本＋天体位置・画像合成 7本＋観測支援・天文データ 10本＋気象衛星リアルタイム画像 1本＋天体異常系 3本＋**学術文献 2本**）。全58ツールを実呼び出しで検証済みです（外部APIの障害・レート制限時は、例外ではなく CallToolResult のエラーとして返します）。
 
 | ツール | できること | データ源 | 認証 |
 |--------|-----------|---------|------|
@@ -307,6 +290,8 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `gcn_alerts` | **NASA GCN（General Coordinates Network）の過渡天体速報**。GRB・X線新星・重力波などの **GCN Circular** を期間（`days` 1〜60）／キーワード（`query`）で新しい順に一覧し、`circular_id` で1件の本文（投稿者・観測時刻・本文）まで返す。一覧は公開アーカイブの HTML が既定（サイト内部の JSON ルートは 403 を返すことがあるためフォールバック）。⚠️ 機械可読の Notices は Kafka 配信のため対象外 | NASA GCN (gcn.nasa.gov) | 不要 |
 | `mast_observations` | **MAST（NASA/STScI の宇宙望遠鏡アーカイブ）の観測データ検索**。JWST・ハッブル(HST)・TESS・Kepler・GALEX 等を、天体名（和名可・Sesame で座標解決）／座標コーン／装置（部分一致）／データ種別／観測日で検索。観測ID・装置・観測日・校正レベル・フィルタ・`Mast.Caom.Products` による FITS のダウンロードURL（`include_products=true`）まで返す。`preview_image=true` なら先頭観測のプレビュー画像を**チャットにインライン表示**（🖼️リンク先行＋保存パス）。校正用露出（BIAS/DARK）は既定で除外。⚠️ MAST は混雑時に1クエリ 60 秒級（実測）＝結果は30分キャッシュ | MAST Mashup API | 不要 |
 | `alma_search` | ALMA（アルマ望遠鏡）科学アーカイブの観測データ検索（観測対象・座標・周波数帯・公開/要権限） | ALMA Science Archive (NAOJ, IVOA TAP) | 不要 |
+| `space_literature_search` | **惑星科学・宇宙の一次文献（論文・技術報告）を横断検索**して根拠（DOI付き）を返す。OpenAlex（要旨・被引用数・OAリンク）・Crossref・NASA NTRS（技術報告＋PDF）・JAXAリポジトリ・J-STAGE・CiNii Research・Zenodo・DataCite を1回で横断し、DOI/タイトルの重複を統合。**日本語クエリは語彙辞書＋和名テーブルで英語語へ置換してから英語圏ソースへ投げる**（実測: OpenAlex/Crossref は日本語クエリだと無関係な文献を返すため）。`sort`（関連度/被引用数/年）・`year_from`/`year_to`・`min_citations`・`open_access_only`・`planetary_only`（惑星科学概念に限定）・`sources` で絞り込み。⚠️ 返すのは**文献（書誌）**で観測データではない（観測は `mast_observations` / `alma_search` / `cadc_observations`） | OpenAlex / Crossref / NASA NTRS / JAXAリポジトリ / J-STAGE / CiNii / Zenodo / DataCite | 不要（`ADS_API_KEY`・`S2_API_KEY`・`WOS_API_KEY` を設定すると ADS・Semantic Scholar・WoS も使う） |
+| `planetary_evidence` | **天体（惑星・衛星・小天体・探査機）の文献的な裏づけをまとめて返す**。①名前解決（Sesame/CDS で和名→英語名→座標）と、②その天体の文献を**英語圏＋日本語の両方**から集めて提示（既定は被引用数順。**惑星科学概念で絞った OpenAlex を上位に置く**＝実測「火星」で MOLA / OMEGA-Mars Express / ALH84001 が上位に来る）。⚠️ 太陽系天体は時刻で位置が変わるため固定座標を持たない旨を `caveats` に明記 | OpenAlex / Crossref / NASA NTRS / JAXAリポジトリ / J-STAGE / CiNii ＋ Sesame/CDS | 不要 |
 | `radio_sources_now` | TART オープン電波望遠鏡が「いま観測できる電波源」（GNSS・静止衛星等）を仰角順に表示 | TART source catalog (NZ) | 不要 |
 | `sky_map_with_satellites` | 指定地の空に太陽系の惑星と人工衛星を重ねた画像（matplotlib正確版=PNG/Pillow簡易版=JPEGを選択） | JPL de421+Skyfield / CelesTrak+SGP4 | 不要 |
 | `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示）。`view="comet_orbit"` で彗星の軌道面ビュー（太陽＝焦点の楕円／e≥1 は双曲線の枝）。**`comet` にカンマ区切りで複数（または `comet2`、最大4天体）指定すると 1彗星=1パネルで1枚に並べる**（パネルごとに軌道面と縮尺が違う旨は `figure.notes` に自動生成）。`view="apparition"` で彗星の**見え方チャート**（地心距離・日心距離・予想光度・太陽離角の時系列、`days` で期間指定。1天体ずつ）。`route=True` で**彗星の通過経路（軌道）を俯瞰図に破線で重ねる**（近日点・遠日点は◇＋日付。対数縮尺では線の形は実際の楕円と一致しない旨を注記に自動生成し、線形版は形が本当の軌道）。**`range_au` で表示範囲（太陽からの距離の上限 AU）を指定でき、`range_au=10` なら土星(9.5 AU)より内側だけを表示して内惑星を大きく見せられる**（`2`=火星まで／`5.2`=木星まで／`30`=海王星まで。**範囲外の天体・目印・軌道の円は描かず**、`figure.notes` と `structuredContent.out_of_range` に数値付きで列挙。0.5 AU 未満はエラー） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
@@ -332,6 +317,36 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `satellite_status` | 世界中の気象・地球観測衛星の運用ステータス・軌道・打ち上げ日（Roscosmos等）。**カタログ全1,000件超を走査**し、query は一致度順（acronym 完全/前方一致 → 名称の語境界 → 部分一致のみ）で提示 | WMO OSCAR | 不要 |
 | `cnsa_status` | 中国CNSA系衛星データポータル（風雲/NSMC・高分/CNSA-GEO・CBERS/CRESDA）の到達状態・概要＋認証不要の代替経路 | CNSA各公式ポータル | 不要(ダウンロードは要登録) |
 | `tiangong_now` | 天宮（Tiangong）中国宇宙ステーションの現在位置（SGP4伝播＋Googleマップ表示） | CelesTrak TLE + SGP4 | 不要 |
+
+---
+
+## 📚 学術文献（惑星の根拠）— 使えるAPIの実測結果
+
+惑星・衛星の説明を Wikipedia / Wikidata と LLM の既存知識だけで書くと**根拠（一次文献）を示せません**。
+そこで公開の書誌 API を実測し、**認証不要で実際に使えたもの**だけを `space_literature_search` /
+`planetary_evidence` に組み込みました（2026-09 実測）。
+
+| API | 実測結果 | 本サーバーでの扱い |
+|:--|:--|:--|
+| **OpenAlex** | 200。要旨（abstract_inverted_index を復元）・被引用数・OAリンクを返す。⚠️ **`search=`（全文）は日本語クエリを解釈できず無関係な文献を返す**（実測:「月 永久影 水氷」→ IPBES 生物多様性評価レポート、「火星 大気脱出」→ 草津白根火山）。裸の天体名は**惑星科学概念（`concepts.id:C152551177`）で絞ると精度が上がる**（実測:「Mars」単独で R 言語マニュアルが1位 → 絞ると THEMIS/MSL/MAVEN） | 既定ソース（`title_and_abstract.search` を使用） |
+| **Crossref** | 200。⚠️ `select` に `language` を入れると **HTTP 400**（select-not-available）。裸の天体名で `query.bibliographic` を使うと無関係な高被引用論文を返す（実測:"Mars" → 遺伝学論文） | 既定ソース（**2語以下は `query.title`**、3語以上は `query.bibliographic`） |
+| **NASA NTRS** | 200。技術報告＋PDF リンク（ミッション設計・探査計画に強い） | 既定ソース |
+| **JAXAリポジトリ（WEKO3）** | 200。**日本語クエリが効く**（「はやぶさ2 リュウグウ」で9件） | 日本語ソース |
+| **J-STAGE** | 200（Atom）。⚠️ **`ERR_001` は「該当なし」でエラーではない**（"大気流出" は ERR_001、"火星" は status=0 で159件）。`WARN_002` は結果を伴う警告。`material`/`article_title` は使えない→**`keyword` を使う**。応答に charset が無く `r.text` は文字化けするので bytes を UTF-8 で解釈する | 日本語ソース（利用規約に従い「表示情報提供元: J-STAGE」＋リンクを表示） |
+| **CiNii Research** | 200（OpenSearch JSON） | 日本語ソース |
+| **Zenodo / DataCite** | 200。データセット・プレプリントの DOI | `sources="all"` で使用 |
+| **NASA ADS** | トークン無しは **401**。無料トークン（要登録・5,000req/日）で使える | `ADS_API_KEY` を設定したときだけ使う |
+| **Semantic Scholar** | キー無しは **429**（共有枠。待っても回復しなかった） | `S2_API_KEY` を設定したときだけ使う |
+| **Web of Science（Starter）** | キー無しは **401**。無料枠は登録制・1req/s・50req/日・被引用数なし | `WOS_API_KEY` を設定したときだけ使う |
+| **arXiv API** | 本環境からは UA を変えても **HTTP 406** | **実装しない**（取得できないものを載せない） |
+| **JDreamIII / J-GLOBAL** | JDreamIII は JST の**有償**サービス（要契約・API も別契約）。J-GLOBAL WebAPI も MyJ-GLOBAL 登録＋キー交付が必要 | **実装しない**（日本語文献は **J-STAGE / CiNii / JAXAリポジトリ**で代替） |
+
+### （任意）学術APIキー
+
+`ADS_API_KEY`（NASA ADS・無料登録）/ `S2_API_KEY`（Semantic Scholar）/ `WOS_API_KEY`（Clarivate）は
+**未設定でも全機能が動きます**（未設定のソースは**スキップして理由を `sources[].note` に返します**。
+「全ソース失敗」とは区別されます）。設定する場合は MCPクライアントの env か、リポジトリ直下の
+`.env`（`.env.example` 参照）に置いてください。キーはサーバー側でのみ保持し、クライアントへ晒しません。
 
 ---
 
@@ -939,6 +954,7 @@ src/space_finder_mcp/
 ├── cadc.py              # cadc_observations（CADC カナダ天文観測データ）
 ├── mast.py              # mast_observations（MAST: JWST/HST/TESS の観測アーカイブ検索）
 ├── gcn.py               # gcn_alerts（NASA GCN: 過渡天体速報 GCN Circulars）
+├── literature.py        # 学術文献（OpenAlex/Crossref/NTRS/JAXAリポジトリ/J-STAGE/CiNii/Zenodo/DataCite ＋ 任意キー ADS/S2/WoS）
 ├── alma.py              # alma_search（ALMA 電波観測データ, Science Archive TAP）
 ├── tart.py              # radio_sources_now（TART オープン電波望遠鏡 可視電波源）
 ├── skyfield_pos.py      # constellation_now（天体位置・星座, Skyfield）
