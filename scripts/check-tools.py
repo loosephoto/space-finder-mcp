@@ -240,6 +240,17 @@ FIGURES_EXTRA_CALLS = (
     # 複数パネル（1彗星=1パネル）: conic は panels[] 側に入るので kind だけ検査する
     ("solar_system_now[comet_orbit/複数パネル]", "solar_system_now",
      {"comet": "ハレー彗星,C/2004 R2", "view": "comet_orbit"}, {"figure_kind": "orbit_plane_set"}),
+    # 彗星の見え方チャート（距離 r/Δ・予想光度・太陽離角の3段パネル）。
+    # 位置は Horizons の N 体解で、近日点・地球最接近・今日の縦線と極値ラベルが入る。
+    ("solar_system_now[apparition]", "solar_system_now",
+     {"comet": "169P", "view": "apparition", "days": 120}, {"figure_kind": "comet_apparition"}),
+    # 期間の端で r が最小（＝近日点ではなく期間内の最小）になる経路: マーカーを
+    # 「近日点」と呼ばず、注記も「期間の端」を明示する（ハレー彗星は 2061 年まで近づく）
+    ("solar_system_now[apparition/期間の端]", "solar_system_now",
+     {"comet": "ハレー彗星", "view": "apparition", "days": 400}, {"figure_kind": "comet_apparition"}),
+    # 双曲線彗星（e>1・閉じない・次回の近日点は無い）
+    ("solar_system_now[apparition/双曲線]", "solar_system_now",
+     {"comet": "C/2023 A3", "view": "apparition", "days": 120}, {"figure_kind": "comet_apparition"}),
     # 日食は既定引数だと「その観測地で見える食」が無い場合があるため、可視の例で叩く
     # 地点マーカー（落点マップ）: 過去機の公表落点を天体面地図に描く経路
     ("planetary_orbiter_track[かぐや落点]", "planetary_orbiter_track",
@@ -340,6 +351,10 @@ MEDIA_EXTRA_CALLS = (
     ("mast_observations[preview_image]", "mast_observations",
      {"ra": 189.9976, "dec": -11.6231, "radius": 0.02, "mission": "JWST",
       "preview_image": True, "limit": 1}),
+    # 彗星の見え方チャートは view="apparition" のときだけ画像を返す（content の先頭に
+    # アイコン付きリンク＋保存先、structuredContent.image_path が入るかを機械的に検査）
+    ("solar_system_now[apparition]", "solar_system_now",
+     {"comet": "169P", "view": "apparition", "days": 60}),
 )
 
 

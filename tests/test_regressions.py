@@ -414,3 +414,84 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("取得できませんでした", result.content[0].text)
         self.assertEqual(len(result.structuredContent["failed"]),
                          len(swpc._SECTIONS_BY_KIND["all"]))
+
+
+class CometApparitionTests(unittest.TestCase):
+    """彗星の見え方チャート（comet_apparition）と彗星名の解決まわりの回帰テスト。"""
+
+    def test_unknown_comet_hint_is_defined(self):
+        # 実測: _comet_unknown_hint が未定義のまま呼ばれ、未知の彗星名で NameError が
+        # ツールの外へ漏れていた（規約1違反）。オフラインで再現させて固定する。
+        from space_finder_mcp import solar_system as ss
+
+        self.assertTrue(callable(getattr(ss, "_comet_unknown_hint", None)))
+        self.assertIn("指定できる彗星の例", ss._comet_unknown_hint("存在しない彗星XYZ"))
+
+        def boom(*args, **kwargs):
+            raise requests.ConnectionError("offline")
+
+        old_get = requests.get
+        requests.get = boom
+        try:
+            r = ss.solar_system_now(comet="存在しない彗星XYZ", view="comet_orbit")
+        finally:
+            requests.get = old_get
+        self.assertIsNotNone(r.structuredContent)
+        self.assertIn("error", r.structuredContent)
+        self.assertIn("指定できる彗星の例", r.content[0].text)
+
+    def test_apparition_view_requires_comet(self):
+        from space_finder_mcp import solar_system as ss
+
+        r = ss.solar_system_now(view="apparition")
+        self.assertIn("error", r.structuredContent or {})
+        self.assertIn("彗星の指定が必要", r.content[0].text)
+        # 複数指定は1天体ずつであることを明示して停止する（推測しない）
+        r2 = ss.solar_system_now(comet="169P,ハレー彗星", view="apparition")
+        self.assertIn("1天体ずつ", r2.content[0].text)
+
+    def test_comet_xyz_from_elements_conics(self):
+        # 近日点通過時刻では r = q になる（楕円・放物線・双曲線のすべて）。
+        import math
+
+        from space_finder_mcp.solar_system import comet_xyz_from_elements
+
+        base = {"i": math.radians(11.3), "node": math.radians(40.0),
+                "argp": math.radians(200.0), "q": 0.6, "tp": 2461300.5}
+        for e in (0.5, 1.0, 1.2):
+            el = dict(base, e=e)
+            r = comet_xyz_from_elements(el, 2461300.5)[3]
+            self.assertAlmostEqual(r, 0.6, places=6, msg="e={}".format(e))
+            # 近日点通過の前後で r は増える（放物線・双曲線でも同じ）
+            self.assertGreater(comet_xyz_from_elements(el, 2461330.5)[3], 0.6)
+
+    def test_comet_xyz_from_elements_requires_q_and_tp(self):
+        import math
+
+        from space_finder_mcp.solar_system import comet_xyz_from_elements
+
+        with self.assertRaises(ValueError):
+            comet_xyz_from_elements({"e": 0.7, "i": 0.1, "node": 0.0, "argp": 0.0},
+                                    2461300.5)
+
+    def test_peri_times_guards_sentinel_period(self):
+        # 双曲線では Horizons が周期に 1e99 の番兵を返すことがある。そのままだと
+        # 巨大な JD を作り、日付への変換で OverflowError になっていた。
+        from space_finder_mcp.comet_apparition import _fmt_jd, _peri_times
+
+        nel = {"e": 1.0001831, "tp": 2460581.3, "period_days": 1.0e99}
+        prev, nxt = _peri_times(nel, 2461305.9)
+        self.assertEqual(prev, 2460581.3)
+        self.assertIsNone(nxt)
+        self.assertEqual(_fmt_jd(None), "-")
+        self.assertEqual(_fmt_jd(2461305.9), "2026-09-22")
+        self.assertEqual(_fmt_jd(1.0e99), "-")
+
+    def test_apparition_error_paths_do_not_leak(self):
+        # 未知の彗星・不正な when でも例外を外へ出さず error を返す。
+        from space_finder_mcp.comet_apparition import comet_apparition_result
+
+        r = comet_apparition_result("存在しない彗星XYZ", days=30)
+        self.assertIn("error", r.structuredContent or {})
+        r2 = comet_apparition_result("169P", when_iso="変な値", days=30)
+        self.assertIn("error", r2.structuredContent or {})

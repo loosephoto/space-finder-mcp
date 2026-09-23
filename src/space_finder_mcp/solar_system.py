@@ -154,6 +154,20 @@ _COMET_ALIASES = {
 }
 
 
+def _comet_unknown_hint(name):
+    """未知の彗星名に対する案内（指定できる名前の例と書式）。
+
+    実測: この関数が未定義のまま呼ばれており、未知の彗星名を渡すと NameError が
+    ツールの外へ漏れていた（規約1違反）。案内は「エイリアス表にある和名」＋
+    「番号／仮符号の書式」を返す。
+    """
+    ja = sorted(k for k in _COMET_ALIASES if not k.isascii())
+    return ("指定できる彗星の例: {}。周期彗星は番号（1P / 2P / 67P など）と和名、"
+            "非周期彗星は \"C/2023 A3\" のような仮符号で指定します"
+            "（JPL SBDB / Horizons の名称。{} は見つかりませんでした）").format(
+                "、".join(ja), str(name)[:40])
+
+
 def _comet_position(name, jd):
     """彗星の日心位置を取得（認証不要）。返すのは (x,y,z, r, eclLon, eclLat) AU/度。
 
@@ -202,25 +216,52 @@ def _resolve_when(when_iso, ts):
 @ttl_cache(TTL_DAILY, maxsize=256)
 def _sbdb_elements(sstr):
     """JPL SBDB API から小惑星の軌道要素辞書を取得（認証不要）。"""
+    # phys-par=true が要る: 彗星の全光度の式（M1/K1）は物理量側に入っており、
+    # これが無いと光度チャートが予測光度を描けない（軌道要素だけでは足りない）。
     r = requests.get("https://ssd-api.jpl.nasa.gov/sbdb.api",
-                     params={"sstr": sstr, "full-prec": "true"},
+                     params={"sstr": sstr, "full-prec": "true", "phys-par": "true"},
                      headers=UA, timeout=25)
     r.raise_for_status()
     d = r.json()
     if "orbit" not in d or "elements" not in d["orbit"]:
         raise ValueError("軌道要素が見つかりません")
     elems = {el["name"]: el["value"] for el in d["orbit"]["elements"]}
-    if not all(k in elems for k in _REQUIRED_ELEMS):
+    # 彗星は「近日点通過時刻 tp と近点距離 q」だけが与えられることがある（双曲線では
+    # 半長軸 a・平均運動 n・平均近点角 ma が無い）。小惑星経路（a/ma/n でケプラー伝播）と
+    # 彗星経路（q/tp から円錐曲線を解く＝comet_xyz_from_elements）の両方を受け付ける。
+    if not all(k in elems for k in ("e", "i", "om", "w")) or not (
+            all(k in elems for k in _REQUIRED_ELEMS) or ("q" in elems and "tp" in elems)):
         raise ValueError("SBDB 要素に必須キーが不足: {}".format(elems.keys()))
     fullname = d.get("object", {}).get("fullname") or sstr
     # epoch は orbit トップレベルにある（彗星では要素リストに無いため必須）
     epoch = float(d.get("orbit", {}).get("epoch") or elems.get("epoch", 2461200.5))
-    return {
-        "e": float(elems["e"]), "a": float(elems["a"]), "i": math.radians(float(elems["i"])),
+    out = {
+        "e": float(elems["e"]), "i": math.radians(float(elems["i"])),
         "node": math.radians(float(elems["om"])), "argp": math.radians(float(elems["w"])),
-        "ma": math.radians(float(elems["ma"])), "n": float(elems["n"]),  # deg/day
         "epoch": epoch, "fullname": fullname,
     }
+    for key in ("a", "ma", "n"):               # 楕円（小惑星・周期彗星）だけにある
+        if elems.get(key) is not None:
+            out[key] = math.radians(float(elems[key])) if key == "ma" else float(elems[key])
+    # 彗星固有の量（近点距離・近日点通過時刻・周期・全光度の式）。ある場合だけ足すので、
+    # 小惑星の呼び出し側の挙動は変わらない。軌道面ビューと光度チャートが同じ取得結果を共有する。
+    for key, name_ in (("q", "q"), ("tp", "tp"), ("per", "period_days")):
+        try:
+            if elems.get(key) is not None:
+                out[name_] = float(elems[key])
+        except (TypeError, ValueError):
+            continue
+    kind = (d.get("object") or {}).get("kind")
+    if kind:
+        out["kind"] = kind
+    phys = {p.get("name"): p.get("value") for p in (d.get("phys_par") or [])}
+    for key in ("M1", "K1", "diameter"):
+        try:
+            if phys.get(key) is not None:
+                out[key.lower()] = float(phys[key])
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def _kepler_position(el, jd):
@@ -243,6 +284,74 @@ def _kepler_position(el, jd):
     y = r * (math.sin(node) * math.cos(u) + math.cos(node) * math.sin(u) * math.cos(i))
     z = r * math.sin(u) * math.sin(i)
     lon = math.degrees(math.atan2(y, x)) % 360
+    lat = math.degrees(math.atan2(z, math.hypot(x, y)))
+    return x, y, z, r, lon, lat
+
+
+# ガウス重力定数（AU・日・太陽質量）。平均運動 n = k / a^1.5 [rad/day]
+_K_GAUSS = 0.01720209895
+
+
+def comet_xyz_from_elements(el, jd):
+    """彗星の要素（e, q, tp）から日心黄道座標 (x,y,z,r,lon,lat) を返す。
+
+    `_kepler_position` は SBDB の a/ma/n を使う**楕円専用**（1-e が負になる e>=1 や、
+    半長軸の無い彗星では破綻する）で、小惑星の経路が使っている。彗星は SBDB/Horizons が
+    **近日点通過時刻 tp と近点距離 q** を返すので、離心率で場合分けして一般の円錐曲線を解く
+    （楕円＝ケプラー方程式／双曲線＝双曲線ケプラー方程式／e≈1＝バーカー式）。
+    惑星摂動は入れない2体近似。i/node/argp は**ラジアン**（SBDB 形式）。
+    """
+    e = float(el["e"])
+    q = el.get("q")
+    tp = el.get("tp") if el.get("tp") is not None else el.get("tp_jd")
+    if not q or tp is None:
+        raise ValueError("彗星の要素に近点距離 q / 近日点通過時刻 tp がありません")
+    q, tp = float(q), float(tp)
+    dt = jd - tp
+    if abs(e - 1.0) <= 1e-9:
+        # 放物線（バーカー式）: tan(ν/2) + tan³(ν/2)/3 = D
+        d_ = dt * _K_GAUSS / (math.sqrt(2.0) * q ** 1.5)
+        t = math.copysign(max(abs(d_) ** (1.0 / 3.0), 1e-9), d_)
+        for _ in range(80):
+            step = (t + t ** 3 / 3.0 - d_) / (1.0 + t * t)
+            t -= step
+            if abs(step) < 1e-12:
+                break
+        nu = 2.0 * math.atan(t)
+        r = q * (1.0 + t * t)
+    elif e < 1.0:
+        a = q / (1.0 - e)
+        m = (_K_GAUSS / a ** 1.5) * dt
+        ecc = m
+        for _ in range(80):
+            step = (m - (ecc - e * math.sin(ecc))) / (1.0 - e * math.cos(ecc))
+            ecc += step
+            if abs(step) < 1e-12:
+                break
+        nu = 2.0 * math.atan2(math.sqrt(1.0 + e) * math.sin(ecc / 2.0),
+                              math.sqrt(1.0 - e) * math.cos(ecc / 2.0))
+        r = a * (1.0 - e * math.cos(ecc))
+    else:
+        a = abs(q / (1.0 - e))                 # 双曲線は a<0。|a| を使う
+        m = (_K_GAUSS / a ** 1.5) * dt
+        hyp = math.asinh(m / e) if abs(m) > 1e-12 else 0.0
+        for _ in range(80):
+            fp = e * math.cosh(hyp) - 1.0
+            if abs(fp) < 1e-12:
+                break
+            step = (e * math.sinh(hyp) - hyp - m) / fp
+            hyp -= step
+            if abs(step) < 1e-12:
+                break
+        nu = 2.0 * math.atan2(math.sqrt(e + 1.0) * math.sinh(hyp / 2.0),
+                              math.sqrt(e - 1.0) * math.cosh(hyp / 2.0))
+        r = a * (e * math.cosh(hyp) - 1.0)
+    i, node, argp = el["i"], el["node"], el["argp"]
+    u = argp + nu
+    x = r * (math.cos(node) * math.cos(u) - math.sin(node) * math.sin(u) * math.cos(i))
+    y = r * (math.sin(node) * math.cos(u) + math.cos(node) * math.sin(u) * math.cos(i))
+    z = r * math.sin(u) * math.sin(i)
+    lon = math.degrees(math.atan2(y, x)) % 360.0
     lat = math.degrees(math.atan2(z, math.hypot(x, y)))
     return x, y, z, r, lon, lat
 
@@ -665,6 +774,80 @@ def _horizons_elements(cmd):
             "a": float(c[11]), "period_days": float(c[13])}
 
 
+def _hz_step(step_days):
+    """Horizons の STEP_SIZE 文字列を作る。
+
+    Horizons は小数付きの刻み（"1.5 d" や "6.5 h"）を受け付けず、整数＋単位のみ
+    （"1 d" / "21 h" / "90 m"）を受け付ける。実測で小数は "No ephemeris" になったので、
+    分へ丸めてから時間・分へ振り分ける。
+    """
+    minutes = max(1, int(round(float(step_days) * 1440.0)))
+    if minutes % 60 == 0:
+        return "{} h".format(minutes // 60)
+    return "{} m".format(minutes)
+
+
+@ttl_cache(TTL_DAILY, maxsize=64)
+def _horizons_cmd_for(cid):
+    """彗星 id から Horizons の一意なコマンド文字列を作る。
+
+    ハレー彗星のように彗星が出現回（apparition）ごとに複数レコード登録されている場合、
+    `DES=1P;` は "Matching small-bodies" の一覧を返すだけで状態ベクトルが得られない
+    （実測）。`DES=1P;CAP` は現在の出現回を選ぶので一意に解決する（実測で
+    "Target body name: 1P/Halley" を返す）。まず CAP なしを試し、駄目なら CAP を付ける。
+    """
+    last = None
+    for cmd in ("DES={};".format(cid), "DES={};CAP".format(cid)):
+        try:
+            _horizons_vectors_range(cmd, 2461250.5, 2461250.6, 0.1)
+            return cmd
+        except Exception as e:                  # 解決できない候補は次へ
+            last = e
+    raise ValueError("Horizons が {} の状態ベクトルを返しません（{}）".format(cid, last))
+
+
+@ttl_cache(TTL_DAILY, maxsize=64)
+def _horizons_vectors_range(cmd, jd0, jd1, step_days):
+    """JPL Horizons の太陽中心状態ベクトルを期間まとめて取得（黄道 J2000・AU/D）。
+
+    1リクエストで期間全体が返るので、彗星の見え方チャート（comet_apparition）は
+    SBDB 要素の2体近似ではなく **n 体解の位置** を使える。実測: 2体近似（SBDB の
+    近日点通過時刻から解く）は JPL の n 体解と最大 0.0249 au（372万 km）ずれ、
+    地球最接近の時刻も約1.2日ずれていた（169P/NEAT・2026年8月〜9月）。
+
+    列: JDTDB, 日付, X, Y, Z, VX, VY, VZ（CSV_FORMAT=YES・VEC_TABLE=2）。
+    """
+    params = {
+        "format": "text", "COMMAND": "'{}'".format(cmd), "OBJ_DATA": "'NO'",
+        "MAKE_EPHEM": "'YES'", "EPHEM_TYPE": "VECTORS", "CENTER": "'500@10'",
+        "START_TIME": "'JD{:.6f}'".format(float(jd0)), "STOP_TIME": "'JD{:.6f}'".format(float(jd1)),
+        "STEP_SIZE": "'{}'".format(_hz_step(step_days)),
+        # REF_PLANE='FRAME'（ICRF）。'ECLIPTIC'（=黄道 J2000）だと DE421 の地球位置と
+        # 0.003 au（45万 km）食い違い、地心距離が混ざる（実測）。ICRF なら 1e-7 au 一致。
+        "REF_PLANE": "'FRAME'",
+        "OUT_UNITS": "'AU-D'", "VEC_TABLE": "'2'", "CSV_FORMAT": "'YES'",
+    }
+    r = requests.get("https://ssd.jpl.nasa.gov/api/horizons.api", params=params,
+                     headers=UA, timeout=(10, 60))
+    r.raise_for_status()
+    txt = r.text
+    i, j = txt.find("$$SOE"), txt.find("$$EOE")
+    if i < 0 or j < 0:
+        raise ValueError("Horizons 応答に状態ベクトルのブロックがありません")
+    out = []
+    for ln in txt[i + 6:j].strip().splitlines():
+        c = [v.strip() for v in ln.split(",")]
+        if len(c) < 5:
+            continue
+        try:
+            out.append((float(c[0]), float(c[2]), float(c[3]), float(c[4])))
+        except ValueError:
+            continue
+    if len(out) < 2:
+        raise ValueError("Horizons の状態ベクトルが不足しています（{} 行）".format(len(out)))
+    return out
+
+
 def _comet_elements(name):
     """彗星の軌道要素（太陽中心）を返す。返すのは (id, 要素辞書)。
 
@@ -684,6 +867,9 @@ def _comet_elements(name):
                    "source": "JPL Horizons（太陽中心・黄道面要素）"})
         return cid, el
     el = _sbdb_elements(cid)                      # i/node/argp はラジアン
+    if "a" not in el:
+        # 双曲線（半長軸が無い）彗星。軌道面ビューは Horizons 経路で扱う。
+        raise ValueError("SBDB に半長軸が無い軌道です（C/ 彗星は Horizons 経路を使用）")
     a, e = el["a"], el["e"]
     return cid, {"typ": "sbdb", "fullname": el.get("fullname") or cid, "e": e, "a": a,
                  "_raw": el,                       # ケプラー伝播（_kepler_position）用
@@ -1148,7 +1334,7 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
                      asteroid2: Optional[str] = None, probe: Optional[str] = None,
                      probe2: Optional[str] = None, comet: Optional[str] = None,
                      comet2: Optional[str] = None, engine: str = "simple",
-                     view: str = "system") -> CallToolResult:
+                     view: str = "system", days: int = 180) -> CallToolResult:
     """太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置図を返す（認証不要）。
 
     例:「太陽系を上から見た図」「今の惑星の位置」「イトカワの今の位置を図で」
@@ -1182,12 +1368,16 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
              "紫金山・アトラス"/"C/2023 A3", "ラブジョイ"/"C/2014 Q2"）。
         comet2: 2つ目の彗星。
         engine: "simple"(既定/Pillow) / "accurate"(matplotlib)。
-        view: "system"(既定)=太陽系俯瞰図 / "comet_orbit"=彗星の軌道面ビュー。
+        view: "system"(既定)=太陽系俯瞰図 / "comet_orbit"=彗星の軌道面ビュー /
+            "apparition"=彗星の見え方チャート（地心距離・日心距離・予想光度・太陽離角の
+            推移。comet の指定が必須で、1天体ずつ）。
             comet_orbit は comet の指定が必須で、彗星自身の軌道面を真横から見た図
             （太陽＝円錐曲線の焦点）を返す。e>=1 の C/彗星は閉じない双曲線の枝として描く。
             **comet にカンマ区切りで複数（または comet2 を併用、最大4天体）指定すると、
             1彗星=1パネルで並べた1枚の画像**を返す（パネルごとに軌道面と縮尺が異なる。
             その旨は figure.notes に数値から生成して入る）。
+        days: view="apparition" の表示日数（1〜3650、既定 180）。今日の 30 日前から
+            days 日後までを描く（直前に過ぎた近日点・最接近も見えるようにするため）。
 
     インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
     content の先頭へ「🖼️ [生成した画像を開く（…）](file:///…) ｜ 保存先: `…`」という
@@ -1196,6 +1386,26 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
     回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
     """
     vw = str(view or "system").strip().lower()
+    if vw in ("apparition", "comet_apparition", "light_curve", "見え方"):
+        from .comet_apparition import comet_apparition_result   # 循環 import を避ける
+        first = comet or comet2
+        if not first or not str(first).strip():
+            known = "、".join(sorted(k for k in _COMET_ALIASES if not k.isascii())[:14])
+            msg = ("view='apparition' には彗星の指定が必要です（例: comet='169P'）。"
+                   "指定できる彗星の例: " + known)
+            return CallToolResult(content=[TextContent(type="text", text=msg)],
+                                  structuredContent={"error": msg,
+                                                     "known_comets": sorted(_COMET_ALIASES)})
+        names = _split_object_names(comet) + [n for n in _split_object_names(comet2)
+                                             if n not in _split_object_names(comet)]
+        if len(names) > 1:
+            msg = ("view='apparition' は1天体ずつです（{} が指定されました）。"
+                   "1つだけ指定して、彗星ごとに呼び出してください（並列呼び出し可）"
+                   .format("、".join(names)))
+            return CallToolResult(content=[TextContent(type="text", text=msg)],
+                                  structuredContent={"error": msg, "comets": names})
+        return comet_apparition_result(names[0] if names else str(first).strip(), when,
+                                       days=days)
     if vw in ("comet_orbit", "comet", "orbit"):
         first = comet or comet2
         if not first or not str(first).strip():

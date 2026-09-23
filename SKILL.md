@@ -62,7 +62,7 @@ category: space
 | `alma_search` | ALMA（アルマ望遠鏡）科学アーカイブの観測データ検索（観測対象・座標・周波数帯・種別/分解能/QA・公開/要権限・実データ製品） | ALMA Science Archive (NAOJ, IVOA TAP) | 不要 |
 | `radio_sources_now` | TART オープン電波望遠鏡が「いま観測できる電波源」（GNSS・静止衛星等）を仰角順に表示 | TART source catalog (NZ) | 不要 |
 | `sky_map_with_satellites` | 指定地の空に太陽系の惑星と人工衛星を重ねた画像（matplotlib正確版=PNG/Pillow簡易版=JPEGを選択） | JPL de421+Skyfield / CelesTrak+SGP4 | 不要 |
-| `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示）。`view="comet_orbit"` で彗星の軌道面ビュー（太陽＝焦点の楕円／e≥1 は双曲線の枝）。`comet` にカンマ区切りで複数（または `comet2`、最大4天体）指定すると **1彗星=1パネルの1枚画像**（パネルごとに軌道面・縮尺が異なる＝`figure.notes` に自動生成、`figure.kind=orbit_plane_set`、パネル別は `figure.panels[]`。一部の惑星の位置計算に失敗した場合は `structuredContent.planet_errors` に理由を記録し、`content` と `figure.notes` に失敗数を出します） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
+| `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示）。`view="comet_orbit"` で彗星の軌道面ビュー（太陽＝焦点の楕円／e≥1 は双曲線の枝）、`view="apparition"` で彗星の**見え方チャート**（日心/地心距離・予想光度・太陽離角の時系列。`days` で期間、1天体ずつ）。`comet` にカンマ区切りで複数（または `comet2`、最大4天体）指定すると **1彗星=1パネルの1枚画像**（パネルごとに軌道面・縮尺が異なる＝`figure.notes` に自動生成、`figure.kind=orbit_plane_set`、パネル別は `figure.panels[]`。一部の惑星の位置計算に失敗した場合は `structuredContent.planet_errors` に理由を記録し、`content` と `figure.notes` に失敗数を出します） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
 | `solar_eclipse_series` | 日食（太陽が月に欠ける過程）の時系列パネル画像（7枚・食分と太陽高度・次回日食の自動検索=約4年(1400日)先まで・max_magnitude対応。**地平線下で見えない食は返さない**） | JPL DE421+Skyfield | 不要 |
 | `moon_phase_map` | **月齢マップ**。`layout="calendar"`（既定）=1か月の日別格子、`layout="lunation"`=1朔望月（朔→朔）の時系列パネル（`days` 3〜12枚）。輝面の向きは太陽の位置角から計算（月齢からの決め打ちをしない）。朔・望・上弦・下弦の時刻を現地時間で併記 | JPL DE421+Skyfield | 不要 |
 | `space_calendar` | **宇宙・天文イベントカレンダー**（月グリッドの画像＋`structuredContent.events`）。打ち上げ（LL2・`net_precision` が Day/Hour/Minute/Second の行だけを日付セルに置き、日付未定は本文へ）・天文現象（Skyfield ローカル計算）・公開イベント（国立天文台＋JAXA の施設一般公開・特別公開＝ファン!ファン!JAXA! と宇宙科学研究所。告知済みのみ・取得日を窓に毎日取り直し）・自分の予定を重ねる。**read-through**: 要求月 M に対して窓 [M-1, M+2] を蓄積ストアで確保し、未取得・期限切れの月だけ取得（2回目以降は API 0 回・実測 0.4 秒） | Launch Library 2 + Skyfield + 国立天文台 + JAXA + nasa.gov | 不要 |
@@ -134,6 +134,7 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 「MROは火星のどこ？」                        → planetary_orbiter_track(body="mars", orbiter="mro")
 「パーサヴィアランスの現在地を火星地図で」    → planetary_rover_location_map(body="mars", rover="perseverance")
 「太陽系を上から見た図」「はやぶさ2は今どこ」 → solar_system_now(probe="はやぶさ2")
+「169P はいつ地球に近づく？光度は？」          → solar_system_now(comet="169P", view="apparition", days=120)  # 見え方チャート
 「ハレー彗星の軌道を見せて」                  → solar_system_now(comet="ハレー彗星", view="comet_orbit")
 「紫金山・アトラスの軌道は？」                → solar_system_now(comet="C/2023 A3", view="comet_orbit")  # e>1 は双曲線の枝
 「ハレーとC/2004 R2の軌道を並べて」            → solar_system_now(comet="ハレー彗星,C/2004 R2", view="comet_orbit")  # 1彗星=1パネル
@@ -225,7 +226,7 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 - `moon_phase_map` は**月齢・照度・満ち欠けの向きを自称する図**です。`verify` は**位置角（PA）軸上で明暗境界線の位置を測り直した照度**との一致（許容 0.05。細い三日月は境界線が1〜2画素幅になり丸め誤差が残る）で、走査軸が申告した PA 方向なので**向きが違えば一致しません**。図の月は模式図（実写ではなく、月の海は乱数・クレーターや秤動・地球照は描かない）で、**天の北を上・東を左に置いた見え方**（地平線からの見え方ではない）です。「朔・望の日は正午時点では前後になる」等の食い違いは `figure.notes` に**数値から生成**してあります。
 - `solar_eclipse_series` は**その観測地で太陽が地平線より上にある時間帯だけ**を描きます。全日食が地平線下なら図を返さず「見えません（最大高度 −67°）」と明示します（見えない食を図にすると誤解させるため）。
 - **情報パネルは現在位置マーカーを隠さない隅に置きます**（`surface_map.panel_placement()`）。パネルを後から描くと地図の暗幕がマーカーを覆い、画素検査（`verify.marker_pixels`）が 0 になって落ちます（実測: 月面の LRO が北緯82°＝図の上端に来たケース）。`verify.panel_overlaps_marker` に結果が入り、隅で避けられない小さい図ではマーカーをパネルの上に描き直して注記にその旨を出します。
-- 検査: `scripts/check-tools.py --figures`（注記が空・`verify.ok` が偽なら exit 1）。既定引数では通らない経路（`view="comet_orbit"`、可視の日食）も明示的に叩きます。
+- 検査: `scripts/check-tools.py --figures`（注記が空・`verify.ok` が偽なら exit 1）。既定引数では通らない経路（`view="comet_orbit"`・`view="apparition"`＝期間の端/双曲線の経路を含む、可視の日食）も明示的に叩きます。
 
 ## 開発ワークフロー（検証ゲート）
 
@@ -286,4 +287,4 @@ uv run python scripts/check-tools.py                  # 全56ツール実呼び�
 
 ## 更新履歴
 
-- v0.34.1 — **画像を連続で返すときの改行崩れを修正**: Markdown は同一段落内の単一改行をスペースに畳み込むため、`astronomy_weather` が返す気象庁の雨雲・降水画像（2枚）で caption と `🖼️ [◯◯を開く](URL)` が **1行に融合**していた（1枚だけのときは段落が分かれて見えるので気付きにくい）。caption とリンクの間を**空行**にし、ブロック末尾にも改行を残して次のブロックと連結しないよう修正（実呼び出しの `content` で確認）。`--media-links`（13ツール・問題0）／`--dead-code`（0件）／回帰テスト135件 OK。
+- v0.35.0 — **彗星の見え方チャートを追加（`solar_system_now(view="apparition")`）**: 地心距離 Δ・日心距離 r・予想光度 m1（SBDB の全光度の式）・太陽離角を横軸＝UTC の日付で描く3段パネル。`days`（既定180日）＋直前30日を描き、今日・近日点・地球最接近を縦線で示す。位置は **JPL Horizons の N 体解を ICRF で統一**（`REF_PLANE=FRAME`。`ECLIPTIC` と DE421 の地球位置を混ぜると Δ が 0.003 au ずれるのを実測で確認。多重登録のハレー彗星は `;CAP` で解決）、失敗時のみ SBDB の2体近似へ退避して精度差（実測 0.0249 au・最接近時刻1.2日）を注記。**期間の端で最小のときは「近日点/地球最接近」と呼ばず「r 最小/Δ 最小」へ切り替え**、「真の極値は期間の外」を数値付きで注記（ハレーは 2061 年まで近づくので常に端が最小）。曲線と重なるラベルは描かず `figure.notes` に列挙、`verify` は極値の画素・ラベル重なり・縦線3本の実在を測り直す。未知の彗星名で NameError が漏れていた既存バグ（`_comet_unknown_hint` 未定義）も修正。`--figures` の追加経路に apparition の3経路（通常/期間の端/双曲線）を追加。
