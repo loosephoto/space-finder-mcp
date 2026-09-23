@@ -30,7 +30,11 @@ from .img_common import (conic_from_elements, figure_notes, figure_payload,
 from .input_utils import as_int
 from .solar_system import (_comet_elements, _comet_unknown_hint, _horizons_cmd_for,
                            _horizons_vectors_range, _load, _resolve_when, _sbdb_elements,
-                           comet_xyz_from_elements)
+                           comet_xyz_from_elements, norm_orbit_el, peri_times)
+
+# 要素の正規化と近日点通過の算出は solar_system 側に集約（俯瞰図の経路描画と共有・重複実装しない）
+_norm_elements = norm_orbit_el
+_peri_times = peri_times
 
 # 彗星の位置は JPL Horizons の n 体解（1リクエストで期間まとめて取得）、
 # 地球の日心黄道位置は DE421 + Skyfield（ローカル）で出す。Horizons が
@@ -95,20 +99,6 @@ def _fmt_jd(jd) -> str:
 def _jd_to_utc(jd: float) -> datetime.datetime:
     """JD(TT) を UTC の datetime へ（暦の差は数十秒＝図の分解能より小さい）。"""
     return (datetime.datetime(1970, 1, 1) + datetime.timedelta(days=float(jd) - 2440587.5))
-
-
-def _norm_elements(cid: str, el: dict) -> dict:
-    """`_comet_elements` の戻り（SBDB 経路／Horizons 経路）を共通形へ正規化する。"""
-    if el.get("typ") == "horizons":
-        return {"e": float(el["e"]), "q": el.get("q"), "tp": el.get("tp_jd"),
-                "i": math.radians(el["i_deg"]), "node": math.radians(el["node_deg"]),
-                "argp": math.radians(el["argp_deg"]), "period_days": el.get("period_days"),
-                "fullname": el.get("fullname") or cid, "source": el.get("source", "")}
-    raw = el.get("_raw") or {}
-    return {"e": float(el["e"]), "q": el.get("q"), "tp": raw.get("tp"),
-            "i": raw.get("i"), "node": raw.get("node"), "argp": raw.get("argp"),
-            "period_days": raw.get("period_days"), "m1": raw.get("m1"), "k1": raw.get("k1"),
-            "fullname": el.get("fullname") or cid, "source": el.get("source", "")}
 
 
 def _magnitude_params(cid: str, el: dict) -> Tuple[Optional[float], Optional[float]]:
@@ -508,22 +498,6 @@ def _closest_approach(nel: dict, eph, ts, jd_from: float, jd_to: float,
             lo = m1_
     jc = (lo + hi) / 2.0
     return jc, _sample(nel, eph, ts, jc, None, None)["delta_au"]
-
-
-def _peri_times(nel: dict, jd_now: float) -> Tuple[Optional[float], Optional[float]]:
-    """近日点通過（前回・次回）。周期が分かる軌道（楕円）でのみ算出できる。"""
-    tp, per = nel.get("tp"), nel.get("period_days")
-    if tp is None:
-        return None, None
-    try:
-        per_f = float(per) if per else 0.0
-    except (TypeError, ValueError):
-        per_f = 0.0
-    # e>=1（放物線・双曲線）や、Horizons が周期に 1e99 の番兵を返す場合は「次回」が無い。
-    if float(nel.get("e") or 0.0) >= 1.0 or not (1.0 <= per_f <= 1.0e7):
-        return tp, None
-    k = math.ceil((jd_now - tp) / per_f)
-    return tp + (k - 1) * per_f, tp + k * per_f
 
 
 def _apparition_data(name: str, when_iso, days, before, samples) -> dict:

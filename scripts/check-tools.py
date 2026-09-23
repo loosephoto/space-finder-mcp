@@ -251,6 +251,37 @@ FIGURES_EXTRA_CALLS = (
     # 双曲線彗星（e>1・閉じない・次回の近日点は無い）
     ("solar_system_now[apparition/双曲線]", "solar_system_now",
      {"comet": "C/2023 A3", "view": "apparition", "days": 120}, {"figure_kind": "comet_apparition"}),
+    # 太陽系俯瞰図に彗星の通過経路（破線）を重ねる経路。対数縮尺では形が歪むことを注記に
+    # 出し、太陽の描画円盤の内側に来る目印は「描かず理由を注記」にする分岐を固定する。
+    ("solar_system_now[route/simple]", "solar_system_now",
+     {"comet": "エンケ彗星", "route": True}, {"figure_kind": "heliocentric_overview"}),
+    # 線形縮尺（±45AU に収まるので accurate を維持）: 経路の形が本当の軌道になる経路
+    ("solar_system_now[route/accurate]", "solar_system_now",
+     {"comet": "エンケ彗星", "route": True, "engine": "accurate"},
+     {"figure_kind": "heliocentric_overview"}),
+    # 近日点が誇張した太陽円盤の内側に入る経路（目印は描かず、確認できない旨を注記に出す）
+    ("solar_system_now[route/近日点が太陽円盤の内側]", "solar_system_now",
+     {"comet": "紫金山・アトラス彗星", "route": True}, {"figure_kind": "heliocentric_overview"}),
+    # 表示範囲の指定（range_au）: 土星より内側だけを拡大して見せる経路。範囲外の天体・軌道の円は
+    # 描かず、注記へ数値付きで列挙する分岐（黙って消さない）を両エンジンで固定する。
+    ("solar_system_now[range_au=10/simple]", "solar_system_now",
+     {"range_au": 10}, {"figure_kind": "heliocentric_overview"}),
+    ("solar_system_now[range_au=10/accurate]", "solar_system_now",
+     {"range_au": 10, "engine": "accurate"}, {"figure_kind": "heliocentric_overview"}),
+    # 経路が範囲内に収まる（線形維持）／収まらない（対数版へ落ちて範囲外を注記）の両方
+    ("solar_system_now[range_au=10/route内に収まる]", "solar_system_now",
+     {"comet": "エンケ彗星", "route": True, "engine": "accurate", "range_au": 10},
+     {"figure_kind": "heliocentric_overview"}),
+    ("solar_system_now[range_au=5/routeが範囲外]", "solar_system_now",
+     {"comet": "ハレー彗星", "route": True, "range_au": 5},
+     {"figure_kind": "heliocentric_overview"}),
+    # 天体名・"fit" での範囲指定（LLM が「火星まで」と判断して縮尺を選ぶ経路）。
+    # 名前は長半径×1.08 で解決し、決め方を figure.notes と structuredContent.range_resolved に出す。
+    ("solar_system_now[range_au=木星まで]", "solar_system_now",
+     {"range_au": "木星まで", "engine": "accurate"}, {"figure_kind": "heliocentric_overview"}),
+    ("solar_system_now[range_au=fit]", "solar_system_now",
+     {"range_au": "fit", "comet": "エンケ彗星", "route": True},
+     {"figure_kind": "heliocentric_overview"}),
     # 日食は既定引数だと「その観測地で見える食」が無い場合があるため、可視の例で叩く
     # 地点マーカー（落点マップ）: 過去機の公表落点を天体面地図に描く経路
     ("planetary_orbiter_track[かぐや落点]", "planetary_orbiter_track",
@@ -355,6 +386,9 @@ MEDIA_EXTRA_CALLS = (
     # アイコン付きリンク＋保存先、structuredContent.image_path が入るかを機械的に検査）
     ("solar_system_now[apparition]", "solar_system_now",
      {"comet": "169P", "view": "apparition", "days": 60}),
+    # 通過経路を重ねた俯瞰図も画像を返す（リンク先行と image_path を機械的に検査）
+    ("solar_system_now[route]", "solar_system_now",
+     {"comet": "エンケ彗星", "route": True}),
 )
 
 

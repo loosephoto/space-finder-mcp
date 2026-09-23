@@ -495,3 +495,260 @@ class CometApparitionTests(unittest.TestCase):
         self.assertIn("error", r.structuredContent or {})
         r2 = comet_apparition_result("169P", when_iso="変な値", days=30)
         self.assertIn("error", r2.structuredContent or {})
+
+
+class OrbitRouteTests(unittest.TestCase):
+    """太陽系俯瞰図に重ねる彗星の通過経路（orbit_path_xyz / route=True）の回帰テスト。"""
+
+    def test_orbit_path_ellipse_is_closed_and_within_q_and_Q(self):
+        # 経路は「閉じた楕円」として描くので、先頭と末尾が一致し、r が q〜Q に収まること。
+        import math
+
+        from space_finder_mcp.solar_system import orbit_path_xyz
+
+        el = {"e": 0.8470, "q": 0.3395, "i": 0.2058, "node": 0.5218, "argp": 0.3256}
+        pts = orbit_path_xyz(el, n=360)
+        self.assertEqual(len(pts), 361)
+        self.assertLess(math.dist(pts[0], pts[-1]), 1e-9)          # 閉曲線
+        rs = [math.dist((0.0, 0.0, 0.0), p) for p in pts]
+        q, Q = el["q"], el["q"] / (1.0 - el["e"]) * (1.0 + el["e"])
+        self.assertGreaterEqual(min(rs), q * 0.999)
+        self.assertLessEqual(max(rs), Q * 1.001)
+
+    def test_orbit_path_hyperbola_is_cut_at_r_cap(self):
+        # e>=1 は閉じないので r_cap で切る（閉じた線として描くと嘘になる）。
+        import math
+
+        from space_finder_mcp.solar_system import orbit_path_xyz
+
+        pts = orbit_path_xyz({"e": 1.2, "q": 0.4, "i": 0.1, "node": 0.2, "argp": 0.3}, r_cap=5.0)
+        rs = [math.dist((0.0, 0.0, 0.0), p) for p in pts]
+        self.assertLessEqual(max(rs), 5.0 + 1e-9)
+        self.assertGreater(math.dist(pts[0], pts[-1]), 1e-9)       # 閉じていない
+        with self.assertRaises(ValueError):
+            orbit_path_xyz({"e": 1.2, "q": None, "i": 0.1, "node": 0.0, "argp": 0.0})
+
+    def test_norm_orbit_el_converts_degrees_once(self):
+        # Horizons 経路は度、SBDB 経路はラジアン。混ぜると角度が 57 倍ずれる。
+        import math
+
+        from space_finder_mcp.solar_system import norm_orbit_el
+
+        hz = norm_orbit_el("1P", {"typ": "horizons", "e": 0.967, "q": 0.586, "tp_jd": 2446470.5,
+                                  "i_deg": 162.26, "node_deg": 58.42, "argp_deg": 111.33,
+                                  "period_days": 27509.0})
+        self.assertAlmostEqual(hz["i"], math.radians(162.26), places=12)
+        self.assertLess(hz["i"], math.pi + 0.1)                    # ラジアン（度なら 162 になる）
+        sb = norm_orbit_el("2P", {"e": 0.847, "q": 0.3395, "a": 4.099, "fullname": "2P/Encke",
+                                  "_raw": {"tp": 2460581.3, "i": 0.2058, "node": 0.5218,
+                                           "argp": 0.3256, "period_days": 1207.0, "m1": 15.7,
+                                           "k1": 4.5}})
+        self.assertAlmostEqual(sb["i"], 0.2058, places=12)
+        self.assertEqual(sb["a"], 4.099)
+        self.assertEqual(sb["m1"], 15.7)
+
+    def test_peri_times_shared_helper(self):
+        # solar_system 側へ集約した peri_times が comet_apparition からも同じ結果を返す。
+        from space_finder_mcp.comet_apparition import _peri_times
+        from space_finder_mcp.solar_system import peri_times
+
+        nel = {"e": 0.847, "tp": 2460581.3, "period_days": 1207.0}
+        self.assertEqual(peri_times(nel, 2461305.9), _peri_times(nel, 2461305.9))
+        prev, nxt = peri_times(nel, 2461305.9)
+        self.assertAlmostEqual(nxt - prev, 1207.0, places=6)
+        self.assertLessEqual(abs(2461305.9 - nxt), 1207.0)
+        self.assertEqual(peri_times({"e": 1.0002, "tp": 2460581.3, "period_days": 1207.0},
+                                    2461305.9)[1], None)
+
+    def test_route_overview_returns_image_and_verified_marks(self):
+        # route=True で通過経路を重ねた俯瞰図: 目印の画素・破線の実在まで検証して返す。
+        from space_finder_mcp.solar_system import solar_system_now
+
+        r = solar_system_now(comet="エンケ彗星", route=True)
+        sc = r.structuredContent or {}
+        self.assertNotIn("error", sc)
+        fig = sc.get("figure") or {}
+        v = fig.get("verify") or {}
+        self.assertTrue(v.get("ok"), v.get("missing"))
+        self.assertEqual(v["routes"][0]["segments"], 720)
+        self.assertTrue(any(m.get("pixels_found") and m["pixels_found"] >= 3
+                            for m in v["routes"][0]["marks"]))
+        self.assertTrue(any("通過経路" in n for n in fig.get("notes", [])))
+        rt = (sc.get("comet_routes") or {})["エンケ彗星"]
+        self.assertNotIn("points", rt)                              # 点列は structuredContent に入れない
+        self.assertEqual(rt["marks"][0]["id"], "perihelion")
+        self.assertEqual(len(r.content), 2)
+        self.assertIn("file:///", r.content[0].text.splitlines()[0])   # 画像より前にリンク（規約13）
+
+    def test_route_mark_inside_sun_disk_is_not_claimed(self):
+        # 近日点が誇張した太陽円盤の内側に入る彗星では、目印を描かず「図からは確認できない」を
+        # 注記に出す（描いていないのに描いたと言わない）。
+        from space_finder_mcp.solar_system import solar_system_now
+
+        r = solar_system_now(comet="紫金山・アトラス彗星", route=True)
+        sc = r.structuredContent or {}
+        self.assertNotIn("error", sc)
+        v = (sc.get("figure") or {}).get("verify") or {}
+        self.assertTrue(v.get("ok"), v.get("missing"))
+        marks = v["routes"][0]["marks"]
+        self.assertEqual(marks[0]["label"], "近日点")
+        self.assertFalse(marks[0]["drawn"])
+        self.assertEqual(marks[0]["reason"], "sun_disk")
+        self.assertTrue(v["routes"][0]["occluded"][0]["verified"])
+        self.assertTrue(any("確認できない" in n for n in sc["figure"]["notes"]))
+
+    def test_accurate_route_marks_are_not_hidden_by_sun_marker(self):
+        # 実測: 線形(±45AU)は約12 px/AU しかなく、太陽マーカー(s=300)は半径約1.7 AU 相当。
+        # 太陽を後に描いていたため、エンケ彗星の近日点(0.34 AU)の◇が完全に隠れていた
+        # （画素0）。太陽を最背面・◇を最前面にして、目印の画素が測れることを固定する。
+        from space_finder_mcp.solar_system import solar_system_now
+
+        r = solar_system_now(comet="エンケ彗星", route=True, engine="accurate")
+        sc = r.structuredContent or {}
+        self.assertNotIn("error", sc)
+        self.assertIn("accurate", sc.get("engine", ""))
+        fig = sc.get("figure") or {}
+        v = fig.get("verify") or {}
+        self.assertTrue(v.get("ok"), v.get("missing"))
+        marks = {m["id"]: m for m in v["routes"][0]["marks"]}
+        self.assertIsNotNone(marks["perihelion"].get("px"))
+        self.assertGreaterEqual(marks["perihelion"].get("pixels_found") or 0, 3)
+        self.assertGreaterEqual(marks["aphelion"].get("pixels_found") or 0, 3)
+        # 太陽マーカーの誇張（半径 AU）を注記・scale に出していること
+        self.assertTrue(any("太陽の描画マーカー" in x
+                            for x in (fig.get("scale") or {}).get("exaggerated", [])))
+        self.assertTrue(any("誇張した太陽マーカー" in n for n in fig.get("notes", [])))
+
+
+class RangeAuTests(unittest.TestCase):
+    """太陽系俯瞰図の表示範囲指定（range_au）。土星より内側だけを拡大して見るための回帰テスト。"""
+
+    def test_fixed_range_lists_outside_planets_with_numbers(self):
+        from space_finder_mcp.solar_system import solar_system_now
+
+        sc = solar_system_now(range_au=10).structuredContent
+        self.assertEqual(sc["range_au"], 10.0)
+        self.assertEqual(sc["figure"]["scale"]["range_au"]["hi"], 10.0)
+        names = [o["name"] for o in sc["out_of_range"]]
+        self.assertIn("天王星", names)
+        self.assertIn("海王星", names)
+        # 範囲外は黙って消さず、数値付きで注記に列挙する
+        joined = "\n".join(sc["figure"]["notes"])
+        self.assertIn("表示範囲10 AU の外にあるため描いていない", joined)
+        self.assertIn("19.44 AU", joined)                      # 天王星の実際の日心距離
+        self.assertIn("表示範囲の外の惑星軌道の円は描いていない", joined)
+
+    def test_both_engines_honor_range_au(self):
+        from space_finder_mcp.solar_system import solar_system_now
+
+        for eng in ("simple", "accurate"):
+            sc = solar_system_now(range_au=10, engine=eng).structuredContent
+            self.assertEqual(sc["figure"]["scale"]["range_au"]["hi"], 10.0, eng)
+            self.assertIn("表示範囲", "\n".join(sc["figure"]["notes"]), eng)
+
+    def test_linear_scale_actually_zooms_with_range_au(self):
+        # 線形版の縮尺は「画像幅/(2*lim)」。lim を 45 AU → 10 AU に絞れば px/AU が約4.5倍に
+        # なる（figure.scale.px_per_AU に実測値を出しているので数値で検証できる）。
+        from space_finder_mcp.solar_system import solar_system_now
+
+        auto = solar_system_now(engine="accurate").structuredContent["figure"]["scale"]
+        tight = solar_system_now(engine="accurate", range_au=10).structuredContent["figure"]["scale"]
+        self.assertGreater(auto.get("px_per_AU") or 0, 5.0)
+        self.assertLess(auto.get("px_per_AU") or 0, 20.0)          # 実測 約12 px/AU（縮尺は固定）
+        self.assertGreater((tight.get("px_per_AU") or 0), (auto.get("px_per_AU") or 0) * 3.0)
+
+    def test_inner_planets_visible_and_outer_not_drawn_with_range_au(self):
+        # range_au=10 では太陽マーカーの誇張半径が 1.7 AU → 0.4 AU に下がり、内惑星が隠れない。
+        # 地球（青）のマーカーが実際に画素として現れ、範囲外の海王星（同じ青系）は描かれない。
+        import numpy as np
+        from PIL import Image
+
+        from space_finder_mcp.solar_system import solar_system_now
+
+        def sun_marker_au(sc):
+            for x in (sc["figure"]["scale"].get("exaggerated") or []):
+                if "太陽の描画マーカー" in x:
+                    return float(x.split("半径 ")[1].split(" AU")[0])
+            return None
+
+        auto = solar_system_now(engine="accurate").structuredContent
+        tight = solar_system_now(engine="accurate", range_au=10).structuredContent
+        self.assertGreater(sun_marker_au(auto), 1.0)               # 1.7 AU（内惑星を覆う大きさ）
+        self.assertLess(sun_marker_au(tight), 0.5)                 # 0.4 AU
+        a = np.asarray(Image.open(tight["image_path"]).convert("RGB")).astype(int)
+        blue = (a[:, :, 2] > 140) & (a[:, :, 2] - a[:, :, 0] > 55)
+        self.assertGreater(int(blue.sum()), 50)                    # 地球のマーカーが見えている
+        # 海王星（30 AU）は範囲外なので描かれていない ＝ 青系は地球だけ
+        self.assertIn("海王星", [o["name"] for o in tight["out_of_range"]])
+        # 画素検証（figure.verify）が範囲内の描画と範囲外の非描画を実際に測っていること
+        v = tight["figure"].get("verify") or {}
+        self.assertTrue(v.get("ok"), v)
+        rv = v.get("range_au") or {}
+        self.assertTrue(rv.get("planets_drawn"), rv)
+        self.assertTrue(all(c["ok"] for c in rv["planets_drawn"]), rv["planets_drawn"])
+        self.assertTrue(all(c["ok"] for c in rv["out_of_range_zero_pixels"]),
+                        rv["out_of_range_zero_pixels"])
+        self.assertTrue((rv.get("sun_marker_vs_inner_planet") or {}).get("ok"), rv)
+
+    def test_route_labels_do_not_hide_planet_markers(self):
+        # range_au=10＋route では ◇の日付ラベル箱が金星のマーカーを覆っていた（実測 255→13 px）。
+        # ラベルを惑星マーカーより下の zorder にして、金星の画素が残ることを固定する。
+        from space_finder_mcp.solar_system import solar_system_now
+
+        sc = solar_system_now(range_au=10, engine="accurate", comet="エンケ彗星",
+                              route=True).structuredContent
+        v = sc["figure"].get("verify") or {}
+        self.assertTrue(v.get("ok"), v)
+        drawn = {c["name"]: c["pixels_found"]
+                 for c in ((v.get("range_au") or {}).get("planets_drawn") or [])}
+        self.assertGreaterEqual(drawn.get("金星", 0), 20, drawn)
+
+    def test_range_au_accepts_body_names(self):
+        # LLM が「火星まで」「木星まで」と判断して縮尺を選べるように、天体名も受け付ける。
+        # 名前は「その天体の軌道の円が入る」ように長半径×1.08 で決める。
+        from space_finder_mcp.solar_system import solar_system_now
+
+        for raw, want, word in (("火星", 1.524 * 1.08, "火星"), ("木星まで", 5.20 * 1.08, "木星"),
+                                ("saturn", 9.58 * 1.08, "土星"), ("土星の軌道", 9.58 * 1.08, "土星")):
+            sc = solar_system_now(range_au=raw).structuredContent
+            self.assertAlmostEqual(sc["range_au"], round(want, 2), places=2, msg=raw)   # 名前は2桁に丸める
+            self.assertIn(word, sc.get("range_resolved") or "", raw)
+            self.assertTrue((sc["figure"].get("verify") or {}).get("ok"), (raw, sc["figure"].get("verify")))
+            self.assertIn("表示範囲の決め方", chr(10).join(sc["figure"]["notes"]), raw)
+
+    def test_range_au_fit_follows_the_specified_bodies(self):
+        # "fit" は「その呼び出しで指定した天体が全部入る範囲」。イトカワ（a=1.32 AU）なら約1.5 AU。
+        from space_finder_mcp.solar_system import solar_system_now
+
+        sc = solar_system_now(asteroid="イトカワ", range_au="fit").structuredContent
+        self.assertTrue(1.2 <= float(sc["range_au"]) <= 2.0, sc["range_au"])
+        self.assertIn("指定した天体", sc.get("range_resolved") or "")
+        # 指定天体が無いときの "fit" は自動（45 AU 起点）へ戻るだけで、エラーにはしない
+        sc2 = solar_system_now(range_au="fit").structuredContent
+        self.assertFalse(sc2.get("range_au"))
+
+    def test_unresolvable_range_name_is_rejected_with_candidates(self):
+        # 未知の名前は推測せず、候補一覧つきで停止する（勝手な縮尺にしない）。
+        from space_finder_mcp.solar_system import solar_system_now
+
+        sc = solar_system_now(range_au="ドラえもん").structuredContent
+        self.assertIn("error", sc)
+        self.assertIn("解決できない表示範囲", sc["error"])
+        self.assertIn("木星", sc.get("range_targets") or [])
+
+    def test_range_au_below_minimum_is_rejected(self):
+        from space_finder_mcp.solar_system import solar_system_now
+
+        sc = solar_system_now(range_au=0.2).structuredContent
+        self.assertIn("error", sc)
+        self.assertIn("0.5 AU", sc["error"])
+
+    def test_route_leaving_the_range_falls_back_to_log_and_is_listed(self):
+        # ハレー彗星（遠日点 35 AU）は 5 AU の枠に収まらないので線形版は使えない。
+        from space_finder_mcp.solar_system import solar_system_now
+
+        sc = solar_system_now(comet="ハレー彗星", route=True, range_au=5).structuredContent
+        self.assertTrue(sc["engine"].startswith("simple"), sc["engine"])
+        joined = "\n".join(sc["figure"]["notes"])
+        self.assertIn("表示範囲5 AU の外にあるため描いていない", joined)
+        self.assertTrue(any(o.get("type") == "route_mark" for o in sc["out_of_range"]), sc["out_of_range"])

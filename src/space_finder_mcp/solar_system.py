@@ -27,6 +27,7 @@ import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import TTL_DAILY, ttl_cache
+from .input_utils import as_float
 from .name_common import split_names as _split_object_names
 from .img_common import (RENDER_LOCK, apply_matplotlib_cjk_font, body_rgb,
                          conic_from_elements, figure_notes, figure_payload,
@@ -292,6 +293,102 @@ def _kepler_position(el, jd):
 _K_GAUSS = 0.01720209895
 
 
+def norm_orbit_el(cid, el):
+    """`_comet_elements` の戻り（SBDB 経路／Horizons 経路）を共通形へ正規化する。
+
+    SBDB 経路は `_raw` に度→ラジアン済みの要素を持ち、Horizons 経路は
+    `i_deg`/`node_deg`/`argp_deg`（度）で返す。両者を混ぜると角度が 57 倍ずれるので、
+    使う側は必ずこれを通す（見え方チャート・通過経路の描画で共有）。
+    """
+    if el.get("typ") == "horizons":
+        return {"e": float(el["e"]), "q": el.get("q"), "tp": el.get("tp_jd"),
+                "i": math.radians(el["i_deg"]), "node": math.radians(el["node_deg"]),
+                "argp": math.radians(el["argp_deg"]), "period_days": el.get("period_days"),
+                "fullname": el.get("fullname") or cid, "source": el.get("source", "")}
+    raw = el.get("_raw") or {}
+    out = {"e": float(el["e"]), "q": el.get("q"), "tp": raw.get("tp"),
+           "i": raw.get("i"), "node": raw.get("node"), "argp": raw.get("argp"),
+           "period_days": raw.get("period_days"), "m1": raw.get("m1"), "k1": raw.get("k1"),
+           "fullname": el.get("fullname") or cid, "source": el.get("source", "")}
+    if el.get("a") is not None:                # 楕円（小惑星・周期彗星）は半長軸も持つ
+        out["a"] = float(el["a"])
+    return out
+
+
+def peri_times(nel, jd_now):
+    """近日点通過（前回・次回）の JD を返す。周期が分かる楕円でのみ算出できる。
+
+    e>=1（放物線・双曲線）や、Horizons が周期に 1e99 の番兵を返す場合は
+    「次回」が無い＝(tp, None)（見え方チャートと俯瞰図の経路で共有）。
+    """
+    tp, per = nel.get("tp"), nel.get("period_days")
+    if tp is None:
+        return None, None
+    try:
+        per_f = float(per) if per else 0.0
+    except (TypeError, ValueError):
+        per_f = 0.0
+    if float(nel.get("e") or 0.0) >= 1.0 or not (1.0 <= per_f <= 1.0e7):
+        return tp, None
+    k = math.ceil((jd_now - tp) / per_f)
+    return tp + (k - 1) * per_f, tp + k * per_f
+
+
+def _jd_date(jd):
+    """JD を YYYY-MM-DD にする（None・暦の範囲外・番兵は "-"）。"""
+    if jd is None:
+        return "-"
+    try:
+        jd = float(jd)
+    except (TypeError, ValueError):
+        return "-"
+    if not (1000000.0 < jd < 4000000.0):
+        return "-"
+    from datetime import datetime, timedelta, timezone
+    return (datetime(2000, 1, 1, 12, tzinfo=timezone.utc)
+            + timedelta(days=jd - 2451545.0)).strftime("%Y-%m-%d")
+
+
+def _xyz_from_rnu(r, nu, i, node, argp):
+    """軌道面内の (r, 真近点角 nu) を日心黄道座標へ回す（伝播と経路描画で共有）。"""
+    u = argp + nu
+    return (r * (math.cos(node) * math.cos(u) - math.sin(node) * math.sin(u) * math.cos(i)),
+            r * (math.sin(node) * math.cos(u) + math.cos(node) * math.sin(u) * math.cos(i)),
+            r * math.sin(u) * math.sin(i))
+
+
+def orbit_path_xyz(el, r_cap=None, n=720):
+    """軌道の形（日心黄道座標の点列, AU）を返す。俯瞰図に「通過経路」を重ねるため。
+
+    - e<1（楕円）: 離心近点角 E を 0〜2π で回した閉曲線（先頭と末尾は同じ点）
+    - e>=1（放物線・双曲線）: 真近点角 ν を ±ν_max まで。ν_max は r ≤ r_cap で決める
+      （既定 r_cap = 8q）。閉じない軌道を「閉じた線」として描くと嘘になるので切る。
+    """
+    e = float(el["e"])
+    i, node, argp = el["i"], el["node"], el["argp"]
+    pts = []
+    if e < 1.0:
+        a = el.get("a")
+        a = float(a) if a is not None else float(el["q"]) / (1.0 - e)
+        for k in range(int(n) + 1):
+            ecc = 2.0 * math.pi * k / int(n)
+            nu = 2.0 * math.atan2(math.sqrt(1.0 + e) * math.sin(ecc / 2.0),
+                                  math.sqrt(1.0 - e) * math.cos(ecc / 2.0))
+            pts.append(_xyz_from_rnu(a * (1.0 - e * math.cos(ecc)), nu, i, node, argp))
+        return pts
+    q = el.get("q")
+    if not q:
+        raise ValueError("放物線/双曲線の経路には近点距離 q が必要です")
+    q = float(q)
+    r_cap = float(r_cap) if r_cap else q * 8.0
+    cos_nu = max(-1.0, min(1.0, (q * (1.0 + e) / r_cap - 1.0) / max(e, 1e-12)))
+    nu_max = math.acos(cos_nu)
+    for k in range(int(n) + 1):
+        nu = -nu_max + 2.0 * nu_max * k / int(n)
+        pts.append(_xyz_from_rnu(q * (1.0 + e) / (1.0 + e * math.cos(nu)), nu, i, node, argp))
+    return pts
+
+
 def comet_xyz_from_elements(el, jd):
     """彗星の要素（e, q, tp）から日心黄道座標 (x,y,z,r,lon,lat) を返す。
 
@@ -346,18 +443,19 @@ def comet_xyz_from_elements(el, jd):
         nu = 2.0 * math.atan2(math.sqrt(e + 1.0) * math.sinh(hyp / 2.0),
                               math.sqrt(e - 1.0) * math.cosh(hyp / 2.0))
         r = a * (e * math.cosh(hyp) - 1.0)
-    i, node, argp = el["i"], el["node"], el["argp"]
-    u = argp + nu
-    x = r * (math.cos(node) * math.cos(u) - math.sin(node) * math.sin(u) * math.cos(i))
-    y = r * (math.sin(node) * math.cos(u) + math.cos(node) * math.sin(u) * math.cos(i))
-    z = r * math.sin(u) * math.sin(i)
+    x, y, z = _xyz_from_rnu(r, nu, el["i"], el["node"], el["argp"])
     lon = math.degrees(math.atan2(y, x)) % 360.0
     lat = math.degrees(math.atan2(z, math.hypot(x, y)))
     return x, y, z, r, lon, lat
 
 
-def _compute(when_iso=None, asteroids=None, probes=None, comets=None):
-    """太陽を原点とした惑星・小惑星・探査機・彗星の日心黄道座標を計算。"""
+def _compute(when_iso=None, asteroids=None, probes=None, comets=None, route=False,
+             range_au=None):
+    """太陽を原点とした惑星・小惑星・探査機・彗星の日心黄道座標を計算。
+
+    route=True のときは、指定された彗星の**軌道（通過経路）の点列**も作る
+    （俯瞰図に重ねるため。対数縮尺の図では形が歪むので、描く側が注記する）。
+    """
     loader, eph = _load()
     ts = loader.timescale()
     t = _resolve_when(when_iso, ts)
@@ -431,12 +529,153 @@ def _compute(when_iso=None, asteroids=None, probes=None, comets=None):
         except Exception as ex:
             coms[name] = {"name": name, "color": _COMET_COLOR, "error": str(ex)[:120]}
 
+    routes = {}
+    if route:
+        for name in coms:
+            if coms[name].get("error"):
+                continue
+            try:
+                routes[name] = _comet_route(name, jd)
+            except Exception as ex:
+                routes[name] = {"name": name, "error": str(ex)[:120]}
+
     return {"time_utc": tstr, "planets": planets, "planet_errors": planet_errors,
-            "asteroids": asts, "probes": prbs, "comets": coms, "asteroid_belt": True}
+            "asteroids": asts, "probes": prbs, "comets": coms, "asteroid_belt": True,
+            "routes": routes, "route": bool(route),
+            # 表示範囲（太陽からの距離の上限 AU）。None なら自動（60 AU 起点＋遠方天体で拡張）
+            "range_au": float(range_au) if range_au else None}
+
+
+def _comet_route(name, jd):
+    """彗星の通過経路（日心黄道座標の点列）と、近日点・遠日点の目印を作る（認証不要）。
+
+    近日点は「次に来る日時」、遠日点は近日点＋半周期（楕円のみ）で日付を添える。
+    e>=1（放物線・双曲線）は閉じないので遠日点は無く、経路も r_cap で切る。
+    """
+    cid, el = _comet_elements(name)
+    nel = norm_orbit_el(cid, el)
+    e = float(nel["e"])
+    q = nel.get("q")
+    r_cap = max(30.0, 8.0 * float(q)) if q else 30.0
+    pts = orbit_path_xyz(nel, r_cap=r_cap)
+    rs = [math.dist((0.0, 0.0, 0.0), p) for p in pts]
+    i_p, i_a = rs.index(min(rs)), rs.index(max(rs))
+    per, tp = nel.get("period_days"), nel.get("tp")
+    tp_next = None
+    try:
+        if tp is not None:
+            tp_next = peri_times(nel, jd)[1] if e < 1.0 else tp
+    except Exception:
+        tp_next = tp
+    marks = [{"id": "perihelion", "label": "近日点", "r_au": rs[i_p],
+              "proj_au": math.hypot(pts[i_p][0], pts[i_p][1]),
+              "lon_deg": math.degrees(math.atan2(pts[i_p][1], pts[i_p][0])) % 360.0,
+              "jd": tp_next, "date": _jd_date(tp_next)}]
+    if e < 1.0:
+        apo = rs[i_a]
+        marks.append({"id": "aphelion", "label": "遠日点", "r_au": apo,
+                      "proj_au": math.hypot(pts[i_a][0], pts[i_a][1]),
+                      "lon_deg": math.degrees(math.atan2(pts[i_a][1], pts[i_a][0])) % 360.0,
+                      "jd": (tp_next + per / 2.0) if (tp_next and per) else None,
+                      "date": _jd_date((tp_next + per / 2.0) if (tp_next and per) else None)})
+    return {"name": nel.get("fullname") or cid, "color": _COMET_COLOR, "points": pts,
+            "marks": marks, "period_days": per, "e": e, "q_au": q,
+            "closed": e < 1.0, "r_cap_au": None if e < 1.0 else r_cap,
+            # 経路の最大半径（表示範囲に収まるかの判定に使う）と、既存の ±45AU 判定
+            "r_max_au": max(max(abs(q[0]), abs(q[1])) for q in pts),
+            "out_of_frame": bool(max(max(abs(q[0]), abs(q[1])) for q in pts) > 43.0)}
 
 
 # ---------- 描画ヘルパー ----------
 # ---------- 描画エンジン B: Pillow (簡易・実写合成, 既定) ----------
+# 表示範囲の指定に使える天体名・キーワード（AU = 公転長半径・目安）。
+# LLM は「火星まで」「木星まで」のように**判断して**範囲を選べる。数値も従来どおり使える。
+_RANGE_TARGET_EN = {"水星": "mercury", "金星": "venus", "地球": "earth", "火星": "mars",
+                    "木星": "jupiter", "土星": "saturn", "天王星": "uranus",
+                    "海王星": "neptune", "冥王星": "pluto"}
+_RANGE_TARGETS = {}
+for _rn, _, _, _rs in _PLANETS:
+    _RANGE_TARGETS[_rn] = (_rs, _rn)
+    _RANGE_TARGETS[_RANGE_TARGET_EN[_rn]] = (_rs, _rn)
+_RANGE_TARGETS.update({
+    "小惑星帯": (2.7, "小惑星帯(2.0–3.4 AU)"), "asteroidbelt": (2.7, "小惑星帯(2.0–3.4 AU)"),
+    "内惑星": (1.524, "内惑星(〜火星)"), "inner": (1.524, "内惑星(〜火星)"),
+    "innerplanets": (1.524, "内惑星(〜火星)"),
+    "外惑星": (30.1, "外惑星(〜海王星)"), "outer": (30.1, "外惑星(〜海王星)"),
+    "outerplanets": (30.1, "外惑星(〜海王星)"),
+    "太陽系": (45.0, "太陽系(±45 AU)"), "solarsystem": (45.0, "太陽系(±45 AU)"),
+    "全体": (45.0, "太陽系全体(±45 AU)"), "太陽系全体": (45.0, "太陽系全体(±45 AU)"),
+})
+
+
+def _resolve_range(raw, scene):
+    """表示範囲の指定（数値 / 天体名 / キーワード）を AU に解決する。
+
+    - 数値: そのまま（例: 10 → 10 AU）
+    - 天体名: 「その天体の軌道の円が入る」ように長半径 × 1.08（例: 木星 5.20 → 5.62 AU）
+      「火星まで」「木星の軌道」のような言い回しは語尾を落として照合する。
+    - "fit"（指定天体に合わせる）: その呼び出しで指定した小惑星・彗星・探査機・経路が
+      すべて入る範囲（最大値 × 1.10、下限 1.2 AU）。
+    戻り値: (AU or 0.0, 由来の説明 or None)。解決できない名前は (None, 説明) を返し、
+    呼び出し側が候補を提示して停止する（推測して勝手な縮尺にしない）。
+    """
+    if raw is None:
+        return 0.0, None
+    num = as_float(raw, default=None, minimum=0.0, maximum=1.0e6)
+    if num:
+        return float(num), None
+    s = str(raw).strip()
+    if not s or s.lower() in ("auto", "none", "0"):
+        return 0.0, None
+    key = s.lower()
+    for suf in ("まで", "以内", "圏", "の軌道", "軌道", "より内側", "より外側"):
+        key = key.replace(suf, "")
+    key = key.replace(" ", "").replace("　", "").replace("_", "")
+    if key in ("fit", "指定天体", "指定した天体", "全部", "すべて", "合わせる", "収まる"):
+        cands = []
+        for coll, fld in (("asteroids", "sma"), ("comets", "au"), ("probes", "proj_au")):
+            for d in (scene.get(coll) or {}).values():
+                if not d.get("error"):
+                    cands.append(float(d.get(fld) or d.get("au") or 0.0))
+        for rt in (scene.get("routes") or {}).values():
+            if not rt.get("error"):
+                cands.append(float(rt.get("r_max_au") or 0.0))
+        cands = [c for c in cands if c > 0]
+        if not cands:
+            return 0.0, "指定天体が無いため自動（45 AU 起点＋遠方天体で拡張）"
+        v = round(max(max(cands) * 1.10, 1.2), 2)
+        return v, "指定した天体が収まる範囲（最大 {:.2f} AU × 1.10 = {:.2f} AU）".format(max(cands), v)
+    if key in _RANGE_TARGETS:
+        _sma, _label = _RANGE_TARGETS[key]
+        return round(_sma * 1.08, 2), "{}の軌道（長半径 {:.2f} AU × 1.08 = {:.2f} AU）".format(
+            _label, _sma, _sma * 1.08)
+    # 同じ呼び出しで指定した天体の名前（例: asteroid="イトカワ" に対して range_au="イトカワ"）
+    for coll, fld in (("asteroids", "sma"), ("comets", "au"), ("probes", "proj_au")):
+        for nm, d in (scene.get(coll) or {}).items():
+            if not d.get("error") and (nm == s or str(d.get("name") or "") == s
+                                       or nm.lower() == key):
+                base = float(d.get(fld) or d.get("au") or 0.0)
+                return round(max(base * 1.15, 0.6), 2), "{}（{:.2f} AU × 1.15 = {:.2f} AU）".format(
+                    nm, base, max(base * 1.15, 0.6))
+    return None, "解決できない表示範囲の指定: {!r}（使える指定: 数値 AU、{}、fit=指定天体に合わせる）".format(
+        s, "／".join(sorted(set(_RANGE_TARGETS))))
+
+
+def _scale_with_range(scale, scene):
+    """figure.scale に表示範囲（range_au 指定時のみ）を数値で残す（図と文を食い違わせない）。"""
+    if not scene.get("range_au"):
+        return scale
+    rp = scene.get("range_report") or {}
+    scale["range_au"] = {
+        "lo": float(rp.get("lo_au") or 0.0),
+        "hi": float(scene["range_au"]),
+        "out_of_range": [{"type": o.get("type"), "name": o.get("name"), "au": o.get("au")}
+                         for o in (rp.get("out_of_range") or [])],
+        "skipped_orbits": list(rp.get("skipped_orbits") or []),
+    }
+    return scale
+
+
 def _render_simple(scene):
     """Pillow 対数縮尺俯瞰図。内惑星〜遠方探査機までを1枚に収める（視認性重視・既定）。
 
@@ -455,7 +694,22 @@ def _render_simple(scene):
     for co in scene["comets"].values():
         if not co.get("error") and co["proj_au"] > 0:
             hi = max(hi, co["proj_au"] * 1.15)
+    for rt in (scene.get("routes") or {}).values():   # 経路が枠外へ出ないよう上限を広げる
+        for (rx, ry, _rz) in (rt.get("points") or []):
+            pr_ = math.hypot(rx, ry)
+            if pr_ > 0:
+                hi = max(hi, pr_ * 1.02)
     R0 = 620.0; lo = 0.30
+    # 表示範囲の指定（例: 土星より内側だけを見たい）。hi を固定し、狭い範囲では下限も下げる。
+    rng_au = float(scene.get("range_au") or 0.0)
+    if rng_au:
+        hi = rng_au
+        lo = min(lo, hi * 0.05)
+    rng_report = {"range_au": hi, "lo_au": lo, "skipped_orbits": [], "out_of_range": []}
+
+    def visible(dist):
+        """太陽からの距離が表示範囲に入っているか（範囲外は描かず、後で注記に列挙する）。"""
+        return (dist is not None) and (float(dist) > 0) and (lo <= float(dist) <= hi)
 
     def scale(dist):
         return R0 * (math.log10(dist) - math.log10(lo)) / (math.log10(hi) - math.log10(lo))
@@ -471,46 +725,101 @@ def _render_simple(scene):
         if math.hypot(x - CX, y - CY) > 640:
             dr.point((x, y), fill=(b, b, b))
 
+    # 太陽（グロー＋円盤）は**データより先に**描く。後に描くと経路の破線や惑星マーカーの上に
+    # 薄いベールがかかり、画素検査で「破線が消えた」と判定される（実測: 代表点9点中2点）。
+    # 表示範囲を絞ったときは最内惑星を覆わない大きさへ縮める（グローは半径70px＋ぼかし30。
+    # 実測: range_au=10 で水星の純色画素が 1 px まで落ちた）。
+    gr, sr = 70, 26
+    if rng_au:
+        _cands = [scale(float(p_["au"])) for p_ in scene["planets"].values()
+                  if not p_.get("error") and 0 < float(p_.get("au") or 0.0) <= hi]
+        if _cands:
+            gr = int(min(gr, 0.90 * min(_cands)))
+            sr = int(min(sr, 0.45 * min(_cands)))
+    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow)
+    gd.ellipse([CX - gr, CY - gr, CX + gr, CY + gr], fill=(255, 230, 140, 220))
+    glow = glow.filter(ImageFilter.GaussianBlur(max(3, int(gr * 30 / 70))))
+    img.paste(Image.alpha_composite(img.convert("RGBA"), glow).convert("RGB"), (0, 0))
+    dr = ImageDraw.Draw(img)
+    dr.ellipse([CX - sr, CY - sr, CX + sr, CY + sr], fill=body_rgb("太陽"),
+               outline=(255, 245, 200), width=2)
+    scene["sun_disk_px_simple"] = float(sr)
+
     for jname, _, _, sma in _PLANETS:
+        if rng_au and not visible(sma):
+            rng_report["skipped_orbits"].append({"name": jname, "sma_au": sma})
+            continue
         r = scale(sma)
         dr.ellipse([CX - r, CY - r, CX + r, CY + r], outline=(110, 120, 170), width=1)
 
-    rlo, rhi = scale(2.0), scale(3.4)
-    for a in range(0, 360, 4):
-        rr = random.uniform(rlo, rhi)
-        th = math.radians(a + random.uniform(-2, 2))
-        g = random.randint(90, 170)
-        dr.point((int(CX + rr * math.cos(th)), int(CY + rr * math.sin(th))), fill=(g, g, g + 10))
+    rlo, rhi = (None, None) if (rng_au and not (visible(2.0) and visible(3.4))) else (scale(2.0), scale(3.4))
+    if rlo is not None:
+        for a in range(0, 360, 4):
+            rr = random.uniform(rlo, rhi)
+            th = math.radians(a + random.uniform(-2, 2))
+            g = random.randint(90, 170)
+            dr.point((int(CX + rr * math.cos(th)), int(CY + rr * math.sin(th))), fill=(g, g, g + 10))
 
     for p in scene["planets"].values():
         jname, au, lon, sma = p["name"], p["au"], p["eclLon"], p["sma"]
-        col = dict((j, c) for j, _, c, _ in _PLANETS)[jname]
-        ang = math.radians(lon)
-        rr = scale(au)
-        px, py = CX + rr * math.cos(ang), CY + rr * math.sin(ang)
-        rad = max(8, min(20, int(5 + 28 * sma / 45)))
+        if rng_au and not visible(au):
+            rng_report["out_of_range"].append({"type": "planet", "name": jname, "au": au})
+            continue
+    # 惑星は「全マーカー → ラベル → マーカーを描き直す」の順で描く。ラベル箱は 178x30px と
+    # 大きく、後から描くと隣の惑星マーカーを隠す（表示範囲を絞ると環の間隔より箱が大きくなる。
+    # 実測: range_au=10 で内惑星の画素が 0 になった）。
+    _planet_draw = []
+
+    def _draw_planet_marker(px, py, rad, col, jname):
         halo = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         hd = ImageDraw.Draw(halo)
         hd.ellipse([px - rad - 14, py - rad - 14, px + rad + 14, py + rad + 14], fill=col + (90,))
         halo = halo.filter(ImageFilter.GaussianBlur(8))
         img.paste(Image.alpha_composite(img.convert("RGBA"), halo).convert("RGB"), (0, 0))
-        dr = ImageDraw.Draw(img)
-        dr.ellipse([px - rad, py - rad, px + rad, py + rad], fill=col,
+        dd = ImageDraw.Draw(img)
+        dd.ellipse([px - rad, py - rad, px + rad, py + rad], fill=col,
                    outline=tuple(min(255, c + 70) for c in col), width=2)
         if jname == "土星":
-            dr.ellipse([px - rad - 14, py - 6, px + rad + 14, py + 6],
+            dd.ellipse([px - rad - 14, py - 6, px + rad + 14, py + 6],
                        outline=symbol_rgb("ring"), width=5)
         elif jname == "木星":
-            dr.line([px - rad, py - 8, px + rad, py - 8], fill=symbol_rgb("band"), width=3)
-            dr.line([px - rad, py + 5, px + rad, py + 5], fill=symbol_rgb("band"), width=3)
-        lx = px + rad + 8 if (px + rad + 170 < W) else px - rad - 178
-        lx = max(lx, 10); ly = py - 10
-        dr.rectangle([lx, ly, lx + 178, ly + 30], fill=(8, 10, 22, 230))
+            dd.line([px - rad, py - 8, px + rad, py - 8], fill=symbol_rgb("band"), width=3)
+            dd.line([px - rad, py + 5, px + rad, py + 5], fill=symbol_rgb("band"), width=3)
+
+    _labels = []
+    for p in scene["planets"].values():
+        jname, au, lon, sma = p["name"], p["au"], p["eclLon"], p["sma"]
+        if rng_au and not visible(au):
+            rng_report["out_of_range"].append({"type": "planet", "name": jname, "au": au})
+            continue
+        col = dict((j, c) for j, _, c, _ in _PLANETS)[jname]
+        ang = math.radians(lon)
+        rr = scale(au)
+        px, py = CX + rr * math.cos(ang), CY + rr * math.sin(ang)
+        rad = max(8, min(20, int(5 + 28 * sma / 45)))
+        _draw_planet_marker(px, py, rad, col, jname)
+        _planet_draw.append((px, py, rad, col, jname))
+        _labels.append((jname, au, px, py, rad, ang))
+    # ラベルは太陽から外向きに置く（内向きだと内側の環のマーカーを覆う）
+    for jname, au, px, py, rad, ang in _labels:
+        ox, oy = int(math.cos(ang) * (rad + 12)), int(math.sin(ang) * (rad + 12))
+        lx = px + ox + 8 if (px + ox + 186 < W) else px + ox - 186
+        lx = max(10, min(lx, W - 190))
+        ly = max(10, min(py + oy - 15, H - 40))
+        dr = ImageDraw.Draw(img)
+        dr.rectangle([lx, ly, lx + 178, ly + 30], fill=(8, 10, 22))
         dr.text((lx + 4, ly + 2), "{} {:.2f}AU".format(jname, au), font=load_font(17, True),
-                fill=(255, 255, 255, 255))
+                fill=(255, 255, 255))
+    # マーカーを描き直して、どのラベル箱よりも上に置く（データを隠さない）
+    for px, py, rad, col, jname in _planet_draw:
+        _draw_planet_marker(px, py, rad, col, jname)
 
     for name, d in scene["asteroids"].items():
         if d.get("error"):
+            continue
+        if rng_au and not visible(d["au"]):
+            rng_report["out_of_range"].append({"type": "asteroid", "name": d["name"], "au": d["au"]})
             continue
         ang = math.radians(d["eclLon"])
         rr = scale(d["au"])
@@ -539,6 +848,9 @@ def _render_simple(scene):
     for name, d in scene["probes"].items():
         if d.get("error"):
             continue
+        if rng_au and not visible(d["proj_au"]):
+            rng_report["out_of_range"].append({"type": "probe", "name": d["name"], "au": d["proj_au"]})
+            continue
         col = tuple(d.get("color", (255, 214, 90)))
         ang = math.radians(d["eclLon"])
         rr = scale(d["proj_au"])
@@ -566,6 +878,9 @@ def _render_simple(scene):
     # 彗星（シアン色の輝く核 + 太陽と反対方向に伸びる尾, 正射影位置に描画）
     for name, d in scene["comets"].items():
         if d.get("error"):
+            continue
+        if rng_au and not visible(d["proj_au"]):
+            rng_report["out_of_range"].append({"type": "comet", "name": d["name"], "au": d["proj_au"]})
             continue
         col = tuple(d.get("color", _COMET_COLOR))
         ang = math.radians(d["eclLon"])
@@ -611,15 +926,86 @@ def _render_simple(scene):
         dr.text((lx + 6, ly + 22), "黄緯 {:.0f}°（黄道面投影 {:.0f}AU）".format(d["eclLat"], d["proj_au"]),
                 font=load_font(13), fill=(190, 235, 255, 255))
 
-    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    gd = ImageDraw.Draw(glow)
-    gd.ellipse([CX - 70, CY - 70, CX + 70, CY + 70], fill=(255, 230, 140, 220))
-    glow = glow.filter(ImageFilter.GaussianBlur(30))
-    img.paste(Image.alpha_composite(img.convert("RGBA"), glow).convert("RGB"), (0, 0))
-    dr = ImageDraw.Draw(img)
-    dr.ellipse([CX - 26, CY - 26, CX + 26, CY + 26], fill=body_rgb("太陽"),
-               outline=(255, 245, 200), width=2)
     dr.text((CX - 14, CY - 8), "太陽", font=load_font(18, True), fill=(120, 80, 0))
+
+    # 彗星の通過経路（黄道面への正射影・対数縮尺）。核マーカーより先に敷く（破線）。
+    # 対数縮尺では線の長さ・曲率が実際の楕円と一致しないので、注記側で必ず明示する。
+    route_draw = {}
+    deferred_marks = []          # 目印は最後に描く（太陽の円盤/グローや彗星自身に隠されない）
+    for rname, rt in (scene.get("routes") or {}).items():
+        if rt.get("error") or not rt.get("points"):
+            continue
+        rcol = tuple(rt.get("color", _COMET_COLOR))
+        segs, prev = [], None
+        for (rx, ry, _rz) in rt["points"]:
+            pr_ = math.hypot(rx, ry)
+            if pr_ < lo * 1.02 or (rng_au and pr_ > hi):
+                # 対数縮尺の下限（太陽円盤の内側）と表示範囲の外は線を切る
+                prev = None
+                continue
+            ang_ = math.atan2(ry, rx)
+            cur = (CX + scale(pr_) * math.cos(ang_), CY + scale(pr_) * math.sin(ang_))
+            if prev is not None:
+                segs.append((prev, cur))
+            prev = cur
+        halo = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        hd = ImageDraw.Draw(halo)
+        dash_samples = []
+        for k2, (p1, p2) in enumerate(segs):    # PIL に破線は無いので1本おきに描く
+            if k2 % 2:
+                continue
+            hd.line([p1[0], p1[1], p2[0], p2[1]], fill=rcol + (170,), width=4)
+            if (k2 // 2) % 40 == 0:             # 破線の実在検査用に代表点を残す
+                dash_samples.append([round((p1[0] + p2[0]) / 2.0), round((p1[1] + p2[1]) / 2.0)])
+        img.paste(Image.alpha_composite(img.convert("RGBA"),
+                                        halo.filter(ImageFilter.GaussianBlur(1))).convert("RGB"), (0, 0))
+        dr = ImageDraw.Draw(img)
+        drawn = []
+        # 太陽の描画円盤（既定は半径26px + グロー + 余白）。表示範囲を絞ると円盤も縮むので追従する
+        _sr_px = float(scene.get("sun_disk_px_simple") or 26.0)
+        disk_px = 34.0 if _sr_px >= 26.0 else max(6.0, _sr_px * 1.3)
+        for mk in (rt.get("marks") or []):
+            pr_ = float(mk.get("proj_au") or mk.get("r_au") or 0.0)   # 図に置くのは正射影距離
+            ang_ = math.radians(float(mk.get("lon_deg") or 0.0))
+            mx = CX + scale(pr_) * math.cos(ang_); my = CY + scale(pr_) * math.sin(ang_)
+            rec = {"id": mk.get("id"), "label": mk.get("label"), "au": mk.get("r_au", pr_),
+                   "proj_au": pr_, "lon_deg": float(mk.get("lon_deg") or 0.0),
+                   "px": [round(mx), round(my)], "date": mk.get("date")}
+            if rng_au and pr_ > hi:
+                rec["drawn"] = False
+                rec["reason"] = "out_of_range"
+                drawn.append(rec)
+                rng_report["out_of_range"].append({"type": "route_mark", "name": rt.get("name") or rname,
+                                                   "label": mk.get("label"), "au": pr_})
+                continue
+            if pr_ < lo * 1.02 or math.hypot(mx - CX, my - CY) < disk_px:
+                # 対数縮尺の下限／誇張した太陽の描画円盤の内側。描いても見えないので描かず、
+                # 理由を残す（注記側で数値とともに「図からは確認できない」と明示する）。
+                rec["drawn"] = False
+                rec["reason"] = "sun_disk" if pr_ >= lo * 1.02 else "below_scale"
+                drawn.append(rec)
+                continue
+            rec["drawn"] = True
+            rec["deferred"] = True       # 実際の描画は最後（他の要素に隠されない位置で）
+            drawn.append(rec)
+            deferred_marks.append((mx, my, rcol))
+        route_draw[rname] = {"name": rt.get("name") or rname, "color": list(rcol),
+                             "segments": len(segs), "marks": drawn,
+                             "closed": bool(rt.get("closed")),
+                             "sun_disk_px": disk_px, "dash_samples": dash_samples,
+                             # 太陽円盤が覆う距離（対数縮尺の逆算）。注記を数値から作るため
+                             "sun_disk_au": 10.0 ** (math.log10(lo)
+                                                     + (disk_px / R0) * (math.log10(hi) - math.log10(lo))),
+                             "skipped_au_below": lo * 1.02 if (rt.get("q_au") or 9) < lo * 1.02 else None}
+    scene["route_draw"] = route_draw
+    scene["range_report"] = rng_report
+
+    # 通過経路の目印（◇）は最後に描く: 太陽の円盤・光のにじみ・彗星自身のマーカーや尾の
+    # 上に来る位置では、先に描くと見えなくなる（実測: ハレー彗星は現在位置＝遠日点付近で
+    # 目印が尾に隠れ、最近点側は太陽のグローで色が沈んだ）。
+    for (mx, my, rcol_) in deferred_marks:
+        dr.polygon([(mx, my - 6), (mx + 6, my), (mx, my + 6), (mx - 6, my)],
+                   fill=(10, 14, 24), outline=rcol_, width=2)
 
     dr.rectangle([0, 0, W, 104], fill=(0, 0, 0, 230))
     title = "太陽系・現在の惑星位置（太陽を中心とした俯瞰図）"
@@ -650,6 +1036,10 @@ def _render_simple(scene):
         leg += "  ☄彗星（シアン・尾）"
     if has_probe:
         leg += "  ◆ 探査機（遠方・星間空間）"
+    if (scene.get("route_draw") or {}):
+        leg += "  ┈┈彗星の通過経路（対数縮尺・正射影）"
+    if rng_au:
+        leg += "   表示範囲 {:.2f}–{:g} AU（範囲外の天体は描いていない）".format(lo, hi)
     leg += "   ✦帯 小惑星帯(2.0–3.4AU目安)  ☀太陽"
     dr.text((28, H - 40), leg + " ・ 出典: JPL DE421+SBDB+Horizons / Skyfield",
             font=load_font(16), fill=(225, 232, 250, 255))
@@ -668,34 +1058,94 @@ def _render_accurate(scene):
     # 個別にフォント名を探すと macOS（ヒラギノ）・Linux（Noto CJK / IPA）で見つからない。
     apply_matplotlib_cjk_font()
 
+    rng_au = float(scene.get("range_au") or 0.0)     # 表示範囲の上限（0=自動）
+    rng_report = {"range_au": None, "lo_au": 0.0, "skipped_orbits": [], "out_of_range": []}
+
     fig, ax = plt.subplots(figsize=(9.5, 9.5))
     ax.set_facecolor("#0b1026")
     fig.patch.set_facecolor("#04060f")
     ax.set_aspect("equal")
 
-    # 惑星軌道（線形）
+    # 惑星軌道（線形）。表示範囲の外は描かない（枠を超えた円は縮尺の意味を壊す）
     for jname, _, _, sma in _PLANETS:
+        if rng_au and sma > rng_au:
+            rng_report["skipped_orbits"].append({"name": jname, "sma_au": sma})
+            continue
         th = np.linspace(0, 2 * np.pi, 360)
         ax.plot(sma * np.cos(th), sma * np.sin(th), color="#3a4466", lw=0.8)
 
-    # 小惑星帯
-    belt_r = np.random.uniform(2.0, 3.4, 900)
-    belt_th = np.random.uniform(0, 2 * np.pi, 900)
-    ax.scatter(belt_r * np.cos(belt_th), belt_r * np.sin(belt_th),
-               s=2, color="#8a9ab8", alpha=0.5, zorder=1)
+    # 小惑星帯（表示範囲内の部分だけ）
+    if not rng_au or rng_au >= 2.0:
+        belt_r = np.random.uniform(2.0, min(3.4, rng_au) if rng_au else 3.4, 900)
+        belt_th = np.random.uniform(0, 2 * np.pi, 900)
+        ax.scatter(belt_r * np.cos(belt_th), belt_r * np.sin(belt_th),
+                   s=2, color="#8a9ab8", alpha=0.5, zorder=1)
+
+    # 彗星の通過経路（線形縮尺なので形は本当の軌道。対数縮尺の簡易版と違い歪まない）。
+    # このエンジンは彗星マーカーを描かないので、経路を描くときは現在位置も併せて描く。
+    route_draw = {}
+    for rname, rt in (scene.get("routes") or {}).items():
+        if rt.get("error") or not rt.get("points"):
+            continue
+        rcol = rgb_hex(tuple(rt.get("color", _COMET_COLOR)))
+        ax.plot([q[0] for q in rt["points"]], [q[1] for q in rt["points"]],
+                ls="--", lw=1.3, color=rcol, alpha=0.9, zorder=3)
+        drawn = []
+        for mk in (rt.get("marks") or []):
+            ang = math.radians(float(mk.get("lon_deg") or 0.0))
+            rr = float(mk.get("proj_au") or mk.get("r_au") or 0.0)   # 図に置くのは正射影距離
+            if rng_au and rr > rng_au:
+                drawn.append({"id": mk.get("id"), "label": mk.get("label"), "au": rr,
+                              "lon_deg": float(mk.get("lon_deg") or 0.0),
+                              "date": mk.get("date"), "drawn": False, "reason": "out_of_range"})
+                rng_report["out_of_range"].append({"type": "route_mark",
+                                                   "name": rt.get("name") or rname,
+                                                   "label": mk.get("label"), "au": rr})
+                continue
+            mx, my = rr * math.cos(ang), rr * math.sin(ang)
+            ax.scatter([mx], [my], marker="D", s=46, facecolor="none", edgecolor=rcol,
+                       lw=1.3, zorder=12)      # ◇は最前面（太陽マーカーの上でも見える）
+            ax.annotate("{} {}".format(mk.get("label"), mk.get("date") or "-"), (mx, my),
+                        textcoords="offset points", xytext=(9, -13), fontsize=9, color=rcol,
+                        # z=5: 惑星マーカー(z=6)より下。上に置くと縮尺を絞ったとき内側の
+                        # 惑星マーカーを箱が覆う（実測: 金星の画素 255→13）。
+                        zorder=5, bbox=dict(boxstyle="round,pad=0.15", fc="#00000099", ec="none"))
+            drawn.append({"id": mk.get("id"), "label": mk.get("label"), "au": mk.get("r_au", rr),
+                          "proj_au": rr, "lon_deg": float(mk.get("lon_deg") or 0.0),
+                          "date": mk.get("date"), "drawn": True})
+        co = (scene.get("comets") or {}).get(rname) or {}
+        if co.get("eclLon") is not None and co.get("au") and (not rng_au or co["au"] <= rng_au):
+            cxr = co["au"] * math.cos(math.radians(co["eclLon"]))
+            cyr = co["au"] * math.sin(math.radians(co["eclLon"]))
+            ax.scatter([cxr], [cyr], s=120, color=rcol, edgecolor="white", lw=1.0, zorder=8)
+            ax.annotate("{}（現在 {:.2f}AU）".format(co.get("name") or rname, co["au"]),
+                        (cxr, cyr), textcoords="offset points", xytext=(9, 7), fontsize=10,
+                        color=rcol, fontweight="bold", zorder=9,
+                        bbox=dict(boxstyle="round,pad=0.2", fc="#00131ad9", ec=rcol))
+        route_draw[rname] = {"name": rt.get("name") or rname, "segments": len(rt["points"]) - 1,
+                             "marks": drawn, "closed": bool(rt.get("closed")),
+                             "scale": "linear"}
+    scene["route_draw"] = route_draw
 
     for p in scene["planets"].values():
         jname, au, lon, sma = p["name"], p["au"], p["eclLon"], p["sma"]
+        if rng_au and au > rng_au:
+            rng_report["out_of_range"].append({"type": "planet", "name": jname, "au": au})
+            continue
         col = dict((j, c) for j, _, c, _ in _PLANETS)[jname]
         ang = math.radians(lon)
         ax.scatter(au * math.cos(ang), au * math.sin(ang), s=90,
-                   color=tuple(c / 255 for c in col), edgecolor="white", lw=0.8, zorder=4)
+                   color=tuple(c / 255 for c in col), edgecolor="white", lw=0.8, zorder=6)   # ラベル箱(z=5)より上（下に描くと暗く沈む）
         ax.annotate("{}\n{:.2f}AU".format(jname, au), (au * math.cos(ang), au * math.sin(ang)),
-                    textcoords="offset points", xytext=(8, 6), fontsize=9, color="white",
+                    textcoords="offset points", xytext=(12.0 * math.cos(ang), 12.0 * math.sin(ang)) if rng_au else (8, 6),
+                    fontsize=9, color="white",
                     zorder=5, bbox=dict(boxstyle="round,pad=0.15", fc="#00000099", ec="none"))
 
     for name, d in scene["asteroids"].items():
         if d.get("error"):
+            continue
+        if rng_au and d["au"] > rng_au:
+            rng_report["out_of_range"].append({"type": "asteroid", "name": d["name"], "au": d["au"]})
             continue
         ang = math.radians(d["eclLon"])
         ast_rgb = symbol_rgb("asteroid")
@@ -710,23 +1160,252 @@ def _render_accurate(scene):
                               ec=rgb_hex(ast_rgb)))
 
     # 太陽
-    ax.scatter(0, 0, s=300, color=rgb_hex(body_rgb("太陽")), edgecolor="#fff5c2", lw=1.5, zorder=8)
+    # 太陽マーカーは最背面（zorder=2）。実測: 半径21px＝約1.7AU相当あり、前に描くと
+    # 水星〜火星（zorder=4）と経路の◇が完全に隠れていた。
+    _sun_marker_after_scale = True      # マーカー本体は縮尺(px/AU)が決まってから描く（下記）
     ax.annotate("太陽", (0, 0), textcoords="offset points", xytext=(-12, -26),
                 fontsize=11, color="#ffe9a3", fontweight="bold", ha="center", zorder=9)
 
-    ax.set_title("太陽系・惑星位置（線形距離の正確な俯瞰図）\n{} ・ 円=公転軌道(AU)".format(scene["time_utc"]),
+    ax.set_title("太陽系・惑星位置（線形距離の正確な俯瞰図）\n{} ・ 円=公転軌道(AU){}".format(
+        scene["time_utc"], " ・ 破線=彗星の通過経路" if (scene.get("route_draw") or {}) else ""),
                  fontsize=12, color="white", pad=15)
     ax.set_xlabel("X (AU)", color="#9aa")
     ax.set_ylabel("Y (AU)", color="#9aa")
     ax.tick_params(colors="#9aa")
     for sp in ax.spines.values():
         sp.set_color("#3a4466")
-    ax.set_xlim(-45, 45); ax.set_ylim(-45, 45)
+    if rng_au:
+        lim = float(rng_au)                            # 表示範囲の指定があれば固定
+        rng_report["range_au"] = lim
+        rng_report["lo_au"] = 0.0
+    else:
+        lim = 45.0
+        for rt in (scene.get("routes") or {}).values():   # 経路が枠外へ出ないよう広げる
+            for q in (rt.get("points") or []):
+                lim = max(lim, abs(q[0]) * 1.05, abs(q[1]) * 1.05)
+    ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
+    scene["range_report"] = rng_report
+    # 太陽マーカー(s=300 pt²)の半径を AU に換算して残す。線形図は 12.3 px/AU 程度しかないので
+    # マーカー半径は約1.7 AU＝内惑星や近日点がマーカーの下に隠れる大きさになる（実測）。
+    try:
+        w_px = ax.get_window_extent().width
+        px_au = w_px / (2.0 * lim)
+        scene["px_per_au"] = px_au                    # 縮尺の実測値（AU→px）
+        scene["sun_marker_au"] = (math.sqrt(300.0 / math.pi) * (fig.dpi / 72.0)) / max(px_au, 1e-9)
+    except Exception:
+        scene["sun_marker_au"] = None
+    # 太陽マーカーの本体をここで描く。既定は s=300（半径 9.8pt）。**表示範囲の指定時は
+    # 最内惑星を覆わない大きさへ絞る**（実測: range_au=30 では s=300 で半径 0.6 AU となり
+    # 水星 0.46 AU が隠れる。範囲を絞る目的と矛盾するため、数値から大きさを決める）。
+    try:
+        _px_au = float(scene.get("px_per_au") or 0.0)
+        sun_px = math.sqrt(300.0 / math.pi) * (fig.dpi / 72.0)
+        if rng_au and _px_au > 0:
+            _inner = min([float(p_["au"]) for p_ in scene["planets"].values()
+                          if not p_.get("error") and 0 < float(p_.get("au") or 0.0) <= rng_au]
+                         or [float(rng_au)])
+            sun_px = min(sun_px, 0.45 * _inner * _px_au)
+        ax.scatter(0, 0, s=math.pi * (sun_px * 72.0 / fig.dpi) ** 2,
+                   color=rgb_hex(body_rgb("太陽")), edgecolor="#fff5c2", lw=1.5, zorder=2)
+        if _px_au > 0:
+            scene["sun_marker_au"] = sun_px / _px_au
+    except Exception:
+        ax.scatter(0, 0, s=300, color=rgb_hex(body_rgb("太陽")), edgecolor="#fff5c2",
+                   lw=1.5, zorder=2)
+
+    # 目印の描画座標（データ→保存画像の px）を確定させる。検証が画素を測れるようにするため。
+    # データ原点と bbox_inches="tight"（既定 pad_inches=0.1）の差を打ち消して保存画像と一致させる。
+    try:
+        fig.set_dpi(150)                      # 保存と同じ dpi で再描画し、座標系を一致させる
+        fig.canvas.draw()
+        tb = fig.get_tightbbox(fig.canvas.get_renderer())   # インチ（pad_inches は含まない）
+        dpi_s = float(fig.dpi)
+        x0, y0 = ax.transData.transform((0.0, 0.0))         # 表示 px（＝保存 px）
+        ox = x0 - (tb.x0 - 0.1) * dpi_s
+        oy = (tb.y1 + 0.1) * dpi_s - y0
+        pu = float(ax.get_window_extent().width / (2.0 * lim))
+        scene["origin_px"] = [round(ox, 2), round(oy, 2)]
+        scene["px_per_au"] = pu
+        scene["sun_marker_px"] = math.sqrt(300.0 / math.pi) * dpi_s / 72.0
+        for rname, rd0 in (scene.get("route_draw") or {}).items():
+            rt0 = (scene.get("routes") or {}).get(rname) or {}
+            for i, mk in enumerate(rt0.get("marks") or []):
+                ang = math.radians(float(mk.get("lon_deg") or 0.0))
+                rr = float(mk.get("proj_au") or mk.get("r_au") or 0.0)
+                rd0["marks"][i]["px"] = [int(round(ox + rr * math.cos(ang) * pu)),
+                                         int(round(oy - rr * math.sin(ang) * pu))]
+    except Exception:
+        pass
 
     buf = io.BytesIO()
     plt.savefig(buf, format="png", dpi=150, facecolor=fig.get_facecolor(), bbox_inches="tight")
     plt.close(fig)
     return buf.getvalue()
+
+
+def _verify_route_draw(png, scene):
+    """俯瞰図に重ねた彗星の通過経路を自己検証する（画素を測り直す）。
+
+    - 経路の線分が 0 なら不合格（線を引けていない）。
+    - Pillow 版は目印(◇)の描画座標があるので、その周辺に彗星色の画素があるかを測る。
+    - matplotlib 版は描画座標を持たないため、目印の (r, 黄経) が経路の点列に
+      載っているか（データ座標で）検算する。どちらも「描いたつもり」を許さない。
+    """
+    rep = {"ok": True, "method": "overview_route_marks", "routes": [], "missing": [],
+           "mark_window_px": 5}
+    rd = scene.get("route_draw") or {}
+    if not rd:
+        return {"ok": False, "method": "overview_route_marks", "routes": [],
+                "missing": ["経路の描画記録が無い（描画に到達していない）"]}
+    px = None
+    try:
+        from PIL import Image
+        im = Image.open(io.BytesIO(png)).convert("RGB")
+        px = im.load()
+        W, H = im.size
+    except Exception:
+        px = None
+    paths = scene.get("routes") or {}
+    for name, d in rd.items():
+        col = tuple(d.get("color", _COMET_COLOR))
+        row = {"name": d.get("name") or name, "segments": d.get("segments", 0), "marks": []}
+        if not d.get("segments"):
+            rep["ok"] = False
+            rep["missing"].append("{}: 経路の線分が 0（線を引けていない）".format(name))
+        hits = []
+        if px is not None and d.get("dash_samples"):
+            cx0 = cy0 = W / 2.0
+            dsk = float(d.get("sun_disk_px") or 0.0)
+            for sx, sy in d["dash_samples"]:
+                if math.hypot(sx - cx0, sy - cy0) < dsk:
+                    continue            # 太陽の描画円盤の内側は線が隠れて当然（検査しない）
+                found = 0
+                for yy in range(max(0, sy - 4), min(H, sy + 5)):
+                    for xx in range(max(0, sx - 4), min(W, sx + 5)):
+                        c = px[xx, yy]
+                        # 破線は半透明＋ぼかしで背景と混ざる。彗星色に近い、または「青緑寄りに
+                        # 持ち上がっている」画素なら描けているとみなす。背景(11,16,38)は
+                        # c1-c0=5 で落ちるので、線が無ければヒットしない（実測で較正）。
+                        if (abs(c[0] - col[0]) + abs(c[1] - col[1]) + abs(c[2] - col[2]) <= 60
+                                or (c[1] - c[0] >= 18 and c[2] - c[0] >= 25 and c[2] >= 60
+                                    and c[0] < 190)):
+                            found += 1
+                hits.append(found)
+            row["dash_samples"] = len(hits)
+            row["dash_hits"] = sum(1 for h in hits if h > 0)
+            if row["dash_hits"] < max(1, int(0.9 * len(hits))):
+                rep["ok"] = False
+                rep["missing"].append("{}: 破線の代表点 {} 点のうち {} 点しか画素が無い".format(
+                    name, len(hits), row["dash_hits"]))
+        path = (paths.get(name) or {}).get("points") or []
+        for mk in d.get("marks") or []:
+            hit = None
+            if mk.get("drawn") is False:
+                reason = mk.get("reason")
+                if reason == "sun_disk" and mk.get("px") and px is not None:
+                    cx0 = cy0 = W / 2.0
+                    dist0 = math.hypot(mk["px"][0] - cx0, mk["px"][1] - cy0)
+                    # 「太陽円盤の内側だから描いていない」という主張自体を測って確かめる
+                    row.setdefault("occluded", []).append(
+                        {"label": mk.get("label"), "au": mk.get("au"),
+                         "px_dist_from_sun": round(dist0, 1),
+                         "sun_disk_px": d.get("sun_disk_px"), "verified": bool(
+                             dist0 < float(d.get("sun_disk_px") or 0.0))})
+                    if not row["occluded"][-1]["verified"]:
+                        rep["ok"] = False
+                        rep["missing"].append("{} {}: 太陽円盤の内側という説明が位置と合わない".format(
+                            name, mk.get("label")))
+                elif reason == "below_scale":
+                    row.setdefault("occluded", []).append(
+                        {"label": mk.get("label"), "au": mk.get("au"),
+                         "reason": "対数縮尺の下限より内側"})
+                row["marks"].append({"id": mk.get("id"), "label": mk.get("label"),
+                                     "au": mk.get("au"), "date": mk.get("date"),
+                                     "px": mk.get("px"), "pixels_found": None,
+                                     "drawn": False, "reason": reason})
+                continue
+            if px is not None and mk.get("px"):
+                mx, my = mk["px"]
+                hit = 0
+                for yy in range(max(0, int(my) - 5), min(H, int(my) + 6)):
+                    for xx in range(max(0, int(mx) - 5), min(W, int(mx) + 6)):
+                        c = px[xx, yy]
+                        if abs(c[0] - col[0]) + abs(c[1] - col[1]) + abs(c[2] - col[2]) <= 40:
+                            hit += 1
+                if hit < 3:
+                    rep["ok"] = False
+                    rep["missing"].append("{} {}: 目印の位置に彗星色の画素が無い".format(
+                        name, mk.get("label")))
+            elif path:
+                # 描画座標が無いエンジン: 目印の (r, 黄経) が経路の点列にあるかを検算
+                ang = math.radians(float(mk.get("lon_deg") or 0.0))
+                rp = float(mk.get("proj_au") or mk.get("au") or 0.0)
+                tx, ty = rp * math.cos(ang), rp * math.sin(ang)
+                hit = min(math.dist((tx, ty), (q[0], q[1])) for q in path)
+                if hit > 1e-3:
+                    rep["ok"] = False
+                    rep["missing"].append("{} {}: 目印が経路の点列に無い（{:.4f} AU 離れ）".format(
+                        name, mk.get("label"), hit))
+            row["marks"].append({"id": mk.get("id"), "label": mk.get("label"),
+                                 "au": mk.get("au"), "proj_au": mk.get("proj_au"),
+                                 "date": mk.get("date"),
+                                 "px": mk.get("px"), "pixels_found": hit})
+        rep["routes"].append(row)
+    return rep
+
+
+def _verify_range_draw(png, scene):
+    """表示範囲（range_au）の自己検証: 「範囲外は描いていない」「範囲内は実際に描けている」を画素で測る。
+
+    - 範囲内の惑星は、その天体色の画素が画像中に一定数以上あること（ラベル箱の下に隠れていない）。
+      実測: 範囲指定でラベル箱が隣のマーカーを覆っていたとき、地球の画素は 0 だった。
+    - 範囲外の惑星は、その天体色の画素が 0 であること。
+    - 太陽の描画マーカーの誇張半径が最内惑星より小さいこと（範囲を絞る意味を壊さない）。
+    """
+    hi = float(scene.get("range_au") or 0.0)
+    if not hi:
+        return None
+    rep = {"ok": True, "method": "range_au_pixels", "range_au": hi,
+           "planets_drawn": [], "out_of_range_zero_pixels": [],
+           # 描画側は tol 12（マーカーは連続した塊）。範囲外側は**厳密一致(tol 0)**で判定する
+           # （塗りは厳密一致するので、ぼかし・ハローの混色が土星色/天王星色に 20px ほど
+           #  寄るのを「描いている」と誤判定しないため）
+           "color_tol_drawn": 12, "color_tol_out_of_range": 0,
+           "thresholds": {"drawn_min_px": 20, "out_of_range_max_px": 20}}
+    cols = dict((j, c) for j, _, c, _ in _PLANETS)
+    try:
+        import numpy as np
+        from PIL import Image
+        arr = np.asarray(Image.open(io.BytesIO(png)).convert("RGB")).astype(int)
+    except Exception as e:                      # 画素を測れないときは「検証できていない」を明示
+        return {"ok": False, "method": "range_au_pixels", "range_au": hi,
+                "error": str(e)[:120]}
+    for p_ in (scene.get("planets") or {}).values():
+        nm = p_.get("name")
+        if p_.get("error") or nm not in cols:
+            continue
+        tol = rep["color_tol_drawn"] if float(p_.get("au") or 0.0) <= hi             else 0        # 範囲外は厳密一致のみ（マーカーの塗りは厳密一致する。混色は数えない）
+        n = int(((abs(arr - np.array(cols[nm])).max(axis=2)) <= tol).sum())
+        au = float(p_.get("au") or 0.0)
+        row = {"name": nm, "au": round(au, 3), "pixels_found": n}
+        if au <= hi:
+            row["ok"] = n >= 20                     # 描いたマーカーは実測 79px 以上
+            rep["planets_drawn"].append(row)
+        else:
+            row["ok"] = n < 20                      # 偶発的な近似色（実測 2px 等）は許容
+            rep["out_of_range_zero_pixels"].append(row)
+    sun_au = scene.get("sun_marker_au")
+    inner = min([c["au"] for c in rep["planets_drawn"]] or [hi])
+    if sun_au:
+        rep["sun_marker_vs_inner_planet"] = {
+            "sun_marker_au": round(float(sun_au), 3), "inner_planet_au": round(inner, 3),
+            "ok": float(sun_au) < inner * 0.75}
+    rep["ok"] = (bool(rep["planets_drawn"])
+                 and all(c["ok"] for c in rep["planets_drawn"])
+                 and all(c["ok"] for c in rep["out_of_range_zero_pixels"])
+                 and all((rep.get("sun_marker_vs_inner_planet") or {}).get("ok", True)
+                         for _ in [0]))
+    return rep
 
 
 # ---------- 彗星の軌道面ビュー（figure 注記つき） ----------
@@ -1334,7 +2013,8 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
                      asteroid2: Optional[str] = None, probe: Optional[str] = None,
                      probe2: Optional[str] = None, comet: Optional[str] = None,
                      comet2: Optional[str] = None, engine: str = "simple",
-                     view: str = "system", days: int = 180) -> CallToolResult:
+                     view: str = "system", days: int = 180,
+                     route: bool = False, range_au: "float | str" = 0) -> CallToolResult:
     """太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置図を返す（認証不要）。
 
     例:「太陽系を上から見た図」「今の惑星の位置」「イトカワの今の位置を図で」
@@ -1378,6 +2058,27 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
             その旨は figure.notes に数値から生成して入る）。
         days: view="apparition" の表示日数（1〜3650、既定 180）。今日の 30 日前から
             days 日後までを描く（直前に過ぎた近日点・最接近も見えるようにするため）。
+        route: view="system" で、指定した彗星の**通過経路（軌道）を俯瞰図に重ねる**
+            （破線）。近日点・遠日点には◇と日付を添える。既定 False。
+            線形の "accurate" では形は本当の軌道と一致するが、対数縮尺の "simple" では
+            線の長さと曲率が実際の楕円と一致しない（その旨は figure.notes に入る）。
+            形そのものを見たいときは view="comet_orbit"。
+        range_au: view="system" の表示範囲（太陽からの距離の上限）。既定 0＝自動
+            （対数版は 60 AU 起点、線形版は ±45 AU 起点で、遠方の天体・経路に合わせて拡張）。
+            **数値（AU）でも天体名でも指定できる**（「火星まで」「木星まで」のように
+            LLM が判断して縮尺を選ぶ用途を想定）。
+            数値: 10=土星(9.58 AU)より内側／2=火星まで／5.62=木星まで／30=海王星まで。0.5 未満はエラー。
+            天体名: "火星"（→1.65 AU）／"木星"（→5.62）／"土星"（→10.35）／"海王星"（→32.5）／
+            "冥王星"／英語名（mars, jupiter…）／"小惑星帯"／"内惑星"／"外惑星"。
+            その呼び出しで指定した小惑星・彗星・探査機の名前も使える（例: asteroid="イトカワ"
+            に対して range_au="イトカワ"）。**天体名は「その天体の軌道の円が入る」ように
+            長半径×1.08 で決める**（決め方は figure.notes と structuredContent.range_resolved に
+            数値付きで出る）。
+            "fit"（＝指定天体に合わせる）: その呼び出しで指定した天体・経路がすべて入る範囲
+            （最大値×1.10、下限 1.2 AU）。天体を指定せず "fit" にすると自動（45 AU 起点）。
+            解決できない名前は**推測せずエラーで候補一覧を返す**。
+            **範囲外の天体・目印・軌道の円は描かず**、figure.notes と structuredContent
+            に出典付きで列挙する（黙って消さない）。対数版は下限も範囲に合わせて下がる。
 
     インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
     content の先頭へ「🖼️ [生成した画像を開く（…）](file:///…) ｜ 保存先: `…`」という
@@ -1427,7 +2128,7 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
     prbs = _split_object_names(probe) + _split_object_names(probe2)
     coms = _split_object_names(comet) + _split_object_names(comet2)
     try:
-        scene = _compute(when, asts, prbs, coms)
+        scene = _compute(when, asts, prbs, coms, route=bool(route))
     except (OSError, KeyError, ValueError) as e:
         # de421.bsp の初回ダウンロード失敗・暦の読み込み失敗は例外が外へ漏れていた
         return CallToolResult(
@@ -1440,14 +2141,45 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
             content=[TextContent(type="text", text=scene["error"])],
             structuredContent={"error": scene["error"]},
         )
+    # 表示範囲の指定を解決する（数値 AU / 天体名「火星まで」「木星」/ "fit"=指定天体に合わせる）
+    rng_au, rng_why = _resolve_range(range_au, scene)
+    if rng_au is None:                       # 解決できない名前は推測せず候補を提示して停止する
+        return CallToolResult(
+            content=[TextContent(type="text", text=str(rng_why))],
+            structuredContent={"error": rng_why, "range_targets": sorted(set(_RANGE_TARGETS))},
+        )
+    if rng_au and rng_au < 0.5:
+        return CallToolResult(
+            content=[TextContent(type="text", text="表示範囲は 0.5 AU 以上で指定してください（例: 2 で火星まで、"
+                                 "5.62 で木星まで、10 で土星より内側、または range_au=\"木星\" のように天体名で）。"
+                                 "0（既定）は自動です。")],
+            structuredContent={"error": "表示範囲は 0.5 AU 以上（0=自動）"},
+        )
+    scene["range_au"] = rng_au or None
     has_probe = any(not v.get("error") for v in scene["probes"].values())
     has_com = any(not v.get("error") for v in scene["comets"].values())
     eng = (engine or "simple").lower()
     if eng == "auto" or eng not in ("accurate", "simple"):
         eng = "simple"
-    # 遠方探査機・彗星は線形(±45AU)では枠外 → 対数縮尺の Pillow 版へ
+    # 遠方探査機・彗星は線形(±45AU)では枠外 → 対数縮尺の Pillow 版へ。
+    # ただし route=True で経路が枠に収まるときは accurate を維持する（経路を重ねるなら
+    # 形が本当の軌道と一致する線形版の方が良い。彗星が枠外なら対数版へ落とす）。
     if (has_probe or has_com) and eng == "accurate":
-        eng = "simple"
+        rmax = rng_au or 43.0
+
+        def _rt_fits(rt):
+            rt = rt or {}
+            if rt.get("error"):
+                return False
+            return (float(rt.get("r_max_au") or 0.0) <= rmax * 0.98) if rng_au                 else (not rt.get("out_of_frame"))
+
+        drawn_coms = [co for co in scene["comets"].values()
+                      if not co.get("error") and float(co.get("au") or 0.0) <= rmax]
+        fits = (bool(route) and not has_probe and bool(drawn_coms)
+                and all(_rt_fits(rt) for rt in (scene.get("routes") or {}).values())
+                and all(float(co.get("au") or 0.0) <= rmax for co in drawn_coms))
+        if not fits:
+            eng = "simple"
     import base64
     try:
         if eng == "accurate":
@@ -1504,17 +2236,169 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
             else:
                 lines.append("- {}: 真距離 {:.1f}AU・黄緯 {:.1f}°（黄道面投影 {:.1f}AU）".format(
                     n, d["au"], d["eclLat"], d["proj_au"]))
+    if scene.get("routes"):
+        lines.append("**彗星の通過経路**（図の破線＝黄道面への正射影）:")
+        for n, rt in scene["routes"].items():
+            if rt.get("error"):
+                lines.append("- {}: 経路を取得できませんでした（{}）".format(n, rt["error"]))
+                continue
+            mk = "／".join("{} {} AU（{}）".format(m.get("label"), _au_fmt(m.get("r_au")),
+                                                m.get("date") or "-")
+                           for m in (rt.get("marks") or []))
+            lines.append("- {}: {}周期 {} 日（{}）".format(
+                rt.get("name") or n, (mk + "・") if mk else "",
+                int(rt["period_days"]) if rt.get("period_days") else "-",
+                "閉じた楕円" if rt.get("closed") else "閉じない（双曲線/放物線のため打ち切り）"))
+    # 線形(accurate)は縮尺が固定（実測 約12 px/AU）で、太陽マーカー(s=300)が半径 約1.7 AU 相当に
+    # なる。内惑星や近日点はこのマーカーと重なるので、誇張であることを数値付きで明示する。
+    exagg = ["惑星の色アイコン（実寸ではない）", "小惑星帯の帯（2.0-3.4AUの目安）"]
+    sun_au = scene.get("sun_marker_au") if eng == "accurate" else None
+    if sun_au:
+        exagg.append("太陽の描画マーカー（半径 {:.1f} AU 相当・実寸ではない。太陽近傍の天体は"
+                     "このマーカーと重なって見える）".format(float(sun_au)))
+
+    # 通過経路を重ねたときの注記・検証（数値から生成する。図と文を食い違わせない）。
+    route_verify = None
+    route_notes = []
+    if scene.get("routes"):
+        names = "・".join((rt.get("name") or n) for n, rt in scene["routes"].items()
+                          if not rt.get("error"))
+        if eng == "simple":
+            route_notes.append(
+                "破線は{}の通過経路（黄道面への正射影）。この図は対数縮尺なので、線の長さと"
+                "曲率は実際の楕円と一致しない。形そのものは view=\"comet_orbit\" の図を参照".format(names))
+        else:
+            route_notes.append(
+                "破線は{}の通過経路（黄道面への正射影）。この図は線形距離なので、形は実際の"
+                "楕円と一致する".format(names))
+        for n, rt in scene["routes"].items():
+            if rt.get("error"):
+                route_notes.append("{} の経路を取得できませんでした（{}）".format(n, rt["error"]))
+                continue
+            def _mk_txt(m):
+                r_t, r_p = m.get("r_au"), m.get("proj_au")
+                extra = ""
+                if r_t and r_p and abs(float(r_p) - float(r_t)) / max(float(r_t), 1e-9) > 0.005:
+                    extra = "・黄道面投影 {} AU".format(_au_fmt(r_p))
+                return "{} {} AU{}（{}）".format(m.get("label"), _au_fmt(r_t), extra,
+                                                m.get("date") or "-")
+            mks = "／".join(_mk_txt(m) for m in (rt.get("marks") or []))
+            if mks:
+                route_notes.append("経路の◇は{}".format(mks))
+                route_notes.append(
+                    "この日付は JPL SBDB の軌道要素（2体近似）から計算している。惑星の摂動で"
+                    "実際の回帰は数日ずれる（見え方チャートの近日点は Horizons の n 体解なので、"
+                    "同じ彗星でも日付が数日違うことがある）")
+            if not rt.get("closed"):
+                route_notes.append(
+                    "{} は閉じない軌道（e={:.4f}）のため、経路は太陽から {:.0f} AU までで"
+                    "打ち切って描いている（それ以遠は描いていない）".format(
+                        rt.get("name") or n, float(rt.get("e") or 0.0),
+                        float(rt.get("r_cap_au") or 0.0)))
+        if sun_au:
+            near = ["{} {} {} AU（{}）".format(rt.get("name") or n, m.get("label"),
+                                             _au_fmt(m.get("r_au")), m.get("date") or "-")
+                    for n, rt in scene["routes"].items()
+                    for m in (rt.get("marks") or [])
+                    if m.get("r_au") and float(m["r_au"]) < float(sun_au)]
+            if near:
+                route_notes.append(
+                    "{} は誇張した太陽マーカー（半径 {:.1f} AU 相当）と重なる位置にあるが、◇は"
+                    "マーカーの上に描いている。距離はマーカーの大きさから読み取らず、上の数値を"
+                    "使うこと".format("／".join(near), float(sun_au)))
+        low, hidden = [], []
+        for n, d in (scene.get("route_draw") or {}).items():
+            if d.get("skipped_au_below"):
+                low.append("{}（{:.2f} AU 未満）".format(d.get("name") or n, d["skipped_au_below"]))
+            for mk in (d.get("marks") or []):
+                if mk.get("drawn") is False and mk.get("reason") == "sun_disk":
+                    hidden.append("{} {} {} AU（{}）".format(
+                        d.get("name") or n, mk.get("label"), _au_fmt(mk.get("au")),
+                        mk.get("date") or "-"))
+        if low:
+            route_notes.append(
+                "経路のうち太陽円盤に近い内側は描いていない: {}。対数縮尺の下限で、太陽に"
+                "近い部分は線を切っている".format("／".join(low)))
+        if hidden:
+            d0 = (scene.get("route_draw") or {})
+            dsk = max([float((v or {}).get("sun_disk_au") or 0.0) for v in d0.values()] or [0.0])
+            dpx = max([float((v or {}).get("sun_disk_px") or 0.0) for v in d0.values()] or [0.0])
+            route_notes.append(
+                "{} は誇張した太陽の描画円盤（半径 {} px ＝ 約 {} AU 相当）の内側に入るため、"
+                "この縮尺では図から位置を確認できない（目印は描いていない）。数値は上の注記の"
+                "とおり（図から読み取らないこと）".format("／".join(hidden), int(dpx), _au_fmt(dsk)))
+        route_verify = _verify_route_draw(png, scene)
+    rng_verify = _verify_range_draw(png, scene)      # 表示範囲指定時のみ（None なら対象外）
+    if rng_verify:
+        if route_verify:
+            rng_verify["route_ok"] = route_verify.get("ok")
+            rng_verify["ok"] = bool(rng_verify.get("ok")) and bool(route_verify.get("ok"))
+        stat_ok = bool((route_verify or {}).get("ok", True))
+        verify_out = {"ok": bool(rng_verify.get("ok")) and stat_ok,
+                      "range_au": rng_verify, "routes": (route_verify or {}).get("routes"),
+                      "mark_window_px": (route_verify or {}).get("mark_window_px"),
+                      "missing": (route_verify or {}).get("missing") or []}
+        verify_out = {k: v for k, v in verify_out.items() if v is not None}
+        verify_out["method"] = "range_au_pixels+overview_route_marks" if route_verify             else "range_au_pixels"
+    else:
+        verify_out = route_verify
+    why_txt = ("太陽を図の中心に置く俯瞰図のため、楕円軌道の焦点は主天体ではなく、"
+               "各天体の軌道の形そのものは描いていない")
+    rng_rep = scene.get("range_report") or {}
+    rng_notes = []
+    if scene.get("range_au"):
+        hi_r = float(scene["range_au"]); lo_r = float(rng_rep.get("lo_au") or 0.0)
+        if rng_verify:
+            _d = rng_verify.get("planets_drawn") or []
+            _o = rng_verify.get("out_of_range_zero_pixels") or []
+            rng_notes.append(
+                "画素検証: 範囲内の惑星 {} 件すべてが画像中に描かれている（{}）／範囲外の惑星 {} 件は"
+                "画素 0（描いていない）".format(
+                    len(_d), "、".join("{} {}px".format(c["name"], c["pixels_found"]) for c in _d),
+                    len(_o)) if rng_verify.get("ok") else
+                "画素検証に失敗した項目がある（figure.verify.range_au を参照）")
+        rng_notes.append("表示範囲は{}〜{:g} AU に固定（範囲外の天体は描いていない）".format(
+            "太陽中心（下限 {:.2f} AU）".format(lo_r) if lo_r else "太陽中心", hi_r))
+        if rng_why:                       # 名前や "fit" で指定されたときは決め方を数値付きで出す
+            rng_notes.append("表示範囲の決め方: {}".format(rng_why))
+        oob = rng_rep.get("out_of_range") or []
+        names_oob = []
+        for o in oob:
+            if o.get("type") == "route_mark":
+                continue
+            nm = str(o.get("name") or "")
+            if nm and nm not in names_oob:
+                names_oob.append("{} {} AU".format(nm, _au_fmt(o.get("au"))))
+        if names_oob:
+            rng_notes.append("表示範囲{:g} AU の外にあるため描いていない: {}".format(hi_r, "、".join(names_oob)))
+        rms = [o for o in oob if o.get("type") == "route_mark"]
+        if rms:
+            rng_notes.append("経路の目印 {} 件（{}）も表示範囲の外にあるため描いていない".format(
+                len(rms), "、".join("{} {} AU".format(o.get("label"), _au_fmt(o.get("au"))) for o in rms)))
+        sk = rng_rep.get("skipped_orbits") or []
+        if sk:
+            rng_notes.append("表示範囲の外の惑星軌道の円は描いていない: " + "、".join(
+                "{} {} AU".format(s_.get("name"), _au_fmt(s_.get("sma_au"))) for s_ in sk))
+        rmax = max([float((rt or {}).get("r_max_au") or 0.0)
+                    for rt in (scene.get("routes") or {}).values()] or [0.0])
+        if rmax > hi_r:
+            rng_notes.append("経路は最大{:g} AU まで伸びるが、表示範囲{:g} AU の外は描いていない".format(rmax, hi_r))
+    if scene.get("routes"):
+        why_txt = ("太陽を図の中心に置く俯瞰図のため、楕円軌道の焦点は主天体ではない"
+                   "（惑星の軌道の形は描かず、指定された彗星の通過経路だけを破線で重ねている）")
     fig = figure_payload(
         kind="heliocentric_overview",
         title="太陽系の現在位置（太陽中心・黄道面俯瞰）",
         view=view_spec("ecliptic_plane", "top_down",
                        "黄道面を真上から見た日心俯瞰図（太陽は図の中心）",
-                       why="太陽を図の中心に置く俯瞰図のため、楕円軌道の焦点は主天体ではなく、"
-                           "各天体の軌道の形そのものは描いていない"),
+                       why=why_txt),
         primary=primary_spec("太陽", "center"),
-        scale=scale_spec("log" if eng == "simple" else "linear", to_scale=(eng != "simple"),
-                         exaggerated=["惑星の色アイコン（実寸ではない）",
-                                      "小惑星帯の帯（2.0-3.4AUの目安）"]),
+        scale=_scale_with_range(scale_spec("log" if eng == "simple" else "linear",
+                                           to_scale=(eng != "simple"), exaggerated=exagg,
+                                           px_per_unit=(scene.get("px_per_au")
+                                                        if eng == "accurate" else None),
+                                           unit="AU"),
+                                scene),
         notes=figure_notes(extra=[
             "惑星軌道の円は" + ("対数縮尺の目安で、離心率（水星 e=0.206 など）は無視している"
                                if eng == "simple" else "公転長半径の円で、離心率は無視している"),
@@ -1523,8 +2407,10 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
              "（structuredContent.planet_errors を参照）"
              if scene.get("planet_errors") else ""),
             "彗星の尾は反太陽方向に描いており、進行方向ではない",
-        ]),
-        caption="太陽を中心とした日心俯瞰図。数値は structuredContent の各値を参照。",
+        ] + rng_notes + route_notes),
+        caption="太陽を中心とした日心俯瞰図。数値は structuredContent の各値を参照。"
+                + ("破線＝彗星の通過経路。" if scene.get("routes") else ""),
+        verify=verify_out,
     )
     lines.append("")
     lines.append(figure_text_block(fig))
@@ -1537,5 +2423,11 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
                            "asteroids": scene["asteroids"],
                            "probes": scene["probes"], "comets": scene["comets"],
                            "figure": fig, "image_path": out_path,
+                           "range_au": (scene.get("range_au") or None),
+                           "range_resolved": rng_why,
+                           "out_of_range": (rng_rep.get("out_of_range") or []),
+                           "comet_routes": {n: {k: v for k, v in (rt or {}).items()
+                                                if k != "points"}
+                                            for n, rt in (scene.get("routes") or {}).items()},
                            "source": "JPL DE421+SBDB+Horizons / Skyfield"},
     )
