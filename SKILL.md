@@ -1,6 +1,6 @@
 ---
 name: space-finder-mcp
-description: 宇宙・天文・地球観測データを横断検索するMCPサーバー。NASA/ESA/JAXA/ISRO/CSA/INPE/UK/CNSA/CelesTrak/JPL/Wikidata/Open-Meteo と MAST（JWST・ハッブル等の観測アーカイブ）・NASA GCN（過渡天体速報）・JPL CNEOS（火球・小惑星接近・衝突リスク）および学術文献（OpenAlex/Crossref/NTRS/JAXAリポジトリ/J-STAGE/CiNii）を統合した58ツール。衛星画像・軌道マップ・日食パネル・月齢マップを画像で返し、構造化JSONも同時に提供。
+description: 宇宙・天文・地球観測データを横断検索するMCPサーバー。NASA/ESA/JAXA/ISRO/CSA/INPE/UK/CNSA/CelesTrak/JPL/Wikidata/Open-Meteo と MAST（JWST・ハッブル等の観測アーカイブ）・NASA GCN（過渡天体速報）・JPL CNEOS（火球・小惑星接近・衝突リスク）および学術文献（OpenAlex/Crossref/NTRS/JAXAリポジトリ/J-STAGE/CiNii）および SIMBAD / VizieR（CDS の天体カタログ）・NASA Exoplanet Archive（系外惑星）・みちびき（QZSS の精密軌道）を統合した62ツール。衛星画像・軌道マップ・日食パネル・月齢マップを画像で返し、構造化JSONも同時に提供。
 category: space
 ---
 
@@ -297,4 +297,4 @@ uv run python scripts/check-tools.py                  # 全56ツール実呼び�
 
 ## 更新履歴
 
-- v0.37.1 — **彗星の通過経路（`solar_system_now(route=True)`）の近日点日付に JPL Horizons の n 体解を併記**: SBDB の要素は古いエポックの接触軌道なので、2体近似の近日点は摂動の大きい彗星で大きくずれる（実測 1P/Halley: 2体近似 2062-01-08 対 n 体解 2061-07-28 ＝ 163.8 日、67P 82.6 日、エンケ彗星 0.8 日）。Horizons の `ELEMENTS` の Tp は「そのエポックでの接触軌道の近日点通過時刻」なので、**エポックを直前の Tp に置き直して反復**して収束させる（`_horizons_perihelion_jd`・1日キャッシュ）。本文と `figure.notes` に両方の日付と差の日数を数値から生成（`marks[0].date_nbody` / `nbody_diff_days` / `comet_routes[].tp_nbody_date`）。取得できないときは `nbody_error` に理由を残して注記に出し、**2体近似だけを黙って出さない**（C/彗星は Horizons 要素＝すでに n 体解なので分岐）。旧注記の「実際の回帰は数日ずれる」は誤り（実測 0.8〜164 日）だったため削除。回帰テスト2件追加（計174件）。
+- v0.38.0 — **天体カタログ（SIMBAD / VizieR, CDS）・系外惑星（NASA Exoplanet Archive TAP）・みちびき（QZSS）の4ツールを追加（58→62ツール）**: `object_lookup`（天体名・和名から主名/種別/スペクトル型/年周視差→pc・光年/固有運動/視線速度/等級、`neighbors` で周辺天体を角距離順）・`catalog_search`（2MASS 等の星表を天体名・座標から円錐検索。半径は分指定の0.1分が下限、未知の星表は候補提示で停止）・`exoplanet_search`（恒星名/惑星名・発見方法・距離・発見年・地球類似条件で検索。和名は英字名へ展開）・`qzss_status`（超速報 SP3 を解析して各機の現在位置・東京からの仰角方位・準天頂軌道の振れ幅。提供元明記の非商用利用のみ）。JVO と OACAPI は機械可読窓口が無い（404）/TLS 証明書失効のため見送り、NeoWs は既存 `neo_today` が同サービスを使うため追加せず。

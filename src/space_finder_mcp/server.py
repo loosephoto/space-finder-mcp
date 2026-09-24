@@ -54,6 +54,9 @@ from . import satellite_map as _satmap
 from . import weather_sat as _wsat
 from . import space_calendar as _calendar
 from . import literature as _lit
+from . import cds as _cds
+from . import exoplanet as _exo
+from . import qzss as _qzss
 
 # ---- ネイティブ拡張は「起動前に」import しておく（重要） ----
 # numpy / matplotlib / skyfield を**ツール実行時**（イベントループが動き出した後）に import
@@ -131,6 +134,13 @@ _reg(_tart.radio_sources_now)
 # ---- 学術文献（惑星科学の根拠: OpenAlex / Crossref / NTRS / JAXAリポジトリ / J-STAGE / CiNii） ----
 _reg(_lit.space_literature_search)
 _reg(_lit.planetary_evidence)
+
+# ---- CDS（ストラスブール天文データセンター: SIMBAD 天体情報 / VizieR 星表, 認証不要）----
+_reg(_cds.object_lookup)
+_reg(_cds.catalog_search)
+
+# ---- 太陽系外惑星 (NASA Exoplanet Archive TAP, 認証不要) ----
+_reg(_exo.exoplanet_search)
 
 # ---- 星空マップ＋人工衛星オーバーレイ (matplotlib/Pillow 選択式, 認証不要) ----
 _reg(_skyover.sky_map_with_satellites)
@@ -225,6 +235,11 @@ _reg(_ssd.impact_risk)
 # ---- AWS Earth Search STAC (Sentinel/Landsat/NAIP, 認証不要) ----
 _reg(_stac.stac_collections)
 _reg(_stac.stac_search)
+
+
+# ---- みちびき（準天頂衛星システム QZSS, 内閣府 公開アーカイブ API, 認証不要）----
+# 提供元が非商用利用のみと明記（応答にもその旨を出す）。
+_reg(_qzss.qzss_status)
 
 
 # ---- ISS 現在位置 (Open Notify, 認証不要) ----

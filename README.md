@@ -14,6 +14,7 @@
 - **tokyo-transit方式のJSON応答** — 人間向け表示（`content`）とLLM向け純粋JSON（`structuredContent`）を分離し、情報を失わずに構造化データを渡せる
 - **認証不要のツールが大半** — APIキーの管理なしですぐ動く（NASA の一部ツールのみ任意キー。ESA/Copernicus は検索・プレビューのみで、認証付きダウンロードは非対応）
 - **他国の宇宙機関データに対応** — インド ISRO・欧州 ESA/Copernicus・日本 JAXA・カナダ CSA・ブラジル INPE・英国 EO DataHub・フランス CNES・中国 CNSA 系ポータル・全衛星軌道(CelesTrak)・EO Dashboard(NASA/ESA/JAXA共同) を横断検索
+- **天体カタログと系外惑星、準天頂衛星に対応** — 天体の素性は SIMBAD、観測星表は VizieR（いずれも CDS・認証不要）、系外惑星は NASA Exoplanet Archive、**みちびき（QZSS）**の精密軌道は内閣府の公開アーカイブ API から取得します（QZSS は提供元明記の**非商用利用のみ**）
 - **引用元を明示** — 科学的な内容には必ずデータソースへのリンクを併記
 - **図の注記を機械可読で返す（figure/1）** — 描画系ツールは「どの面を・どの縮尺で・主天体を焦点に置いたか」と注記・自己検証を JSON で返し、LLM が図を誤読しないようにする
 
@@ -95,21 +96,22 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 - **機械的に検査します** — `scripts/check-tools.py --media-links`（画像ブロックより前にアイコン付きリンクが無い／`structuredContent` にURL・保存パスが無い／`image_path` のファイルが存在しない場合は exit 1。実測: 画像を返す12ツールすべて OK）。生成系の docstring には「回答時はこのリンクをそのまま提示してください」と明記しています。
 - **複数の画像を続けて返すときは、caption とリンクの間を空行にします** — Markdown は同一段落内の単一改行をスペースに畳み込むため、単一改行で組むと隣り合う画像の caption / リンクが **1行に融合**します（1枚だけ返すときは段落が分かれるので気付きにくい。実測: `astronomy_weather` の気象庁画像2枚）。
 
-### 🆕 直近の更新内容（v0.37.1）
+### 🆕 直近の更新内容（v0.38.0）
 
-**「彗星の通過経路の近日点日付に JPL Horizons の n 体解を併記する（SBDB の2体近似が実際の回帰と最大 164 日ずれていた）」**（v0.37.1）。
+**「天体カタログ（SIMBAD / VizieR）・系外惑星（NASA Exoplanet Archive）・みちびき（QZSS）を追加 — 天体名から素性を引き、惑星の物理量を確かめ、準天頂衛星が今どこにいるかを精密軌道から出す」**（v0.38.0・58→62ツール）。
 
-- **☄️ 何が変わるか** — `solar_system_now(comet=..., route=True)` の◇近日点の日付は、これまで **JPL SBDB の2体近似だけ**でした。SBDB の要素は古いエポックの接触軌道なので、摂動の大きい彗星ではこれが実際の回帰と大きく食い違います（実測 1P/Halley: 2体近似 2062-01-08 に対し **Horizons の n 体解 2061-07-28 ＝ 163.8 日の差**。67P 82.6日、エンケ彗星 0.8日）。本文と `figure.notes` に**両方の日付と差の日数**を出します（`marks[0].date_nbody` / `nbody_diff_days` / `comet_routes[].tp_nbody_date`）。
-- **🔎 求め方** — Horizons の `ELEMENTS` が出す Tp は「そのエポックでの接触軌道の近日点通過時刻」なので、**エポックを直前の Tp に置き直して反復**して収束させます（実測: エポック 2026-09-23 → 2061-08-04、エポック 2062-01-08 → 2061-07-28.7、次の反復で 0.01 日以内に安定。1日1回キャッシュ）。
-- **🛡️ 取れないときは黙らない** — Horizons が遮断・応答異常のときは `nbody_error` に理由を入れ、注記に「n 体解を取得できなかったためずれは示せない」と出します（2体近似だけを黙って出さない）。C/彗星（Horizons 要素＝すでに n 体解）は分岐して2体近似と混同しません。
-- **✏️ 誤記の修正** — 旧注記の「惑星の摂動で実際の回帰は**数日**ずれる」は言い切りが誤り（実測 0.8〜164 日）でした。また「見え方チャートの近日点は Horizons の n 体解」も誤り（チャートで n 体解なのは**位置**で、前回・次回の近日点は同じ SBDB 2体近似の概算）なので、実装に合わせて直しました。
-- **🧪 検証** — `--dead-code`（0件）／`--figures`（描画系9・`verify_ok`）／`--offline`／`--fuzz`（372組合せ・例外漏れ0）／`--media-links`（15ツール・0）／`--fonts`／`--concurrency`／`--stdio`（すべて exit 0）／回帰テスト **174件 OK**（新規2件・ネットワーク不要のスタブ）／全58ツール実呼び出し（exit 0・51 OK・7 ERROR は既知の外部要因＝NASA DEMO_KEY 429×2・CelesTrak 遮断×3・TART タイムアウト・Wikidata タイムアウト）。
+- **🔭 `object_lookup`（新規）** — 天体名（**和名可**）から **SIMBAD**（CDS）を引いて、主名・天体種別・スペクトル型・**年周視差（→ pc / 光年）**・固有運動・視線速度・参考文献数・**等級（U/B/V/R/I/J/H/K）**を返します。`neighbors` を指定すると**周辺天体を近い順**に列挙（角距離はクライアント側で計算）。実測: シリウス＝`SB*` / `A0mA1Va` / 年周視差 379.21 mas＝**2.64 pc（8.6 光年）** / V=-1.46 / 周辺3天体、M31＝`AGN`（SIMBAD の分類そのまま）＋B/H/J/K 等級。
+- **📚 `catalog_search`（新規）** — **VizieR**（CDS）の星表を天体名／座標から**円錐検索**。`catalog` は 2mass / gaia / gaia-edr3 / hipparcos / allwise / unwise / ps1 / sdss16 / sdss12 / ngc、または**生の表名**（`II/246/out` 等）。**未知の星表は推測せず候補一覧を返して停止**します。角度は分指定（0.1分＝6秒が下限）。実測: M31 の 2MASS で J/H/K 等級＋天体からの角距離を返します。
+- **🪐 `exoplanet_search`（新規）** — **NASA Exoplanet Archive**（TAP）から系外惑星を検索。恒星名／惑星名の部分一致（**和名は「ケプラー22」→ Kepler-22 b のように英字名へ展開**）、`discovery_method`（日本語可）、`max_distance_pc` / `since_year` / `earth_like`（半径 0.5〜2 R⊕・平衡温度 200〜320 K）で絞り込み、軌道周期・軌道長半径・半径・質量・平衡温度・恒星型・距離・TIC/Gaia ID を返します（`limit` 最大 50）。実測: TRAPPIST-1 の**7惑星すべて**、**ケプラー22 b**（周期 289.9 日・半径 2.3 R⊕・578 K・196 pc）。0件のときは**候補の恒星名**を提示します。出典は DOI `10.26133/NEA12`。
+- **🛰️ `qzss_status`（新規）** — **みちびき（準天頂衛星システム QZSS）**の公開アーカイブ API（内閣府・認証不要）。既定では**超速報 SP3（192 エポック × 15 分 ≒ 48 時間分の精密軌道）**を解析して、各機の**現在の緯度・経度・高度**、**東京からの仰角・方位**、準天頂軌道の**緯度の振れ幅（8 の字）**を返します。実測: QZS-3（J07）＝経度 127.0°・高度 35780 km でほぼ静止、QZS-1R（J04）＝緯度 36.6°で**東京から仰角 86.1°**（ほぼ真上）。`almanac` / `clock` / `l1s` / `l6` / `anpi`（安否確認）/ `naqu` 等は**最新ファイルの一覧とダウンロードURL**を返します。⚠️ 提供元が**非商用利用のみ**・正確性非保証と明記しているため、応答にもその旨を必ず出します。
+- **🌐 調査したが見送った API** — **JVO**（国立天文台）は TAP/ポータル API が 404 で機械可読の窓口が無く、**OACAPI** は TLS 証明書が失効（2026-09-22）し `verify=False` でも HTML が混入するため見送りました。**NeoWs** は既存の `neo_today` が同じサービスを使っており追加不要、**The Solar System OpenData** は API キー必須（任意キー枠でも可）のため今回は入れていません。
+- **🧪 検証** — `--dead-code`（0件）／`--offline`／`--fuzz`（412組合せ・例外漏れ0）／`--media-links`（画像系16ツール・問題0）／`--fonts`（3/3）／`--concurrency`（3/3）／`--stdio`（6/6・無応答0）／`--figures`（描画系9・追加経路33・`verify_ok`）／回帰テスト **208件 OK**（新規12件・ネットワーク不要のスタブ。SP3 のエポック行より前を読まないこと・和名の ASCII 展開・ECEF↔測地の往復・候補提示で停止することを固定）／全62ツール実呼び出し（exit 0・**59 OK・3 ERROR は既知の外部要因**＝NASA DEMO_KEY の 429（`apod` / `neo_today`）と Wikidata の接続リセット（`reverse_lookup`））。
 
-登録ツールは **58本**。
+登録ツールは **62本**。
 
 ### 以前の更新
 
-- **v0.37.0** — **惑星の記述を一次文献（DOI 付き）で裏づける学術文献ツールを追加（`space_literature_search` / `planetary_evidence`、56→58ツール）**。OpenAlex / Crossref / NTRS / JAXAリポジトリ / J-STAGE / CiNii / Zenodo / DataCite を横断し DOI 重複を統合。日本語クエリは英語語へ置換してから英語圏ソースへ投げる（置換不能ならスキップ理由を返す）。任意キー（`ADS_API_KEY` / `S2_API_KEY` / `WOS_API_KEY`）未設定でも全機能が動きます。
+- **v0.37.1** — **彗星の通過経路の近日点日付に JPL Horizons の n 体解を併記（SBDB の2体近似は実際の回帰と最大 164 日ずれていた）**。エポックを直前の Tp に置き直して反復収束させ、差の日数を本文と `figure.notes` に出す（取れないときは理由を `nbody_error` に残す）。
 
 ## 📦 インストール
 
@@ -188,6 +190,16 @@ cp .env.example .env   # 編集して NASA_API_KEY=... を記入（.gitignore �
 
 > **キーの取り扱い**: 応答に含まれる API キーは伏せ字化します（`nasa_budget.redact()` → `api_key=***`、`budget.key` は `DEMO_KEY` / `custom` のみ）。requests の例外文字列が URL ごとキーを含むため、そのまま返すと利用者のキーが漏れるためです。
 
+### （任意）学術文献APIキー
+
+`space_literature_search` / `planetary_evidence` で利用する追加ソースのキーです。**3つとも任意**で、未設定でも OpenAlex / Crossref / NASA NTRS / JAXAリポジトリ / J-STAGE / CiNii / Zenodo / DataCite は引き続き利用できます。キー未設定のソースはスキップされ、理由を `sources[].note` に返します。
+
+- `ADS_API_KEY` — NASA ADS の無料トークン。登録して取得し、設定すると ADS の書誌検索を利用できます（上限 5,000 リクエスト/日）。
+- `S2_API_KEY` — Semantic Scholar の API キー。未設定でも検索を試みますが、共有レート制限により HTTP 429 になる場合があります。
+- `WOS_API_KEY` — Clarivate Web of Science Starter API のキー。登録が必要です。無料枠は 1 リクエスト/秒・50 リクエスト/日で、被引用数は返りません。
+
+設定先は MCP クライアントの環境変数（優先）またはリポジトリ直下の `.env` です（変数名と空欄の例は `.env.example` を参照）。キーはサーバー側でのみ扱い、クライアントへの応答には含めません。
+
 ### ESA Copernicus について（認証付きダウンロードは非対応）
 
 `copernicus_search` の**検索とプレビューURL取得は認証不要**で動作します。本サーバーは **OAuth2 による認証付きダウンロードは行いません**（`CDSE_CLIENT_ID` 等のクレデンシャルは使用しません）。実際の画像ダウンロードが必要な場合は [Copernicus Data Space](https://dataspace.copernicus.eu) で取得してください。
@@ -255,7 +267,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 
 ## 🛠️ ツール一覧
 
-登録ツールは **58本**（宇宙・天文イベントカレンダー 4本（`space_calendar` / `calendar_events` / `calendar_event_add` / `calendar_event_remove`）＋ロケット打ち上げ・逆引き 4本＋NASA日次・宇宙天気 3本＋メディア 3本＋各国宇宙機関・地球観測 16本＋衛星・軌道 5本＋天体位置・画像合成 7本＋観測支援・天文データ 10本＋気象衛星リアルタイム画像 1本＋天体異常系 3本＋**学術文献 2本**）。全58ツールを実呼び出しで検証済みです（外部APIの障害・レート制限時は、例外ではなく CallToolResult のエラーとして返します）。
+登録ツールは **62本**（宇宙・天文イベントカレンダー 4本（`space_calendar` / `calendar_events` / `calendar_event_add` / `calendar_event_remove`）＋ロケット打ち上げ・逆引き 4本＋NASA日次・宇宙天気 3本＋メディア 3本＋各国宇宙機関・地球観測 16本＋衛星・軌道 6本＋天体位置・画像合成 7本＋観測支援・天文データ 13本（うち**天体カタログ 2本**（`object_lookup` / `catalog_search`）・**系外惑星 1本**（`exoplanet_search`））＋気象衛星リアルタイム画像 1本＋天体異常系 3本＋**学術文献 2本**）。全62ツールを実呼び出しで検証済みです（外部APIの障害・レート制限時は、例外ではなく CallToolResult のエラーとして返します）。
 
 | ツール | できること | データ源 | 認証 |
 |--------|-----------|---------|------|
@@ -290,6 +302,9 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `gcn_alerts` | **NASA GCN（General Coordinates Network）の過渡天体速報**。GRB・X線新星・重力波などの **GCN Circular** を期間（`days` 1〜60）／キーワード（`query`）で新しい順に一覧し、`circular_id` で1件の本文（投稿者・観測時刻・本文）まで返す。一覧は公開アーカイブの HTML が既定（サイト内部の JSON ルートは 403 を返すことがあるためフォールバック）。⚠️ 機械可読の Notices は Kafka 配信のため対象外 | NASA GCN (gcn.nasa.gov) | 不要 |
 | `mast_observations` | **MAST（NASA/STScI の宇宙望遠鏡アーカイブ）の観測データ検索**。JWST・ハッブル(HST)・TESS・Kepler・GALEX 等を、天体名（和名可・Sesame で座標解決）／座標コーン／装置（部分一致）／データ種別／観測日で検索。観測ID・装置・観測日・校正レベル・フィルタ・`Mast.Caom.Products` による FITS のダウンロードURL（`include_products=true`）まで返す。`preview_image=true` なら先頭観測のプレビュー画像を**チャットにインライン表示**（🖼️リンク先行＋保存パス）。校正用露出（BIAS/DARK）は既定で除外。⚠️ MAST は混雑時に1クエリ 60 秒級（実測）＝結果は30分キャッシュ | MAST Mashup API | 不要 |
 | `alma_search` | ALMA（アルマ望遠鏡）科学アーカイブの観測データ検索（観測対象・座標・周波数帯・公開/要権限） | ALMA Science Archive (NAOJ, IVOA TAP) | 不要 |
+| `object_lookup` | **天体の素性を SIMBAD から引く**。天体名（**和名可**・Sesame で英語名へ展開）から主名・天体種別・スペクトル型・**年周視差（→ pc / 光年）**・固有運動・視線速度・参考文献数・**等級（U/B/V/R/I/J/H/K）**を返す。`neighbors` で**周辺天体を角距離順**に列挙。⚠️ SIMBAD の ADQL は `ORDER BY DISTANCE()` 非対応のため距離順はサーバー側で計算 | SIMBAD TAP (CDS) | 不要 |
+| `catalog_search` | **観測星表の円錐検索（VizieR）**。2MASS / Gaia DR3・EDR3 / ヒッパルコス / AllWISE / unWISE / Pan-STARRS1 / SDSS DR16・DR12 / NGC を、天体名（和名可）または座標から検索し、**星表の列名・単位そのまま**で返す（生の表名 `II/246/out` も可）。**未知の星表は推測せず候補を提示して停止**。⚠️ 半径は**分**指定（0.1分＝6秒が下限） | VizieR ASU (CDS) | 不要 |
+| `exoplanet_search` | **系外惑星（NASA Exoplanet Archive）**。恒星名／惑星名の部分一致（**和名は「ケプラー22」→ Kepler-22 b のように英字名へ展開**）・発見方法（日本語可）・恒星距離・発見年・地球類似条件（半径0.5〜2 R⊕・平衡温度200〜320 K）で検索し、軌道周期・軌道長半径・半径・質量・平衡温度・恒星型・距離・TIC/Gaia ID を返す。0件時は**候補の恒星名**を提示。出典 DOI `10.26133/NEA12` | NASA Exoplanet Archive (TAP) | 不要 |
 | `space_literature_search` | **惑星科学・宇宙の一次文献（論文・技術報告）を横断検索**して根拠（DOI付き）を返す。OpenAlex（要旨・被引用数・OAリンク）・Crossref・NASA NTRS（技術報告＋PDF）・JAXAリポジトリ・J-STAGE・CiNii Research・Zenodo・DataCite を1回で横断し、DOI/タイトルの重複を統合。**日本語クエリは語彙辞書＋和名テーブルで英語語へ置換してから英語圏ソースへ投げる**（実測: OpenAlex/Crossref は日本語クエリだと無関係な文献を返すため）。`sort`（関連度/被引用数/年）・`year_from`/`year_to`・`min_citations`・`open_access_only`・`planetary_only`（惑星科学概念に限定）・`sources` で絞り込み。⚠️ 返すのは**文献（書誌）**で観測データではない（観測は `mast_observations` / `alma_search` / `cadc_observations`） | OpenAlex / Crossref / NASA NTRS / JAXAリポジトリ / J-STAGE / CiNii / Zenodo / DataCite | 不要（`ADS_API_KEY`・`S2_API_KEY`・`WOS_API_KEY` を設定すると ADS・Semantic Scholar・WoS も使う） |
 | `planetary_evidence` | **天体（惑星・衛星・小天体・探査機）の文献的な裏づけをまとめて返す**。①名前解決（Sesame/CDS で和名→英語名→座標）と、②その天体の文献を**英語圏＋日本語の両方**から集めて提示（既定は被引用数順。**惑星科学概念で絞った OpenAlex を上位に置く**＝実測「火星」で MOLA / OMEGA-Mars Express / ALH84001 が上位に来る）。⚠️ 太陽系天体は時刻で位置が変わるため固定座標を持たない旨を `caveats` に明記 | OpenAlex / Crossref / NASA NTRS / JAXAリポジトリ / J-STAGE / CiNii ＋ Sesame/CDS | 不要 |
 | `radio_sources_now` | TART オープン電波望遠鏡が「いま観測できる電波源」（GNSS・静止衛星等）を仰角順に表示 | TART source catalog (NZ) | 不要 |
@@ -315,6 +330,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `calendar_event_add` | **自分の予定をカレンダーに追加**（ローカル保存・外部送信なし）。日付は `2026-10-24` / `10月24日` 形式、時刻・終了日・繰り返し（毎日/毎週/毎月/毎年）対応。**フローティングなローカル日時**なので `place` を変えても予定の日付は動かない | ローカル（`%LOCALAPPDATA%\space-finder-mcp`） | 不要 |
 | `calendar_event_remove` | 自分の予定を削除（id か title[+date]）。冪等（既に無ければエラーにしない）。同名が複数あるときは**削除せず候補を提示**して停止 | ローカル | 不要 |
 | `satellite_status` | 世界中の気象・地球観測衛星の運用ステータス・軌道・打ち上げ日（Roscosmos等）。**カタログ全1,000件超を走査**し、query は一致度順（acronym 完全/前方一致 → 名称の語境界 → 部分一致のみ）で提示 | WMO OSCAR | 不要 |
+| `qzss_status` | **みちびき（準天頂衛星システム QZSS）**。既定では**超速報 SP3（192エポック×15分≒48時間分の精密軌道）**を解析し、各機の**現在の緯度・経度・高度**、**東京からの仰角・方位**、準天頂軌道の**8の字の振れ幅**を返す（J07 から PRN 表へ対応づけ、未対応 ID は ID のまま表示）。`rapid-orbit` / `clock` / `erp` / `almanac` / `ephemeris` / `l1s` / `l6` / `anpi`（安否確認）/ `naqu` は最新ファイル一覧＋DLリンク。⚠️ 提供元明記の**非商用利用のみ・正確性非保証** | 内閣府 QZSS 公開アーカイブ API | 不要 |
 | `cnsa_status` | 中国CNSA系衛星データポータル（風雲/NSMC・高分/CNSA-GEO・CBERS/CRESDA）の到達状態・概要＋認証不要の代替経路 | CNSA各公式ポータル | 不要(ダウンロードは要登録) |
 | `tiangong_now` | 天宮（Tiangong）中国宇宙ステーションの現在位置（SGP4伝播＋Googleマップ表示） | CelesTrak TLE + SGP4 | 不要 |
 
@@ -340,13 +356,6 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | **Web of Science（Starter）** | キー無しは **401**。無料枠は登録制・1req/s・50req/日・被引用数なし | `WOS_API_KEY` を設定したときだけ使う |
 | **arXiv API** | 本環境からは UA を変えても **HTTP 406** | **実装しない**（取得できないものを載せない） |
 | **JDreamIII / J-GLOBAL** | JDreamIII は JST の**有償**サービス（要契約・API も別契約）。J-GLOBAL WebAPI も MyJ-GLOBAL 登録＋キー交付が必要 | **実装しない**（日本語文献は **J-STAGE / CiNii / JAXAリポジトリ**で代替） |
-
-### （任意）学術APIキー
-
-`ADS_API_KEY`（NASA ADS・無料登録）/ `S2_API_KEY`（Semantic Scholar）/ `WOS_API_KEY`（Clarivate）は
-**未設定でも全機能が動きます**（未設定のソースは**スキップして理由を `sources[].note` に返します**。
-「全ソース失敗」とは区別されます）。設定する場合は MCPクライアントの env か、リポジトリ直下の
-`.env`（`.env.example` 参照）に置いてください。キーはサーバー側でのみ保持し、クライアントへ晒しません。
 
 ---
 

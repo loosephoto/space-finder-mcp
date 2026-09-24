@@ -54,6 +54,10 @@ GATE_ARGS = {
     # 学術文献は「実際に文献が返る」クエリで経路を検証する（sentinel では何も検証できない）
     "space_literature_search": {"query": "Mars global dust storm", "limit": 3},
     "planetary_evidence": {"object_name": "火星", "limit": 3},
+    # 系外惑星・星表・天体情報は「実際に惑星/天体が返る」クエリで経路を検証する
+    "exoplanet_search": {"object_name": "TRAPPIST-1", "limit": 3},
+    "catalog_search": {"object_name": "M31", "catalog": "2mass", "max_rows": 3},
+    "object_lookup": {"object_name": "シリウス", "neighbors": 2},
 }
 # カレンダーのストアに書き込むツールは、ゲートでは一時ストアへ逃がす（利用者の実データを汚さない）
 # 天体異常系（fireball_reports / neo_close_approach）は呼び出し結果を蓄積するのでここに含める。
