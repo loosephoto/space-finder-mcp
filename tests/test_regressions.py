@@ -829,3 +829,34 @@ class RangeAuTests(unittest.TestCase):
         joined = "\n".join(sc["figure"]["notes"])
         self.assertIn("表示範囲5 AU の外にあるため描いていない", joined)
         self.assertTrue(any(o.get("type") == "route_mark" for o in sc["out_of_range"]), sc["out_of_range"])
+
+
+    def test_simple_solar_system_draws_projected_light_day_for_each_probe(self):
+        from space_finder_mcp import solar_system
+
+        scene = {
+            "time_utc": "2026-09-24 00:00 UTC",
+            "planets": {},
+            "asteroids": {},
+            "probes": {
+                "Voyager 1": {"name": "Voyager 1", "au": 160.0, "proj_au": 159.0,
+                              "eclLon": 20.0, "eclLat": 5.0, "color": [255, 214, 90],
+                              "light_days": 0.92, "light_day_reached": False,
+                              "light_day_eta_date": "2027-01-01", "to_light_day_au": 13.1},
+                "Voyager 2": {"name": "Voyager 2", "au": 145.0, "proj_au": 132.0,
+                              "eclLon": 205.0, "eclLat": 25.0, "color": [90, 180, 255],
+                              "light_days": 0.84, "light_day_reached": False,
+                              "light_day_eta_date": "2028-01-01", "to_light_day_au": 28.1},
+            },
+            "comets": {},
+            "routes": {},
+            "route_draw": {},
+            "range_au": None,
+            "range_report": {},
+        }
+        png = solar_system._render_simple(scene)
+        verified = solar_system._verify_light_day_draw(png, scene)
+        names = {ring.get("name") for ring in verified["rings"]
+                 if ring.get("kind") == "probe_projection"}
+        self.assertEqual(names, {"Voyager 1", "Voyager 2"}, verified)
+        self.assertTrue(verified["ok"], verified)

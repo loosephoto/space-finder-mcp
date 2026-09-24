@@ -527,6 +527,10 @@ def split_at_antimeridian(points: Iterable[Tuple[float, float]],
 
 FIGURE_SCHEMA = "figure/1"
 
+# structuredContent.figure 側にだけ書く LLM 向けの指示（content＝人間向け表示には出さない）
+FIGURE_NOTES_USAGE = ("figure.notes は図を誤読しないための注記なので、要約・言い換えせず"
+                      "そのまま回答に引用すること。")
+
 
 def _fmt_num(v: Optional[float], digits: int = 2) -> str:
     """注記用の数値表記（大きな値は3桁区切り、小さい値は有効数字を確保）。"""
@@ -675,6 +679,8 @@ def figure_payload(*, kind: str, title: str, view: Optional[dict] = None,
     if mk:
         fig["markers"] = mk
     fig["notes"] = [n for n in notes if n]
+    # 注記の扱い（LLM 向けの指示。content＝人間向け表示には出さない）
+    fig["notes_usage"] = FIGURE_NOTES_USAGE
     if caption:
         fig["caption"] = caption
     if verify:
@@ -683,8 +689,14 @@ def figure_payload(*, kind: str, title: str, view: Optional[dict] = None,
 
 
 def figure_text_block(figure: dict) -> str:
-    """content 用の注記ブロック（LLM が要約せずそのまま引用できる形）。"""
-    lines = ["### ⚠️ 図の注記（要約・言い換えせず、そのまま引用してください）"]
+    """content 用の注記ブロック（**人間が読む表示**。指示文は入れない）。
+
+    注記を要約せず引用すべきことはホスト LLM への指示であって、content は人間が
+    読むチャネルなので、ここには書かない（表示に指示文が混ざると読み手に
+    意味不明な文が出る）。指示は各ツールの docstring と
+    `structuredContent.figure.notes_usage`（LLM が読む JSON 側）に置く。
+    """
+    lines = ["### ⚠️ 図の注記"]
     lines += ["- " + t for t in figure.get("notes", [])]
     if figure.get("caption"):
         lines.append("**図の説明**: " + figure["caption"])

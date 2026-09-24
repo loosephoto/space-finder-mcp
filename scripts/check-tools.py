@@ -285,6 +285,18 @@ FIGURES_EXTRA_CALLS = (
     ("solar_system_now[range_au=fit]", "solar_system_now",
      {"range_au": "fit", "comet": "エンケ彗星", "route": True},
      {"figure_kind": "heliocentric_overview"}),
+    # 1光日の系: 探査機を指定すると、真距離の1光日リング・投影での1光日リング・◇（到達時
+    # の方向）・到達予測日を図と注記に出す経路。リングが枠に入るよう表示範囲も広げる。
+    # （黄緯 35.2° のボイジャー1号＝投影 141.6 AU と真距離 173.14 AU が別の円になる例）
+    ("solar_system_now[1光日/ボイジャー1号]", "solar_system_now",
+     {"probe": "ボイジャー1号"}, {"figure_kind": "heliocentric_overview"}),
+    # 黄緯が小さい例（パイオニア10号・黄緯 3.0°）: 真距離の円と投影の円が図上でほぼ重なり、
+    # その旨を注記に出す分岐を固定する
+    ("solar_system_now[1光日/パイオニア10号]", "solar_system_now",
+     {"probe": "パイオニア10号"}, {"figure_kind": "heliocentric_overview"}),
+    # 表示範囲を絞ったときは1光日リングを描かず、理由（範囲外）を注記に出す分岐
+    ("solar_system_now[1光日/表示範囲外]", "solar_system_now",
+     {"probe": "ボイジャー1号", "range_au": 10}, {"figure_kind": "heliocentric_overview"}),
     # 日食は既定引数だと「その観測地で見える食」が無い場合があるため、可視の例で叩く
     # 地点マーカー（落点マップ）: 過去機の公表落点を天体面地図に描く経路
     ("planetary_orbiter_track[かぐや落点]", "planetary_orbiter_track",

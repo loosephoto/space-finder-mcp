@@ -7,40 +7,30 @@ SGP4 で現在の緯度・経度・高度を計算する。Open Notify の iss_n
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import requests
 from functools import lru_cache
 from mcp.types import CallToolResult, TextContent
 from sgp4.api import Satrec, jday
 
-from .celestrak import fetch_tle
+from .celestrak import (TLE_SOURCE_ORDER, fallback_status, fetch_tle_ex,
+                        source_label, tle_epoch_iso)
 
 TIANGONG_NORAD = 48274
 
 
-def _tle_epoch_iso(line1: str) -> str:
-    """TLE 1行目のエポック(YYDDD.DDDDDDDD)を ISO8601(UTC) 文字列に変換する。"""
-    try:
-        raw = line1[18:32].strip()
-        yy, doy = int(raw[:2]), float(raw[2:])
-        year = 2000 + yy if yy < 57 else 1900 + yy
-        dt = datetime(year, 1, 1, tzinfo=timezone.utc) + timedelta(days=doy - 1.0)
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
-    except (ValueError, IndexError):
-        return ""
-
-
 @lru_cache(maxsize=1)
 def _fetch_tiangong_tle() -> tuple:
-    """天宮の最新TLE (name, line1, line2) を取得（TLEは数時間有効）。
+    """天宮の最新TLE (name, line1, line2, 出典) を取得（TLEは数時間有効）。
 
-    取得は celestrak.fetch_tle に共通化（セッション内キャッシュ付き）。
+    取得は celestrak.fetch_tle_ex に共通化（セッション内キャッシュ付き）。
+    CelesTrak 遮断中は代替源から取るので、出典も返して表示に反映する。
     """
-    tle = fetch_tle(norad_id=TIANGONG_NORAD)
+    tle, source = fetch_tle_ex(norad_id=TIANGONG_NORAD)
     if tle is None:
-        raise ValueError("CelesTrak の応答に TLE 2行が含まれていません")
-    return tle
+        raise ValueError("TLE 2行が取得できませんでした")
+    return (tle[0], tle[1], tle[2], source)
 
 
 def _compute_position(tle_line1: str, tle_line2: str) -> dict:
@@ -71,25 +61,29 @@ def tiangong_now() -> CallToolResult:
     """天宮（Tiangong）中国宇宙ステーションの現在位置を返す。
 
     例:「天宮の現在位置」「中国宇宙ステーションは今どこ？」
-    CelesTrak の最新 TLE を SGP4 で伝播して現在の緯度・経度・高度・速度を計算。
+    CelesTrak の最新 TLE を SGP4 で伝播して現在の緯度・経度・高度・速度を計算
+    （CelesTrak 遮断中は代替源の公開ミラーから取得し、本文の「軌道要素エポック」行に
+    実際の出典を表示。structuredContent.tle_source にも入る）。
     認証不要。content に表示用サマリ＋Googleマップリンク、structuredContent に JSON。
 
     Returns:
         CallToolResult: 表示用サマリ + JSON。
     """
     try:
-        _name, tle1, tle2 = _fetch_tiangong_tle()
+        _name, tle1, tle2, tle_source = _fetch_tiangong_tle()
     except requests.RequestException as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"CelesTrak への接続に失敗しました: {e}")],
-            structuredContent={"error": str(e), "source": "celestrak.org"},
+            content=[TextContent(type="text", text=f"TLE取得に失敗しました（CelesTrak／公開代替源）: {e}")],
+            structuredContent={"error": str(e), "sources_tried": list(TLE_SOURCE_ORDER),
+                               "fallback": fallback_status()},
         )
     except ValueError as e:
         return CallToolResult(
             content=[TextContent(type="text", text=f"天宮の軌道要素(TLE)を取得できませんでした: {e}")],
-            structuredContent={"error": str(e), "source": "celestrak.org"},
+            structuredContent={"error": str(e), "sources_tried": list(TLE_SOURCE_ORDER),
+                               "fallback": fallback_status()},
         )
-    epoch = _tle_epoch_iso(tle1)
+    epoch = tle_epoch_iso(tle1)
     pos = _compute_position(tle1, tle2)
     if "error" in pos:
         return CallToolResult(
@@ -104,13 +98,14 @@ def tiangong_now() -> CallToolResult:
         # km/s → km/h は ×3600（×3.6 は m/s→km/h。この誤りで 1/1000 の値になっていた）
         f"🛰 高度 約{pos['altitude_km']}km ・ 速度 約{round(pos['speed_kms']*3600):,}km/h（1周 約91分）",
         f"🗺 Googleマップ: https://www.google.com/maps?q={lat},{lon}&z=3",
-        f"軌道要素エポック: {epoch} UTC（CelesTrak / NORAD 48274）",
+        f"軌道要素エポック: {epoch} UTC（{source_label(tle_source)} / NORAD 48274）",
         f"乗組員: 現在 3 名（天宮は運用中の常駐宇宙ステーション）",
     ]
     return CallToolResult(
         content=[TextContent(type="text", text="\n".join(lines))],
         structuredContent={"norad_id": TIANGONG_NORAD, "name": "Tiangong",
                            "epoch_utc": epoch, "position": pos,
+                           "tle_source": tle_source,
                            "google_maps": f"https://www.google.com/maps?q={lat},{lon}&z=3"},
     )
 

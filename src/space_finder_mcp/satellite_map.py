@@ -22,7 +22,7 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
-from .celestrak import WELL_KNOWN, fetch_tle
+from .celestrak import WELL_KNOWN, TLE_SOURCE_ORDER, fetch_tle_ex, source_label
 from .img_common import (encode_jpeg, figure_notes, figure_payload,
                          figure_text_block, load_font, media_link_line, pixel_near,
                          primary_spec, save_output, scale_spec,
@@ -67,12 +67,16 @@ def _resolve_norad_candidates(name: str) -> list[tuple[str, int]]:
             if len(nm) >= 4 and (k in nm or nm in k)]
 
 
-def _fetch_tle2(norad_id: int) -> tuple[str, str, str]:
-    """NORAD ID から TLE 2行を取得。戻り: (name, line1, line2)。"""
-    tle = fetch_tle(norad_id=as_int(norad_id))
+def _fetch_tle2(norad_id: int) -> tuple[str, str, str, str]:
+    """NORAD ID から TLE 2行と出典を取得。戻り: (name, line1, line2, 出典)。
+
+    出典を返すのは、CelesTrak 遮断中は代替源から取るため（代替源の TLE を
+    「CelesTrak の TLE」と書くと出典が嘘になる）。
+    """
+    tle, source = fetch_tle_ex(norad_id=as_int(norad_id))
     if tle is None:
         raise ValueError(f"NORAD {norad_id} の TLE が見つかりません")
-    return tle
+    return (tle[0], tle[1], tle[2], source)
 
 
 def _sat_subpoint(sat, t) -> tuple[float, float, float]:
@@ -97,7 +101,8 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
     """任意の人工衛星の現在位置と地上軌道を地球地図にプロットした画像を返す。
 
     例:「ISSの現在位置を地球地図で」「ひのでの位置を地図で」「ハッブルの軌道」
-    CelesTrak の最新 TLE を Skyfield（SGP4）で伝播し、衛星の真下の点（緯度経度・高度）
+    CelesTrak の最新 TLE（遮断中は代替源の公開ミラー。本文と structuredContent.tle_source に
+    実際の出典を表示）を Skyfield（SGP4）で伝播し、衛星の真下の点（緯度経度・高度）
     とその前後の軌道トレイルを NASA Blue Marble 地球地図に重ねる。認証不要。
 
     精度: 軌道トレイルは step 分刻み（デフォルト 1分）で描画し、経度±180度境界で
@@ -142,14 +147,15 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
                 structuredContent={"error": "ambiguous satellite name", "name": name,
                                    "candidates": [{"name": k, "norad_id": v} for k, v in cands]},
             )
+    tle_source = ""
     if norad_id is None:
         # 名前で CelesTrak を直接検索（取得失敗と「該当なし」を区別する）
         try:
-            found = fetch_tle(name=name)
+            found, tle_source = fetch_tle_ex(name=name)
         except requests.RequestException as e:
             return CallToolResult(
                 content=[TextContent(type="text", text=f"衛星の軌道要素(TLE)取得に失敗しました: {e}")],
-                structuredContent={"error": str(e), "source": "celestrak.org"},
+                structuredContent={"error": str(e), "sources_tried": list(TLE_SOURCE_ORDER)},
             )
         if found is None:
             return CallToolResult(
@@ -166,11 +172,11 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
                 structuredContent={"error": "invalid norad_id", "norad_id": str(norad_id)},
             )
         try:
-            sat_name, tle1, tle2 = _fetch_tle2(nid)
+            sat_name, tle1, tle2, tle_source = _fetch_tle2(nid)
         except (requests.RequestException, ValueError) as e:
             return CallToolResult(
                 content=[TextContent(type="text", text=f"衛星の軌道要素(TLE)取得に失敗しました: {e}")],
-                structuredContent={"error": str(e), "source": "celestrak.org"},
+                structuredContent={"error": str(e), "sources_tried": list(TLE_SOURCE_ORDER)},
             )
 
     minutes = as_int(minutes, 45, 5, 1440)
@@ -333,7 +339,8 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
             "地図は等角図法（緯度経度）のため、高緯度ほど東西方向が圧縮されて見える",
             "経度±180°をまたぐ部分は線を分割して描いている（地図の端を横切らせない）",
             f"マーカー（赤●＋白中心）は指定時刻の真下の点。高度 {alt0:.0f} km・速度 約{speed0*3600:.0f} km/h",
-            "位置は CelesTrak の最新TLEを Skyfield(SGP4) で伝播したその時刻の値（予報ではない）",
+            "位置は {} の最新TLEを Skyfield(SGP4) で伝播したその時刻の値（予報ではない）".format(
+                source_label(tle_source)),
             ("" if (px0, py0) == (14, 14) and not panel_hidden else
              "情報パネルは現在位置マーカー（cx={:.0f}, cy={:.0f}px）と重ならない隅に配置した".format(cx, cy)),
             ("" if not panel_hidden else
@@ -357,7 +364,8 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
         f"🛤 軌道トレイル: 前後 {minutes} 分（{step} 分刻み）。オレンジ線=軌道。",
         "",
         figure_text_block(fig),
-        "出典: CelesTrak TLE + Skyfield(SGP4) ／ 地図 NASA Blue Marble（認証不要）",
+        "出典: {} の TLE + Skyfield(SGP4) ／ 地図 NASA Blue Marble（認証不要）".format(
+            source_label(tle_source)),
     ]
     return CallToolResult(
         content=[TextContent(type="text", text="\n".join(text_lines)), imgc],
@@ -367,6 +375,7 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
             "altitude_km": round(alt0, 1), "speed_kmh": round(speed0 * 3600),
             "trail_minutes": minutes, "step_min": step, "trail_points": len(trail),
             "figure": fig, "image_path": out_path,
-            "source": "CelesTrak + Skyfield + NASA Blue Marble",
+            "tle_source": tle_source,
+            "source": "{} + Skyfield + NASA Blue Marble".format(source_label(tle_source)),
         },
     )

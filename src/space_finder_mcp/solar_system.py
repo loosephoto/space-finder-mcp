@@ -39,6 +39,12 @@ _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_
 os.makedirs(_DATA_DIR, exist_ok=True)
 UA = {"User-Agent": "space-finder-mcp/0.21 (MCP; solar system)"}
 
+# 「1光日」= 光が 1日（86400 秒）で進む距離。天文単位に換算して 173.1446 AU。
+#   299792.458 km/s × 86400 s = 25,902,068,371 km ÷ 149,597,870.7 km/AU
+# 遠方探査機（ボイジャー等）が星間空間のどこまで来たかを示す目安として図に描く。
+LIGHT_DAY_AU = 86400.0 * 299792.458 / 149597870.7
+LIGHT_DAY_KM = LIGHT_DAY_AU * 149597870.7
+
 # よく使う小惑星のエイリアス -> JPL SBDB sstr（日本語名・英名・番号）
 _ASTEROID_ALIASES = {
     "イトカワ": "25143", "itokawa": "25143", "25143": "25143",
@@ -97,12 +103,22 @@ def _horizons_position(cmd, jd):
     地図上は同一位置なので実用上問題ない。これで同一分内の再呼び出しは
     ネットワークへ出ない（実測 1.61s → 0.0Xs）。
     """
+    st = _horizons_state(cmd, jd)
+    return st["x"], st["y"], st["z"], st["rr"], st["lon"], st["lat"]
+
+
+def _horizons_state(cmd, jd):
+    """位置と速度（太陽中心・黄道 J2000。AU と AU/日）を同じ応答から取り出す。
+
+    速度は「1光日まであと何日か」の見積りに使う。VEC_TABLE=2 の応答は位置と速度を
+    同居させているので、位置だけ使う場合と HTTP は1回で済む（追加の呼び出しをしない）。
+    """
     jd_min = round(float(jd) * 1440.0) / 1440.0
-    return _horizons_position_cached(str(cmd), jd_min)
+    return _horizons_state_cached(str(cmd), jd_min)
 
 
 @ttl_cache(TTL_DAILY, maxsize=256)
-def _horizons_position_cached(cmd, jd):
+def _horizons_state_cached(cmd, jd):
     """分単位に丸めた jd をキーにした Horizons 取得（1分ごとに新キー＝自然に更新）。"""
     r = requests.get("https://ssd.jpl.nasa.gov/api/horizons.api",
                      params={"format": "text", "COMMAND": "'{}'".format(cmd), "OBJ_DATA": "'NO'",
@@ -118,7 +134,8 @@ def _horizons_position_cached(cmd, jd):
     block = txt[i + 5:j]
     AU = 1.495978707e8  # km
     import re
-    m = re.search(r"X\s*=\s*([-+0-9.Ee]+)\s+Y\s*=\s*([-+0-9.Ee]+)\s+Z\s*=\s*([-+0-9.Ee]+)", block)
+    m = re.search(r"X\s*=\s*([-+0-9.Ee]+)\s+Y\s*=\s*([-+0-9.Ee]+)\s+Z\s*=\s*([-+0-9.Ee]+)",
+                  block)
     if not m:
         raise ValueError("状態ベクトルを解析できません")
     x = float(m.group(1)) / AU
@@ -127,7 +144,46 @@ def _horizons_position_cached(cmd, jd):
     rr = math.hypot(x, y, z)
     lon = math.degrees(math.atan2(y, x)) % 360
     lat = math.degrees(math.atan2(z, math.hypot(x, y)))
-    return x, y, z, rr, lon, lat
+    # 速度は既定の単位系（KM-S）で返るので AU/日 に直す。無い応答でも位置は返す
+    vx = vy = vz = 0.0
+    mv = re.search(r"VX\s*=\s*([-+0-9.Ee]+)\s+VY\s*=\s*([-+0-9.Ee]+)\s+VZ\s*=\s*([-+0-9.Ee]+)",
+                   block)
+    if mv:
+        vx = float(mv.group(1)) * 86400.0 / AU
+        vy = float(mv.group(2)) * 86400.0 / AU
+        vz = float(mv.group(3)) * 86400.0 / AU
+    return {"x": x, "y": y, "z": z, "rr": rr, "lon": lon, "lat": lat,
+            "vx": vx, "vy": vy, "vz": vz}
+
+
+def _light_day_fields(st, jd):
+    """「1光日」までの残りと到達予測日を**数値から**作る（図と文を食い違わせない）。
+
+    - 基準は**日心距離（真距離）**。地心距離で見た1光日は地球の公転で最大 ±1 AU 変わり、
+      「1光日まで何日」の答えが変わるため、記録する単位を日心距離に固定する。
+    - 到達予測日は現在の日心視線速度による**線形外挿**（探査機は徐々に減速するので
+      数日の幅を見る）。n体解で厳密に解いた日付が必要なら JPL Horizons で追うこと。
+    """
+    rr = float(st["rr"])
+    v = math.sqrt(st["vx"] ** 2 + st["vy"] ** 2 + st["vz"] ** 2)                 # AU/日
+    vr = ((st["x"] * st["vx"] + st["y"] * st["vy"] + st["z"] * st["vz"]) / rr) if rr else 0.0
+    AU_KM = 149597870.7
+    out = {"light_days": rr / LIGHT_DAY_AU, "light_hours": rr / LIGHT_DAY_AU * 24.0,
+           "to_light_day_au": LIGHT_DAY_AU - rr,
+           "speed_km_s": v * AU_KM / 86400.0,
+           "radial_speed_km_s": vr * AU_KM / 86400.0}
+    if rr >= LIGHT_DAY_AU:
+        out["light_day_reached"] = True
+        return out
+    out["light_day_reached"] = False
+    if vr > 0:
+        eta_days = (LIGHT_DAY_AU - rr) / vr
+        out["light_day_eta_days"] = eta_days
+        out["light_day_eta_date"] = _jd_date(jd + eta_days)
+        out["light_day_eta_method"] = (
+            "現在の日心視線速度 {:.2f} km/s による線形外挿（日心距離が1光日に達する日）"
+            .format(out["radial_speed_km_s"]))
+    return out
 
 
 # 彗星 (日本語名/英名/記号 -> (種別, 取得ID))
@@ -509,10 +565,12 @@ def _compute(when_iso=None, asteroids=None, probes=None, comets=None, route=Fals
             continue
         cmd, col = hit
         try:
-            x, y, z, rr, lon, lat = _horizons_position(cmd, jd)
-            prbs[name] = {"name": name, "cmd": cmd, "color": col,
-                          "au": rr, "proj_au": math.hypot(x, y),   # 黄道面正射影距離
-                          "eclLon": lon, "eclLat": lat}
+            st = _horizons_state(cmd, jd)
+            rec = {"name": name, "cmd": cmd, "color": col,
+                   "au": st["rr"], "proj_au": math.hypot(st["x"], st["y"]),  # 黄道面正射影距離
+                   "eclLon": st["lon"], "eclLat": st["lat"]}
+            rec.update(_light_day_fields(st, jd))    # 1光日までの残り・到達予測（日心距離）
+            prbs[name] = rec
         except Exception as ex:
             prbs[name] = {"name": name, "cmd": cmd, "color": col, "error": str(ex)[:120]}
 
@@ -708,6 +766,11 @@ def _render_simple(scene):
     for pr in scene["probes"].values():
         if not pr.get("error") and pr["proj_au"] > 0:
             hi = max(hi, pr["proj_au"] * 1.15)
+    # 探査機を描く図では「1光日」リング（真距離 173.1446 AU）も枠に入るように広げる。
+    # 広げないとリングが枠外になり、1光日の位置を示せない（実測: ボイジャー1号の投影は
+    # 140.5 AU なので 161.6 AU までしか広がらず、173.14 AU のリングが描けなかった）。
+    if any(not pr.get("error") for pr in scene["probes"].values()):
+        hi = max(hi, LIGHT_DAY_AU * 1.02)
     for co in scene["comets"].values():
         if not co.get("error") and co["proj_au"] > 0:
             hi = max(hi, co["proj_au"] * 1.15)
@@ -770,6 +833,63 @@ def _render_simple(scene):
         r = scale(sma)
         dr.ellipse([CX - r, CY - r, CX + r, CY + r], outline=(110, 120, 170), width=1)
 
+    # 「1光日」の目安リング（真距離 173.1446 AU = 25,902,068,371 km）。表示範囲に入って
+    # いるときだけ描き、外なら理由を figure.notes に数値付きで出す（黙って消さない）。
+    _ld_color = (255, 150, 160)
+    ld_draw = {"au": LIGHT_DAY_AU, "km": LIGHT_DAY_KM, "color": list(_ld_color),
+               "drawn": False, "why": "", "dash_samples": [], "proj": None,
+               "label_box": None, "proj_label_box": None, "mark_px": None}
+    _occ_rects = []                                   # 既に描いたラベル箱（後のラベルが避ける）
+    _occ_pts = [(float(CX), float(CY), float(sr) * 1.4)]   # 太陽の描画円盤
+
+    def _ring(radius_px, color, width=2, step=4, on=2, phase=0):
+        """PIL に破線円が無いので、円弧を分割して1本おきに描く（代表点も残す）。"""
+        pts = []
+        if radius_px <= 1.0:
+            return pts
+        for segment in range(0, 360, step):
+            if (segment // step) % 2:
+                continue
+            a_ = segment + phase
+            t1, t2 = math.radians(a_), math.radians(a_ + on)
+            p1 = (CX + radius_px * math.cos(t1), CY + radius_px * math.sin(t1))
+            p2 = (CX + radius_px * math.cos(t2), CY + radius_px * math.sin(t2))
+            dr.line([p1[0], p1[1], p2[0], p2[1]], fill=color, width=width)
+            pts.append([round((p1[0] + p2[0]) / 2.0), round((p1[1] + p2[1]) / 2.0)])
+        return pts
+
+    if visible(LIGHT_DAY_AU):
+        ld_draw["drawn"] = True
+        ld_draw["r_px"] = scale(LIGHT_DAY_AU)
+        ld_draw["dash_samples"] = _ring(ld_draw["r_px"], _ld_color)
+    else:
+        ld_draw["why"] = "表示範囲 {:.2f}–{:g} AU の外".format(lo, hi)
+
+    # 1光日に達していない探査機があるときは、その探査機の**黄道面投影**での1光日リングも
+    # 描く（俯瞰図は正射影なので、真距離のリング上に位置を置くと図と数値が食い違う）。
+    projections = []
+    for _idx, (_n0, _d0) in enumerate(scene["probes"].items()):
+        if _d0.get("error") or _d0.get("light_days") is None or _d0.get("light_day_reached"):
+            continue
+        _pj_au = LIGHT_DAY_AU * math.cos(math.radians(float(_d0.get("eclLat") or 0.0)))
+        if not visible(_pj_au):
+            continue
+        _r_pj = scale(_pj_au)
+        _th0 = math.radians(float(_d0.get("eclLon") or 0.0))
+        pj = {"name": _n0, "eclLat": float(_d0.get("eclLat") or 0.0),
+              "eclLon": float(_d0.get("eclLon") or 0.0), "au": _pj_au,
+              "color": list(_d0.get("color") or (255, 214, 90)),
+              "eta": _d0.get("light_day_eta_date"),
+              "eta_method": _d0.get("light_day_eta_method"), "r_px": _r_pj,
+              "probe_marker_px": [round(CX + scale(float(_d0["proj_au"])) * math.cos(_th0)),
+                                  round(CY + scale(float(_d0["proj_au"])) * math.sin(_th0))]}
+        pj["dash_samples"] = _ring(_r_pj, tuple(pj["color"]), phase=2 * (_idx + 1))
+        projections.append(pj)
+        if ld_draw["proj"] is None:
+            ld_draw["proj"] = pj
+    ld_draw["projections"] = projections
+    scene["light_day_draw"] = ld_draw
+
     rlo, rhi = (None, None) if (rng_au and not (visible(2.0) and visible(3.4))) else (scale(2.0), scale(3.4))
     if rlo is not None:
         for a in range(0, 360, 4):
@@ -826,6 +946,8 @@ def _render_simple(scene):
         ly = max(10, min(py + oy - 15, H - 40))
         dr = ImageDraw.Draw(img)
         dr.rectangle([lx, ly, lx + 178, ly + 30], fill=(8, 10, 22))
+        _occ_rects.append((lx, ly, lx + 178, ly + 30))
+        _occ_pts.append((px, py, rad + 10))
         dr.text((lx + 4, ly + 2), "{} {:.2f}AU".format(jname, au), font=load_font(17, True),
                 fill=(255, 255, 255))
     # マーカーを描き直して、どのラベル箱よりも上に置く（データを隠さない）
@@ -859,6 +981,8 @@ def _render_simple(scene):
         if lx + 240 > W:
             lx = px - rad - 250
         dr.rectangle([lx, ly, lx + 240, ly + 30], fill=(10, 40, 18, 235))
+        _occ_rects.append((lx, ly, lx + 240, ly + 30))
+        _occ_pts.append((px, py, rad + 10))
         dr.text((lx + 4, ly + 2), "{} {:.2f}AU".format(d["name"], d["au"]), font=load_font(17, True),
                 fill=(200, 255, 215))
 
@@ -882,15 +1006,30 @@ def _render_simple(scene):
         dr = ImageDraw.Draw(img)
         dr.polygon([(px, py - rad), (px + rad, py), (px, py + rad), (px - rad, py)],
                    fill=col, outline=(255, 255, 255))
+        _ld_extra = ""
+        if d.get("light_days") is not None:
+            if d.get("light_day_reached"):
+                _ld_extra = "1光日 到達済み（{:.4f} 光日）".format(float(d["light_days"]))
+            elif d.get("light_day_eta_date"):
+                _ld_extra = "1光日(173.14AU)まで {:.2f}AU・到達予測 {}（線形外挿）".format(
+                    float(d["to_light_day_au"]), d["light_day_eta_date"])
+            else:
+                _ld_extra = "1光日(173.14AU)まで {:.2f}AU".format(float(d["to_light_day_au"]))
+        _bh = 60 if _ld_extra else 42
         lx, ly = px + rad + 12, py - 16
         if lx + 300 > W:
             lx = px - rad - 310
-        lx = max(lx, 4)
-        dr.rectangle([lx, ly, lx + 300, ly + 42], fill=(40, 20, 0, 235))
-        dr.text((lx + 6, ly + 3), "{}  {:.0f}AU".format(d["name"], d["au"]), font=load_font(16, True),
+        lx = max(lx, 4); ly = max(112, min(ly, H - 62 - _bh))
+        dr.rectangle([lx, ly, lx + 300, ly + _bh], fill=(40, 20, 0, 235))
+        _occ_rects.append((lx, ly, lx + 300, ly + _bh))
+        _occ_pts.append((px, py, rad + 12))
+        dr.text((lx + 6, ly + 3), "{}  {:.0f}AU（{:.4f} 光日）".format(
+            d["name"], d["au"], float(d.get("light_days") or 0.0)), font=load_font(16, True),
                 fill=(255, 255, 255, 255))
         dr.text((lx + 6, ly + 22), "黄緯 {:.0f}°（黄道面投影 {:.0f}AU）".format(d["eclLat"], d["proj_au"]),
                 font=load_font(13), fill=(255, 235, 190, 255))
+        if _ld_extra:
+            dr.text((lx + 6, ly + 41), _ld_extra, font=load_font(13), fill=(255, 200, 200, 255))
 
     # 彗星（シアン色の輝く核 + 太陽と反対方向に伸びる尾, 正射影位置に描画）
     for name, d in scene["comets"].items():
@@ -938,6 +1077,8 @@ def _render_simple(scene):
             lx = px - rad - 330
         lx = max(lx, 4)
         dr.rectangle([lx, ly, lx + 320, ly + 42], fill=(0, 30, 45, 235))
+        _occ_rects.append((lx, ly, lx + 320, ly + 42))
+        _occ_pts.append((px, py, rad + 12))
         dr.text((lx + 6, ly + 3), "☄ {}  {:.1f}AU".format(d["name"], d["au"]), font=load_font(16, True),
                 fill=(255, 255, 255, 255))
         dr.text((lx + 6, ly + 22), "黄緯 {:.0f}°（黄道面投影 {:.0f}AU）".format(d["eclLat"], d["proj_au"]),
@@ -1024,6 +1165,70 @@ def _render_simple(scene):
         dr.polygon([(mx, my - 6), (mx + 6, my), (mx, my + 6), (mx - 6, my)],
                    fill=(10, 14, 24), outline=rcol_, width=2)
 
+    # ---- 1光日のラベル。他のラベルを描いた後に、既存の箱・マーカーから最も遠い角度へ置く
+    # （重ねると図と数値が食い違う。太陽・タイトル帯・下部の帯も避ける）。
+    def _place_rect(w, h, r_px, prefer=None, avoid=()):
+        """リングの外側に置くラベル箱の位置を、占有領域との重なりが最小の角度で選ぶ。"""
+        best, best_pen = None, None
+        order = ([float(prefer)] if prefer is not None else []) + list(range(0, 360, 6))
+        for a_ in order:
+            th = math.radians(a_)
+            cxx = CX + (r_px + 18 + h / 2.0) * math.cos(th)
+            cyy = CY + (r_px + 18 + h / 2.0) * math.sin(th)
+            x0 = min(max(6, cxx - w / 2.0), W - w - 6)
+            y0 = min(max(112, cyy - h / 2.0), H - 62 - h)
+            pen = 0.0
+            for (ox0, oy0, ox1, oy1) in list(avoid) + _occ_rects:
+                _ox = min(x0 + w, ox1) - max(x0, ox0)
+                _oy = min(y0 + h, oy1) - max(y0, oy0)
+                if _ox > 0 and _oy > 0:
+                    pen += _ox * _oy
+            for (mx, my, mr) in _occ_pts:
+                if (x0 - mr) <= mx <= (x0 + w + mr) and (y0 - mr) <= my <= (y0 + h + mr):
+                    pen += 500.0 * mr
+            if best is None or pen < best_pen - 1e-9:
+                best, best_pen = (x0, y0, x0 + w, y0 + h), pen
+        return best
+
+    if ld_draw.get("drawn"):
+        _pref = 180.0
+        if ld_draw.get("projections"):
+            _pref = (float(ld_draw["projections"][0]["eclLon"]) + 180.0) % 360.0    # 探査機の反対側を優先
+        _b = _place_rect(520, 34, ld_draw["r_px"], prefer=_pref)
+        dr.rectangle(list(_b), fill=(46, 12, 22, 240))
+        dr.text((_b[0] + 8, _b[1] + 6),
+                "1光日 {:.2f} AU（{:,.0f} km・太陽光の所要 24 時間）".format(LIGHT_DAY_AU, LIGHT_DAY_KM),
+                font=load_font(16, True), fill=(255, 190, 200))
+        ld_draw["label_box"] = [int(v) for v in _b]
+    _projs = ld_draw.get("projections") or ([ld_draw["proj"]] if ld_draw.get("proj") else [])
+    # ラベルがどの探査機の未来方向マーカーも隠さないよう、全座標を配置前に登録する。
+    for pj in _projs:
+        _th = math.radians(pj["eclLon"])
+        _occ_pts.append((CX + pj["r_px"] * math.cos(_th),
+                         CY + pj["r_px"] * math.sin(_th), 12.0))
+    for pj in _projs:
+        _col = tuple(pj["color"])
+        _th = math.radians(pj["eclLon"])
+        _mx = CX + pj["r_px"] * math.cos(_th); _my = CY + pj["r_px"] * math.sin(_th)
+        _l1 = "1光日（{}の黄道面投影 {:.1f} AU）・◇=到達時の方向".format(pj["name"], pj["au"])
+        _l2 = "黄経 {:.1f}°／黄緯 {:.1f}°{}".format(
+            pj["eclLon"], pj["eclLat"], "・到達予測 {}".format(pj["eta"]) if pj.get("eta") else "")
+        _b2 = _place_rect(560, 54, max(pj["r_px"], float(ld_draw.get("r_px") or 0.0)),
+                          prefer=(pj["eclLon"] + 120.0) % 360.0,
+                          avoid=([tuple(ld_draw["label_box"])] if ld_draw.get("label_box") else ()))
+        dr.rectangle(list(_b2), fill=(24, 16, 44, 240))
+        dr.polygon([(_mx, _my - 9), (_mx + 9, _my), (_mx, _my + 9), (_mx - 9, _my)],
+                   fill=(10, 14, 24), outline=_col, width=2)
+        dr.text((_b2[0] + 8, _b2[1] + 5), _l1, font=load_font(15, True), fill=(226, 214, 255))
+        dr.text((_b2[0] + 8, _b2[1] + 28), _l2, font=load_font(15, True), fill=(226, 214, 255))
+        pj["label_box"] = [int(v) for v in _b2]
+        pj["mark_px"] = [round(_mx), round(_my)]
+        _occ_rects.append(tuple(_b2))
+    if _projs:
+        ld_draw["proj_label_box"] = _projs[0].get("label_box")
+        ld_draw["mark_px"] = _projs[0].get("mark_px")
+    scene["light_day_draw"] = ld_draw
+
     dr.rectangle([0, 0, W, 104], fill=(0, 0, 0, 230))
     title = "太陽系・現在の惑星位置（太陽を中心とした俯瞰図）"
     parts = []
@@ -1055,6 +1260,8 @@ def _render_simple(scene):
         leg += "  ◆ 探査機（遠方・星間空間）"
     if (scene.get("route_draw") or {}):
         leg += "  ┈┈彗星の通過経路（対数縮尺・正射影）"
+    if (scene.get("light_day_draw") or {}).get("drawn"):
+        leg += "  ⭘破線円=1光日 {:.2f}AU".format(LIGHT_DAY_AU)
     if rng_au:
         leg += "   表示範囲 {:.2f}–{:g} AU（範囲外の天体は描いていない）".format(lo, hi)
     leg += "   ✦帯 小惑星帯(2.0–3.4AU目安)  ☀太陽"
@@ -1426,6 +1633,115 @@ def _verify_range_draw(png, scene):
 
 
 # ---------- 彗星の軌道面ビュー（figure 注記つき） ----------
+def _verify_light_day_draw(png, scene):
+    """1光日リング（破線円）と◇（到達時の方向）が実際に画素として在るかを測る自己検証。
+
+    「描いたつもり」を許さないための検査。リングの破線はラベル箱に部分的に隠れ得るので
+    過半数の代表点で判定し、探査機のマーカーは◇や箱に覆われていないこと（画素が残って
+    いること）を別に見る。1光日を描いていない図では None を返す（検証対象外）。
+    """
+    ld = scene.get("light_day_draw") or {}
+    projections = ld.get("projections") or ([ld["proj"]] if ld.get("proj") else [])
+    if not ld.get("drawn") and not projections:
+        return None
+    rep = {"ok": True, "method": "light_day_ring_pixels", "au": ld.get("au"), "km": ld.get("km"),
+           "rings": [], "missing": []}
+    px = None
+    try:
+        from PIL import Image
+        im = Image.open(io.BytesIO(png)).convert("RGB")
+        px = im.load()
+        W, H = im.size
+    except Exception:
+        px = None
+    if px is None:
+        rep["ok"] = False
+        rep["missing"].append("画像を開けず画素を測れない")
+        return rep
+
+    def _near(c, target, tol=48):
+        return all(abs(int(a) - int(b)) <= tol for a, b in zip(c[:3], target[:3]))
+
+    def _hits(samples, target, skip_lon=None):
+        """代表点の周囲 7x7 px に目標色があるかを数える（skip_lon は◇・マーカー周辺を除く）。"""
+        hit, checked = 0, 0
+        for sx, sy in samples:
+            if skip_lon is not None:
+                ang = math.degrees(math.atan2(sy - H / 2.0, sx - W / 2.0)) % 360.0
+                if abs((ang - float(skip_lon) + 180.0) % 360.0 - 180.0) < 22.0:
+                    continue
+            checked += 1
+            found = False
+            for yy in range(max(0, sy - 3), min(H, sy + 4)):
+                for xx in range(max(0, sx - 3), min(W, sx + 4)):
+                    if _near(px[xx, yy], target):
+                        found = True
+                        break
+                if found:
+                    break
+            hit += 1 if found else 0
+        return hit, checked
+
+    def _count(box, target, tol=60):
+        """ラベル箱の中の文字画素を数える（箱だけ描けて文字が無い、を許さない）。"""
+        n = 0
+        for yy in range(max(0, int(box[1])), min(H, int(box[3]))):
+            for xx in range(max(0, int(box[0])), min(W, int(box[2]))):
+                if _near(px[xx, yy], target, tol):
+                    n += 1
+        return n
+
+    if ld.get("drawn"):
+        hit, checked = _hits(ld.get("dash_samples") or [], tuple(ld.get("color") or (255, 150, 160)))
+        row = {"kind": "true_distance", "au": ld.get("au"), "r_px": round(float(ld.get("r_px") or 0.0), 1),
+               "dash_hits": hit, "dash_checked": checked,
+               "label_box": ld.get("label_box"), "ok": bool(checked and hit >= 0.6 * checked)}
+        if not row["ok"]:
+            rep["ok"] = False
+            rep["missing"].append("1光日リングの破線が画素で見つからない（{}/{}）".format(hit, checked))
+        row["label_text_px"] = _count(ld["label_box"], (255, 190, 200)) if ld.get("label_box") else 0
+        if row["label_text_px"] < 600:
+            row["ok"] = False
+            rep["ok"] = False
+            rep["missing"].append("1光日のラベル文字が画素で見つからない（{} px）"
+                                  .format(row["label_text_px"]))
+        rep["rings"].append(row)
+    for pj in projections:
+        hit, checked = _hits(pj.get("dash_samples") or [], tuple(pj.get("color") or (255, 214, 90)),
+                             skip_lon=pj.get("eclLon"))
+        label_box = pj.get("label_box") or ld.get("proj_label_box")
+        row = {"kind": "probe_projection", "name": pj.get("name"), "au": pj.get("au"),
+               "r_px": round(float(pj.get("r_px") or 0.0), 1), "dash_hits": hit,
+               "dash_checked": checked, "mark_px": pj.get("mark_px") or ld.get("mark_px"),
+               "label_box": label_box,
+               "ok": bool(checked and hit >= 0.5 * checked)}
+        if not row["ok"]:
+            rep["ok"] = False
+            rep["missing"].append("{} の投影1光日リングの破線が画素で見つからない（{}/{}）".format(
+                pj.get("name"), hit, checked))
+        row["label_text_px"] = _count(label_box, (226, 214, 255)) if label_box else 0
+        if row["label_text_px"] < 600:
+            row["ok"] = False
+            rep["ok"] = False
+            rep["missing"].append("{} の投影1光日ラベル文字が画素で見つからない（{} px）".format(
+                pj.get("name"), row["label_text_px"]))
+        mpx = pj.get("probe_marker_px")
+        if mpx:
+            found = 0
+            for yy in range(max(0, int(mpx[1]) - 18), min(H, int(mpx[1]) + 19)):
+                for xx in range(max(0, int(mpx[0]) - 18), min(W, int(mpx[0]) + 19)):
+                    if _near(px[xx, yy], tuple(pj.get("color") or (255, 214, 90))):
+                        found += 1
+            row["probe_marker_px"] = int(found)
+            if found < 60:
+                row["ok"] = False
+                rep["ok"] = False
+                rep["missing"].append("{} の探査機マーカー画素が足りない（{} px）".format(
+                    pj.get("name"), found))
+        rep["rings"].append(row)
+    return rep
+
+
 _COMET_ORBIT_COLOR = symbol_rgb("comet_orbit")   # 軌道線の色（verify_curve がこの色を画素から測る）
 
 
@@ -2112,6 +2428,17 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
       - "simple"(既定):   Pillow による視認性重視の合成。惑星を色アイコン、小惑星を緑十字、
         探査機を色付き菱形、彗星をシアンの核＋尾で強調。距離は対数縮尺。
       - "accurate":       matplotlib による線形距離の正確な俯瞰図（近距離のみ）。
+    **「1光日」（光が24時間で進む距離＝173.1446 AU＝25,902,068,371 km）を図に重ねる**:
+    真距離の目安として破線の1光日リングを描き、1光日に達していない探査機を指定したときは
+    それぞれの探査機について**黄道面投影**での1光日リングと、到達時の方向（◇＝黄経/黄緯）・到達予測日を
+    出す。全リングは structuredContent.light_day.projected_rings と figure.verify.light_day.rings に列挙する。
+    俯瞰図は正射影なので真距離の円と投影の円は別物で、その旨は figure.notes に
+    数値付きで入る（重ねて読むと誤る）。structuredContent.probes[] に light_days（何光日）・
+    light_hours（光の所要時間）・to_light_day_au（1光日までの残り）・light_day_eta_date /
+    light_day_eta_method（到達予測＝現在の日心視線速度による線形外挿・数日の幅あり）が入る。
+    **距離の基準は日心距離（真距離）で統一**している（地心距離での1光日は地球の公転で
+    最大 ±1 AU 変わり日付が異なる）。
+
     画像は content に base64 インライン表示、座標は structuredContent に JSON。
     structuredContent.figure には「この図をどう描いたか」の注記（figure/1）が入る。
     ⚠️ figure.notes は図の誤読を防ぐための注記なので、要約・言い換えせずそのまま引用すること。
@@ -2121,7 +2448,9 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
         asteroid: 小惑星（例 "イトカワ"/"itokawa"/"25143", "ベンヌ", "アポフィス"）。
         asteroid2: 2つ目の小惑星。
         probe: 遠方探査機（例 "ボイジャー1号"/"voyager1"/"パイオニア10号"/"はやぶさ2"/
-            "hayabusa2"）。はやぶさ2 は JPL Horizons ID -37。
+            "hayabusa2"）。1光日に達していない探査機では、投影での1光日リング・到達時の
+            方向（◇）・到達予測日も図と structuredContent に出る。
+            はやぶさ2 は JPL Horizons ID -37。
         probe2: 2つ目の探査機。
         comet: 彗星（例 "ハレー彗星"/"halley"/"1P", "エンケ彗星", "67P",
              "紫金山・アトラス"/"C/2023 A3", "ラブジョイ"/"C/2014 Q2"）。
@@ -2306,9 +2635,20 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
         for n, d in scene["probes"].items():
             if d.get("error"):
                 lines.append("- {}: 取得エラー（{}）".format(n, d["error"]))
-            else:
-                lines.append("- {}: 真距離 {:.1f}AU・黄緯 {:.1f}°（黄道面投影 {:.1f}AU）".format(
-                    n, d["au"], d["eclLat"], d["proj_au"]))
+                continue
+            _lds = ""
+            if d.get("light_days") is not None:
+                _lds = "・{:.4f} 光日（光の所要 {:.1f} 時間）".format(
+                    float(d["light_days"]), float(d.get("light_hours") or 0.0))
+                if d.get("light_day_reached"):
+                    _lds += "・1光日 到達済み"
+                elif d.get("light_day_eta_date"):
+                    _lds += "・1光日（173.14AU）まで {:.2f}AU（到達予測 {}／線形外挿）".format(
+                        float(d["to_light_day_au"]), d["light_day_eta_date"])
+                else:
+                    _lds += "・1光日（173.14AU）まで {:.2f}AU".format(float(d["to_light_day_au"]))
+            lines.append("- {}: 真距離 {:.1f}AU{}・黄緯 {:.1f}°（黄道面投影 {:.1f}AU）".format(
+                n, d["au"], _lds, d["eclLat"], d["proj_au"]))
     if scene["comets"]:
         lines.append("**彗星位置**（周期=SBDB / C/=Horizons 状態ベクトル）:")
         for n, d in scene["comets"].items():
@@ -2433,6 +2773,16 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
         verify_out["method"] = "range_au_pixels+overview_route_marks" if route_verify             else "range_au_pixels"
     else:
         verify_out = route_verify
+    # 1光日リング／◇（到達時の方向）の画素検証。描いた図では figure.verify に必ず残す
+    # （「描いたつもり」を許さない。リングがラベルに隠れていれば ok が偽になる）。
+    _ldv = _verify_light_day_draw(png, scene)
+    if _ldv:
+        if verify_out:
+            verify_out["light_day"] = _ldv
+            verify_out["ok"] = bool(verify_out.get("ok")) and bool(_ldv.get("ok"))
+            verify_out["method"] = "{}+light_day_ring".format(verify_out.get("method") or "pixels")
+        else:
+            verify_out = {"ok": bool(_ldv.get("ok")), "method": "light_day_ring", "light_day": _ldv}
     why_txt = ("太陽を図の中心に置く俯瞰図のため、楕円軌道の焦点は主天体ではなく、"
                "各天体の軌道の形そのものは描いていない")
     rng_rep = scene.get("range_report") or {}
@@ -2474,6 +2824,50 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
                     for rt in (scene.get("routes") or {}).values()] or [0.0])
         if rmax > hi_r:
             rng_notes.append("経路は最大{:g} AU まで伸びるが、表示範囲{:g} AU の外は描いていない".format(rmax, hi_r))
+    # 「1光日」の注記（数値から生成する。真距離の円と投影の円は別物であることを明示）
+    ldd = scene.get("light_day_draw") or {}
+    ld_notes = []
+    if ldd.get("drawn"):
+        ld_notes.append(
+            "1光日リング（破線円）＝太陽から {:.4f} AU＝{:,} km（光が24時間で進む距離＝真距離）。"
+            "探査機のマーカーは黄道面への正射影なので、円とマーカーの見た目の重なりで距離を"
+            "読まず、structuredContent の au を使うこと".format(float(ldd["au"]), int(round(ldd["km"]))))
+    elif ldd:
+        ld_notes.append("1光日（{:.4f} AU）は{}にあるため、この図には描いていない".format(
+            float(ldd["au"]), ldd.get("why") or "表示範囲の外"))
+    _ld_projections = ldd.get("projections") or ([ldd["proj"]] if ldd.get("proj") else [])
+    for pj in _ld_projections:
+        ld_notes.append(
+            "◇ は {} の1光日到達時の方向（黄経 {:.1f}°／黄緯 {:.1f}°・現在の黄経で描いている。"
+            "到達までの間に方向はほとんど変わらない）。この方向では正射影の半径が "
+            "{:.4f} AU×cos({:.1f}°)＝{:.1f} AU になるため、投影での1光日リングは真距離の円"
+            "（{:.2f} AU）と別の円として描いている（重ねて読むと誤る）".format(
+                pj["name"], pj["eclLon"], pj["eclLat"], float(ldd["au"]), pj["eclLat"], pj["au"],
+                float(ldd["au"])))
+        _dr = abs(float(ldd.get("r_px") or 0.0) - float(pj.get("r_px") or 0.0))
+        if _dr < 8.0:
+            ld_notes.append(
+                "{} の黄緯 {:.1f}° では真距離の1光日（{:.2f} AU）と投影の1光日（{:.1f} AU）が"
+                "図上でほぼ重なる（円の半径の差 {:.1f} px）。2本の円は見分けられないので、"
+                "どちらの距離かは上の数値で区別すること".format(
+                    pj["name"], pj["eclLat"], float(ldd["au"]), pj["au"], _dr))
+        if pj.get("eta"):
+            ld_notes.append(
+                "{} の到達予測 {} は {}。探査機は徐々に減速するので数日の幅で見ること。"
+                "地心距離（地球から）での1光日は地球の公転で最大 ±1 AU 変わるため日付が異なる"
+                "（この図の数値は日心距離で統一している）".format(
+                    pj["name"], pj["eta"], pj.get("eta_method") or "線形外挿"))
+        else:
+            ld_notes.append(
+                "{} の1光日到達日は視線速度から算出できないため、到達予測を表示していない".format(
+                    pj["name"]))
+    for _n1, _d1 in (scene.get("probes") or {}).items():
+        if not _d1.get("error") and _d1.get("light_day_reached"):
+            ld_notes.append("{} は1光日（{:.4f} AU）に到達済み（現在 {:.4f} 光日）".format(
+                _n1, float(ldd.get("au") or LIGHT_DAY_AU), float(_d1.get("light_days") or 0.0)))
+    if eng != "simple":
+        ld_notes.append("線形縮尺（accurate）の図には1光日リングを描いていない"
+                        "（1光日は対数縮尺の simple 版でのみ描く）")
     if scene.get("routes"):
         why_txt = ("太陽を図の中心に置く俯瞰図のため、楕円軌道の焦点は主天体ではない"
                    "（惑星の軌道の形は描かず、指定された彗星の通過経路だけを破線で重ねている）")
@@ -2498,7 +2892,7 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
              "（structuredContent.planet_errors を参照）"
              if scene.get("planet_errors") else ""),
             "彗星の尾は反太陽方向に描いており、進行方向ではない",
-        ] + rng_notes + route_notes),
+        ] + rng_notes + route_notes + ld_notes),
         caption="太陽を中心とした日心俯瞰図。数値は structuredContent の各値を参照。"
                 + ("破線＝彗星の通過経路。" if scene.get("routes") else ""),
         verify=verify_out,
@@ -2513,6 +2907,17 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
                            "planet_errors": scene.get("planet_errors", []),
                            "asteroids": scene["asteroids"],
                            "probes": scene["probes"], "comets": scene["comets"],
+                           "light_day": {"au": LIGHT_DAY_AU, "km": LIGHT_DAY_KM,
+                                         "ring_drawn": bool(ldd.get("drawn")),
+                                         "ring_why": ldd.get("why") or None,
+                                         "ring_au_for_probe": (ldd.get("proj") or {}).get("au"),
+                                         "ring_probe": (ldd.get("proj") or {}).get("name"),
+                                         "projected_rings": [{"name": pj.get("name"), "au": pj.get("au"),
+                                                                 "eclLon": pj.get("eclLon"), "eclLat": pj.get("eclLat"),
+                                                                 "eta": pj.get("eta")} for pj in _ld_projections],
+                                         "note": "1光日＝光が24時間で進む距離。距離は日心距離（真距離）"
+                                                 "で統一。探査機ごとの light_days / light_day_eta_date は"
+                                                 " structuredContent.probes を参照"},
                            "figure": fig, "image_path": out_path,
                            "range_au": (scene.get("range_au") or None),
                            "range_resolved": rng_why,

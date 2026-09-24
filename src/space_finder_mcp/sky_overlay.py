@@ -21,7 +21,7 @@ import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import disk_get
-from .celestrak import fetch_tle
+from .celestrak import CELESTRAK_SOURCE, fetch_tle_ex
 from .img_common import (RENDER_LOCK, apply_matplotlib_cjk_font, as_image, body_rgb,
                          encode_jpeg, figure_notes, figure_payload, figure_text_block,
                          load_font, media_link_line, pixel_near, primary_spec, rgb_hex,
@@ -91,12 +91,26 @@ def _load():
 
 
 def _fetch_tle(catnr):
-    """CelesTrak から TLE 2行 (line1, line2) を取得（失敗時は None）。"""
+    """TLE 2行 (line1, line2) と出典を取得（失敗時は (None, "")）。
+
+    CelesTrak が遮断中なら代替源から取るので、出典を一緒に返して図の出典表示に反映する
+    （代替源の TLE を「CelesTrak の TLE」と書かないため）。
+    """
     try:
-        tle = fetch_tle(norad_id=catnr)
+        tle, source = fetch_tle_ex(norad_id=catnr)
     except requests.RequestException:
-        return None
-    return (tle[1], tle[2]) if tle else None
+        return (None, "")
+    return ((tle[1], tle[2]), source) if tle else (None, "")
+
+
+def _tle_source_summary(sources: dict) -> str:
+    """実際に位置計算へ使ったTLEの出典を、取得失敗や混在を偽らずに示す。"""
+    hosts = sorted({value for value in sources.values() if value})
+    if not hosts:
+        return "TLE未取得"
+    if hosts == [CELESTRAK_SOURCE]:
+        return "CelesTrak TLE"
+    return "TLE出典: {}".format("、".join(hosts))
 
 
 def _resolve_place(place, lat, lon):
@@ -179,11 +193,13 @@ def _compute(lat, lon, when_iso=None):
 
     sats = {}
     sat_errors = {}
+    tle_sources = {}
     for nm, catnr, kind in _SAT_CATALOG:
         try:
-            tle = _fetch_tle(catnr)
+            tle, tle_source = _fetch_tle(catnr)
             if not tle:
                 continue
+            tle_sources[nm] = tle_source
             sat = EarthSatellite(*tle)
 
             def _sat_aa(tt):
@@ -210,7 +226,7 @@ def _compute(lat, lon, when_iso=None):
 
     return {"time_utc": tstr, "lat": lat, "lon": lon, "planets": planets,
             "stars": stars, "satellites": sats, "satellite_errors": sat_errors,
-            "body_errors": body_errors}
+            "body_errors": body_errors, "tle_sources": tle_sources}
 
 
 # ---------- 色・記号の指定（両エンジン共通の単一の出典） ----------
@@ -552,6 +568,7 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
     if eng == "auto" or eng not in ("accurate", "simple"):
         eng = "simple"  # 既定は視認性重視の Pillow 版
     scene = _compute(ll[0], ll[1], when)
+    tle_sources = scene.get("tle_sources") or {}      # TLE の出典（CelesTrak / 代替源）
     use_acc = eng == "accurate"
     import base64
     try:
@@ -637,7 +654,7 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
     lines.append("")
     lines.append(figure_text_block(fig))
     lines.append("画像は上に表示（base64 " + ("PNG" if mime == "image/png" else "JPEG") +
-                 "）。出典: JPL de421 + Skyfield / CelesTrak TLE + SGP4")
+                 "）。出典: JPL de421 + Skyfield / " + _tle_source_summary(tle_sources) + " + SGP4")
     return CallToolResult(
         content=[TextContent(type="text", text="\n".join(lines)), img],
         structuredContent={"time_utc": scene["time_utc"], "lat": ll[0], "lon": ll[1],
@@ -646,5 +663,6 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
                            "satellite_errors": scene.get("satellite_errors") or {},
                            "body_errors": scene.get("body_errors") or {},
                            "figure": fig, "image_path": out_path,
-                           "source": "JPL de421+Skyfield / CelesTrak+SGP4"},
+                           "tle_sources": tle_sources,
+                           "source": "JPL de421+Skyfield / " + _tle_source_summary(tle_sources) + "+SGP4"},
     )

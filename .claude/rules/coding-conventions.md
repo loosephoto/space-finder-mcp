@@ -50,6 +50,9 @@ moon_phase_map / astronomy_weather〔雨雲・降水画像を返すとき〕 / s
 - 注記(`notes`)は `figure_notes` などで**数値から生成**する。手書きにすると図と注記がドリフトする。
 - `content` にも `figure_text_block()` で同じ注記を出し、docstring に
   「`figure.notes` は要約・言い換えせず、そのまま引用すること」と書く（LLM 向けの指示）。
+- **LLM 向けの指示文を `content` に書かない**。`content` は人間が読むチャネルなので、
+  指示は docstring と `figure.notes_usage`（structuredContent 側）に置く（`figure_text_block()` の
+  見出しは `### ⚠️ 図の注記` のみ。指示文を混ぜると人間に意味不明な文が表示される）。
 - 図の自己検証(`verify`)を入れる: 描いた画素から近点/遠点距離を逆算して a(1±e) と照合
   （`verify_curve`）、ラベル矩形に曲線色が混入していないこと（文字と線の重なり）も見る。
 - 地図の上に置く**情報パネルは `surface_map.panel_placement()` で現在位置マーカーを隠さない隅へ**置く（描いた後にパネルを重ねると暗幕でマーカーが消える。実測: 月面 LRO で `marker_pixels: 0`）。`verify` に `panel_overlaps_marker` を残す。

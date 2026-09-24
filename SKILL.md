@@ -21,7 +21,7 @@ category: space
 ## 対応データソース
 
 - 宇宙機関: NASA（APOD/NEO/DONKI/POWER/Image&Video Library）、ESA Copernicus、JAXA Earth、ISRO、CSA、INPE、UK EO DataHub、CNES、CNSA（NSMC/CNSA-GEO/CRESDA）、EO Dashboard（NASA×ESA×JAXA）
-- 天文・軌道: JPL（DE421暦/SBDB/Horizons）、JPL CNEOS（火球・小惑星接近・Sentry 衝突リスク / ssd-api.jpl.nasa.gov）、CelesTrak（NORAD TLE）、WMO OSCAR、ESO ASM、ALMA Science Archive、CADC、TART、Wikidata（SPARQL）、Open-Meteo、NASA MMGIS / NASA Trek（天体地図）
+- 天文・軌道: JPL（DE421暦/SBDB/Horizons）、JPL CNEOS（火球・小惑星接近・Sentry 衝突リスク / ssd-api.jpl.nasa.gov）、CelesTrak（NORAD TLE。遮断時は公開ミラー tle.ivanstanojevic.me / db.satnogs.org へ自動フォールバック）、WMO OSCAR、ESO ASM、ALMA Science Archive、CADC、TART、Wikidata（SPARQL）、Open-Meteo、NASA MMGIS / NASA Trek（天体地図）
 - 打ち上げ: Launch Library 2
 - 図法・画像素材: NASA Blue Marble、NASA Trek WMTS（月・火星・水星・タイタン・ベスタ・ケレス）
 
@@ -64,7 +64,7 @@ category: space
 | `planetary_evidence` | **天体（惑星・衛星・小天体・探査機）の文献的な裏づけをまとめて返す**。①名前解決（Sesame/CDS で和名→英語名→座標）と、②その天体の文献を**英語圏＋日本語の両方**から集めて提示（既定は被引用数順。**惑星科学概念で絞った OpenAlex を上位に置く**＝実測「火星」で MOLA / OMEGA-Mars Express / ALH84001 が上位に来る）。⚠️ 太陽系天体は時刻で位置が変わるため固定座標を持たない旨を `caveats` に明記 | OpenAlex / Crossref / NASA NTRS / JAXAリポジトリ / J-STAGE / CiNii ＋ Sesame/CDS | 不要 |
 | `radio_sources_now` | TART オープン電波望遠鏡が「いま観測できる電波源」（GNSS・静止衛星等）を仰角順に表示 | TART source catalog (NZ) | 不要 |
 | `sky_map_with_satellites` | 指定地の空に太陽系の惑星と人工衛星を重ねた画像（matplotlib正確版=PNG/Pillow簡易版=JPEGを選択） | JPL de421+Skyfield / CelesTrak+SGP4 | 不要 |
-| `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示）。`view="comet_orbit"` で彗星の軌道面ビュー（太陽＝焦点の楕円／e≥1 は双曲線の枝）、`view="apparition"` で彗星の**見え方チャート**（日心/地心距離・予想光度・太陽離角の時系列。`days` で期間、1天体ずつ）、`route=True` で**彗星の通過経路（軌道）を俯瞰図へ破線で重ねる**（近日点・遠日点は◇＋日付。**近日点の日付は SBDB の2体近似と JPL Horizons の n 体解を併記**し＝`marks[0].date_nbody`、差は `nbody_diff_days`（SBDB の要素は古いエポックの接触軌道なので摂動の大きい彗星では数か月ずれる。実測 ハレー彗星 163.8日）。n 体解が取れないときは `nbody_error` に理由を入れ、注記にも出す。対数縮尺では線の形が実際の楕円と一致しない旨を注記に自動生成、`engine="accurate"` の線形版は枠に収まれば自動維持＝形が本当の軌道。近日点が誇張した太陽円盤の内側なら目印を描かず「図からは確認できない」を注記・`verify` は破線と◇の画素を測り直す）。`range_au` で**表示範囲**を指定でき（**数値 AU・天体名・"fit" のいずれも可**。名は長半径×1.08 で解決し `structuredContent.range_resolved` と `figure.notes` に決め方を数値で出す。"fit" は指定天体が全部入る範囲）、`range_au=10` なら土星より内側だけを拡大表示（0.5 AU 未満はエラー、0=自動）。範囲外の天体・目印・軌道の円は描かず `figure.notes` と`structuredContent.out_of_range` に数値付きで列挙し、線形版の実測縮尺は `figure.scale.px_per_AU` に出る。`comet` にカンマ区切りで複数（または `comet2`、最大4天体）指定すると **1彗星=1パネルの1枚画像**（パネルごとに軌道面・縮尺が異なる＝`figure.notes` に自動生成、`figure.kind=orbit_plane_set`、パネル別は `figure.panels[]`。一部の惑星の位置計算に失敗した場合は `structuredContent.planet_errors` に理由を記録し、`content` と `figure.notes` に失敗数を出します） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
+| `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示）。`view="comet_orbit"` で彗星の軌道面ビュー（太陽＝焦点の楕円／e≥1 は双曲線の枝）、`view="apparition"` で彗星の**見え方チャート**（日心/地心距離・予想光度・太陽離角の時系列。`days` で期間、1天体ずつ）、`route=True` で**彗星の通過経路（軌道）を俯瞰図へ破線で重ねる**（近日点・遠日点は◇＋日付。**近日点の日付は SBDB の2体近似と JPL Horizons の n 体解を併記**し＝`marks[0].date_nbody`、差は `nbody_diff_days`（SBDB の要素は古いエポックの接触軌道なので摂動の大きい彗星では数か月ずれる。実測 ハレー彗星 163.8日）。n 体解が取れないときは `nbody_error` に理由を入れ、注記にも出す。対数縮尺では線の形が実際の楕円と一致しない旨を注記に自動生成、`engine="accurate"` の線形版は枠に収まれば自動維持＝形が本当の軌道。近日点が誇張した太陽円盤の内側なら目印を描かず「図からは確認できない」を注記・`verify` は破線と◇の画素を測り直す）。`range_au` で**表示範囲**を指定でき（**数値 AU・天体名・"fit" のいずれも可**。名は長半径×1.08 で解決し `structuredContent.range_resolved` と `figure.notes` に決め方を数値で出す。"fit" は指定天体が全部入る範囲）、`range_au=10` なら土星より内側だけを拡大表示（0.5 AU 未満はエラー、0=自動）。範囲外の天体・目印・軌道の円は描かず `figure.notes` と`structuredContent.out_of_range` に数値付きで列挙し、線形版の実測縮尺は `figure.scale.px_per_AU` に出る。`comet` にカンマ区切りで複数（または `comet2`、最大4天体）指定すると **1彗星=1パネルの1枚画像**（パネルごとに軌道面・縮尺が異なる＝`figure.notes` に自動生成、`figure.kind=orbit_plane_set`、パネル別は `probe` を指定した図では**「1光日」（光が24時間で進む距離＝173.1446 AU＝25,902,068,371 km）を破線の円で描き**（探査機の図では表示範囲を1光日まで自動拡張）、1光日に達していない探査機**ごとに投影での1光日リング・到達時の方向（◇＝黄経/黄緯）・到達予測日**を出す（`light_day.projected_rings` と `figure.verify.light_day.rings` に各リングを列挙）（俯瞰図は正射影なので真距離の円と投影の円は別物＝両者の半径を `figure.notes` に数値で出し、黄緯が小さいときは「図上でほぼ重なる」旨も出す。`probes[].light_days` / `light_hours` / `to_light_day_au` / `light_day_eta_date` / `light_day_eta_method`（＝日心視線速度による線形外挿。実測 ボイジャー1号 0.9925 光日・2027-02-03＝Horizons の n 体解と一致）は日心距離ベースで統一。範囲外なら `light_day.ring_why` に理由、`figure.verify.light_day` に破線・ラベル文字・マーカーの画素検証）。`figure.panels[]`。一部の惑星の位置計算に失敗した場合は `structuredContent.planet_errors` に理由を記録し、`content` と `figure.notes` に失敗数を出します） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
 | `solar_eclipse_series` | 日食（太陽が月に欠ける過程）の時系列パネル画像（7枚・食分と太陽高度・次回日食の自動検索=約4年(1400日)先まで・max_magnitude対応。**地平線下で見えない食は返さない**） | JPL DE421+Skyfield | 不要 |
 | `moon_phase_map` | **月齢マップ**。`layout="calendar"`（既定）=1か月の日別格子、`layout="lunation"`=1朔望月（朔→朔）の時系列パネル（`days` 3〜12枚）。輝面の向きは太陽の位置角から計算（月齢からの決め打ちをしない）。朔・望・上弦・下弦の時刻を現地時間で併記 | JPL DE421+Skyfield | 不要 |
 | `space_calendar` | **宇宙・天文イベントカレンダー**（月グリッドの画像＋`structuredContent.events`）。打ち上げ（LL2・`net_precision` が Day/Hour/Minute/Second の行だけを日付セルに置き、日付未定は本文へ）・天文現象（Skyfield ローカル計算）・公開イベント（国立天文台＋JAXA の施設一般公開・特別公開＝ファン!ファン!JAXA! と宇宙科学研究所。告知済みのみ・取得日を窓に毎日取り直し）・自分の予定を重ねる。**read-through**: 要求月 M に対して窓 [M-1, M+2] を蓄積ストアで確保し、未取得・期限切れの月だけ取得（2回目以降は API 0 回・実測 0.4 秒） | Launch Library 2 + Skyfield + 国立天文台 + JAXA + nasa.gov | 不要 |
@@ -143,6 +143,7 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 「太陽系を上から見た図」「はやぶさ2は今どこ」 → solar_system_now(probe="はやぶさ2")
 「169P はいつ地球に近づく？光度は？」          → solar_system_now(comet="169P", view="apparition", days=120)  # 見え方チャート
 「太陽系マップでエンケ彗星のルートを表示して」  → solar_system_now(comet="エンケ彗星", route=True)  # 通過経路を重ねる
+「ボイジャー1号はいつ1光日に達する？」          → solar_system_now(probe="ボイジャー1号")  # 1光日リング・◇=到達時の方向・到達予測日
 「土星より内側だけ見せて」                  → solar_system_now(range_au=10, engine="accurate")  # 内側を拡大（範囲外は注記へ）
 「ハレー彗星の軌道を見せて」                  → solar_system_now(comet="ハレー彗星", view="comet_orbit")
 「紫金山・アトラスの軌道は？」                → solar_system_now(comet="C/2023 A3", view="comet_orbit")  # e>1 は双曲線の枝
@@ -202,8 +203,7 @@ uv run space-finder-mcp          # stdio サーバーとして起動
   一時遮断でも、残りの結果はそのまま使えます。
 - **レート制限のあるソースは同時に呼んでも枠は共有**です（NASA `DEMO_KEY` 30 req/h/IP・
   Launch Library 2 の per-IP 制限・CelesTrak の IP 遮断）。CelesTrak は遮断を検知すると
-  **以降 fail fast**（HTTP を出さず即エラー）なので、遮断中でも呼び出しが固まりません
-  （`sat_tle` / `sat_ground_track` / `tiangong_now` / `sky_map_with_satellites` が該当）。
+  **以降 fail fast**（HTTP を出さず即エラー）なので、呼び出しは固まりません（`sat_tle` / `sat_ground_track` / `tiangong_now` / `sky_map_with_satellites` が該当）。**TLE は遮断中も代替源（tle.ivanstanojevic.me → db.satnogs.org）へ自動で切り替わる**ので、位置系ツールは遮断中でも動きます（出典は `tle_source` に実際の取得元を明示）。
 - **CPU 律速の計算は並列化しません**（GIL）。Skyfield の計算や Pillow/matplotlib の描画は
   1枚ずつ処理されます（matplotlib はプロセス全体の状態を持つため、サーバー側で
   `RENDER_LOCK` により直列化）。重い図を何枚も同時に投げても、速くはなりません
@@ -226,6 +226,7 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 
 描画系ツール（`solar_system_now` / `sat_ground_track` / `planetary_orbiter_track` / `planetary_rover_location_map` / `sky_map_with_satellites` / `solar_eclipse_series` / `moon_phase_map` / `astronomy_weather`〔雨雲・降水画像を返すとき〕 / `space_calendar`）は、`structuredContent.figure` に **視点(view)・主天体の置き方(primary: 楕円は焦点であって中心ではない)・縮尺(scale)・円錐曲線(conic)・注記(notes)・自己検証(verify)・説明(caption)** を返します。`content` にも同じ注記が `### ⚠️ 図の注記` として入ります。
 
+- **`content` には人間向けの表示だけを入れる**（「要約せず引用してください」等の LLM への指示文は `content` に書かない。読むのは人間で、意味不明な文になる）。指示は各ツールの docstring と `structuredContent.figure.notes_usage` に置く。
 - **回答に図を説明するときは `figure.notes` を要約・言い換えせず、そのまま引用する**（「主天体は焦点」「対数縮尺」「地上軌道は投影」等の但し書きを落とすと図の誤読を招く）。
 - **`conic.kind` が `hyperbola`/`parabola` のとき、その軌道は閉じていない**（遠日点なし）。「周回軌道」と説明しないこと。
 - `verify.ok` が真なら、描いた画素から測った近点/遠点距離が数値と一致し、ラベルが線に被っていないことを意味します。
@@ -274,7 +275,7 @@ uv run python scripts/check-tools.py                  # 全56ツール実呼び�
 ## 注意事項
 
 1. **出典表示**: 結果には出典URLが含まれます。回答時は必ず引用元を表示してください（NASA / ESA / JAXA / ISRO / CSA / INPE / UK / CNSA / Wikidata など）。
-2. **レート制限**: `DEMO_KEY` は 30リクエスト/時/IP の共有枠（`apod`・`neo_today`・`space_weather` で共有）。`space_weather` は枠切れ時に**認証不要の NOAA SWPC へ自動切替**するので、宇宙天気だけは 429 中でも返ります（`space_weather` 以外の NASA 系は待機が必要）。サーバー側で使用数を数えており、枠を使い切ると HTTP を出さずに回復目安を返し、429 を受けた場合は `Retry-After` を尊重します（`structuredContent.budget` に上限・使用数・残りを添付）。**CelesTrak** も短時間の連続リクエストで IP 単位に遮断され（403、または TCP が返らない blackhole）、その間は 1 回の呼び出しが分単位で固まります。接続は (connect 10 秒, read 25 秒) で打ち切り、遮断を受けたら**セッション内で記憶して以降は HTTP を出さずに即座に案内**を返します（`sat_tle` / `sat_ground_track` / `tiangong_now` / `sky_map_with_satellites` が該当）。
+2. **レート制限**: `DEMO_KEY` は 30リクエスト/時/IP の共有枠（`apod`・`neo_today`・`space_weather` で共有）。`space_weather` は枠切れ時に**認証不要の NOAA SWPC へ自動切替**するので、宇宙天気だけは 429 中でも返ります（`space_weather` 以外の NASA 系は待機が必要）。サーバー側で使用数を数えており、枠を使い切ると HTTP を出さずに回復目安を返し、429 を受けた場合は `Retry-After` を尊重します（`structuredContent.budget` に上限・使用数・残りを添付）。**CelesTrak** も短時間の連続リクエストで IP 単位に遮断され（403、または TCP が返らない blackhole）、その間は 1 回の呼び出しが分単位で固まります。接続は (connect 10 秒, read 25 秒) で打ち切り、遮断を受けたら**セッション内で記憶して以降は HTTP を出さずに即座に案内**を返します（`sat_tle` / `sat_ground_track` / `tiangong_now` / `sky_map_with_satellites` が該当）。 さらに **TLE は代替源へ自動フォールバック**します — CelesTrak 遮断中は認証不要の公開ミラー（tle.ivanstanojevic.me → db.satnogs.org）から同じ衛星の TLE を取得し、**content / structuredContent にどちらから取ったかを明示**します（`tle_source`）。グループ検索（`group=`）は代替源に無いので、遮断中はその旨を案内します。
 3. **曖昧入力**: 衛星名などで候補が複数ある場合は推測せず、NORAD ID 付きの候補を提示して停止します。
 4. **過去ミッション**: かぐや（SELENE）・あかつき等は「現在位置を表示できない」と正直に返します。落点が公表されている機体（かぐや＝南緯65.5°／東経80.4° Gill クレータ付近、2009-06-10 18:25 UTC）は落点を `structuredContent.impact_site` に出典つきで返します（「落点は判明しているか」に MCP だけで答えられます）。和名（かぐや/あかつき）も英語キーへ展開してから判定します。
 5. **描画エンジン**: `simple`（Pillow合成・学生向け視認性重視・JPEG・既定）と `accurate`（matplotlib・正確座標・PNG）。天体・記号の色は `img_common.BODY_COLORS`（惑星・月・太陽の実物色）/ `SYMBOL_COLORS`（環・縞・極冠・小惑星・彗星）が単一の出典で、`sky_map_with_satellites` と `solar_system_now` の両エンジンが同じ値を参照し、`accurate` の凡例は実際に描いたマーカーだけを色コード付きで出します。遠方探査機・彗星は線形縮尺では枠外のため自動的に `simple` を使用します。
