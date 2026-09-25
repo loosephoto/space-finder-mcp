@@ -645,7 +645,7 @@ def space_calendar(year: Optional[int] = None, month: Optional[int] = None, plac
                     "、".join("{} {} 件".format(store.KINDS[k][0], counts[k]) for k in store.KIND_ORDER),
                     len(tray)),
         verify=verify)
-    lines = [media_link_line("生成した画像を開く（{}年{}月の宇宙・天文カレンダー）".format(year_i, month_i),
+    lines = [media_link_line("{}年{}月の宇宙・天文カレンダー".format(year_i, month_i),
                              path=out_path, kind="figure"),
              "🪐 **{}年{}月 宇宙・天文イベントカレンダー**（基準地 {}・{}）".format(year_i, month_i, place, tz_label)]
     if warnings:

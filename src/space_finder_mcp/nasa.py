@@ -103,8 +103,7 @@ def apod(key: str, date: Optional[str] = None) -> CallToolResult:
         )
     img_url = d.get("hdurl") or d.get("url")
     is_video = str(d.get("media_type", "image")).lower() == "video"
-    link = media_link_line(("動画を開く: " if is_video else "画像を開く: ")
-                           + str(d.get("title", "APOD")),
+    link = media_link_line(str(d.get("title", "APOD")),
                            url=img_url, kind=("video" if is_video else "image"))
     text = (f"APOD {d.get('date','')} - {d.get('title','')}\n"
             + (link + "\n" if link else "")

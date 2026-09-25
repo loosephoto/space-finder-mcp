@@ -120,7 +120,7 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
         out_px: 出力画像の幅ピクセル（既定 1200、最大 2048）。
 
     インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
-    content の先頭へ「🖼️ [生成した画像を開く（…）](file:///…) ｜ 保存先: `…`」という
+    content の先頭へ「🖼️ [生成した画像を開く: …](file:///…) ｜ 保存先: `…`」という
     アイコン付きリンクを必ず出します（画像は %LOCALAPPDATA%\\Temp\\space_finder_mcp\\out に
     保存し、同じパスを structuredContent.image_path にも入れます）。
     回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
@@ -356,7 +356,7 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
                 "panel_overlaps_marker": bool(panel_hidden)},
     )
     text_lines = [
-        media_link_line(f"生成した画像を開く（{sat_name} の地上軌道マップ）",
+        media_link_line(f"{sat_name} の地上軌道マップ",
                         path=out_path, kind="figure"),
         f"🛰 **{sat_name}** の地上軌道（{tstr}）:",
         f"📍 現在地: {ns} {abs(lat0):.2f}度 / {ew} {abs(lon0):.2f}度（真下の点）",

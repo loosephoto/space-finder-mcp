@@ -551,7 +551,7 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
         engine: "simple"(既定/Pillow) / "accurate"(matplotlib)。
 
     インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
-    content の先頭へ「🖼️ [生成した画像を開く（…）](file:///…) ｜ 保存先: `…`」という
+    content の先頭へ「🖼️ [生成した画像を開く: …](file:///…) ｜ 保存先: `…`」という
     アイコン付きリンクを必ず出します（画像は %LOCALAPPDATA%\\Temp\\space_finder_mcp\\out に
     保存し、同じパスを structuredContent.image_path にも入れます）。
     回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
@@ -594,7 +594,7 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
     out_path = save_output(img_bytes, "sky_map_with_satellites",
                            "png" if mime == "image/png" else "jpg")
     lines = [
-        media_link_line("生成した画像を開く（星空マップ・{}）".format(eng_label),
+        media_link_line("星空マップ・{}".format(eng_label),
                         path=out_path, kind="figure"),
         "🗺️ **{} の空（惑星と人工衛星・{}）**".format(scene["time_utc"], eng_label),
         "場所: 緯度 {:.2f}° 経度 {:.2f}°".format(ll[0], ll[1]),

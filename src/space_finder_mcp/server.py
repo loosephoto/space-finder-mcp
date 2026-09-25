@@ -10,8 +10,9 @@ from typing import Optional
 
 import anyio
 from mcp.server.fastmcp import FastMCP
-from mcp.types import CallToolResult
+from mcp.types import CallToolResult, TextContent
 
+from . import img_common
 from .wikidata_lookup import reverse_lookup
 from . import nasa as _nasa
 from . import nasa_budget as _nasa_budget
@@ -88,10 +89,41 @@ def _threaded(fn):
     """
     @functools.wraps(fn)
     async def wrapper(*args, **kwargs):
-        return await anyio.to_thread.run_sync(lambda: fn(*args, **kwargs))
+        return await anyio.to_thread.run_sync(lambda: _delivered(fn(*args, **kwargs)))
 
     wrapper.sync_fn = fn
     return wrapper
+
+
+def _delivered(result):
+    """ツールの戻り値を、そのままクライアントへ出せる形に整えて返す。
+
+    唯一の出口（`_threaded`）で content のテキストを整形する。現状はメディアの
+    リンク行を独立した段落にすることだけを行う（`img_common.layout_media_links`）。
+    各ツールが個別に空行を入れる運用だと、1箇所忘れただけで複数の画像を返したときに
+    リンクが1行に畳み込まれる。呼び出し元の結果は ttl_cache で共有され得るので
+    書き換えず、変化があったときだけ新しい CallToolResult を組む。
+    """
+    blocks = getattr(result, "content", None)
+    if not blocks:
+        return result
+    new_blocks = []
+    changed = False
+    for b in blocks:
+        if getattr(b, "type", "") == "text":
+            text = getattr(b, "text", "") or ""
+            laid = img_common.layout_media_links(text)
+            if laid != text:
+                b = TextContent(type="text", text=laid)
+                changed = True
+        new_blocks.append(b)
+    if not changed:
+        return result
+    try:
+        return result.model_copy(update={"content": new_blocks})
+    except Exception:  # pragma: no cover - pydantic でない場合の保険
+        return CallToolResult(content=new_blocks,
+                              structuredContent=getattr(result, "structuredContent", None))
 
 
 def _reg(fn, name: Optional[str] = None):

@@ -694,7 +694,7 @@ def _apparition_content(d: dict, fig: dict, image_path, emax_note: str) -> List[
     dmin, rmin, emax = series[d["idx_d"]], series[d["idx_r"]], series[d["idx_e"]]
     span = "{} 〜 {}".format(_jd_to_utc(d["jd0"]).strftime("%Y-%m-%d"),
                              _jd_to_utc(d["jd1"]).strftime("%Y-%m-%d"))
-    lines = [media_link_line("生成した画像を開く（{} の見え方 {}）".format(nel["fullname"], span),
+    lines = [media_link_line("{} の見え方 {}".format(nel["fullname"], span),
                              path=image_path, kind="figure"),
              "### ☄️ {} の見え方（{}）".format(nel["fullname"], span)]
     if emax_note:
@@ -742,7 +742,7 @@ def comet_apparition_result(name: str, when_iso=None, days=180, before=30,
 
     `figure.notes` は**要約・言い換えせず、そのまま引用してください**（図と数値の対応は
     注記が唯一の説明です）。インライン画像を表示できないハーネス（CLI系・Android系の
-    codex / opencode など）向けに、content の先頭へ「🖼️ [生成した画像を開く（…）]
+    codex / opencode など）向けに、content の先頭へ「🖼️ [生成した画像を開く: …]
     (file:///…)」というアイコン付きリンクを必ず出します（同じパスを
     structuredContent.image_path にも入れます）。回答時はこのリンクをそのまま提示してください。
     '''

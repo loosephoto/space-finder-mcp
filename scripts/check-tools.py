@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import asyncio
 import collections
 import inspect
 import json
@@ -193,6 +194,91 @@ def _icon_link(text: str, icon: str) -> bool:
     return False
 
 
+def _media_text_issues(text: str) -> list:
+    """content のテキストが「リンクの見た目」と「改行」の規約を守っているか。
+
+    (a) リンク行は `🖼️ [画像を開く: 対象](URL)` の統一形式（`img_common` が生成する
+        動詞5種のみ）。ツールごとに手書きすると「サムネイル画像を開く: 」「動画を再生: 」
+        のようにばらつく。
+    (b) 配信される形でメディアのリンク行が前後とも空行で区切られていること。Markdown は
+        単一改行を同一段落に畳み込むため、複数の画像を返すとリンクが1行に融合する
+        （クライアント描画で実測）。配信時は `server._delivered` が
+        `img_common.layout_media_links` で空行を補うので、**整形後**のテキストで検査する
+        （ツールが空行を書くかどうかではなく、ユーザーが見る形を検査する）。
+        整形そのものが機能しているかは `delivery_issues()` が確かめる。
+    """
+    from space_finder_mcp import img_common as _ic
+    out = []
+    for line in text.split(chr(10)):
+        if not _ic.is_media_link_line(line):
+            continue
+        label = _ic.media_link_label(line) or ""
+        if not _ic.canonical_media_label(label):
+            out.append("リンクの見た目が統一されていません（`{}` → `画像を開く: …` 等）: {}"
+                       .format(label[:40], line.strip()[:80]))
+    laid = _ic.layout_media_links(text)
+    lines = laid.split(chr(10))
+    for i, line in enumerate(lines):
+        if not _ic.is_media_link_line(line):
+            continue
+        prev = lines[i - 1] if i > 0 else ""
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        if prev.strip() or nxt.strip():
+            out.append("メディアのリンク行が空行で区切られていません（改行が畳み込まれます）: {}"
+                       .format(line.strip()[:80]))
+    return out
+
+
+def count_media_links(result) -> int:
+    """content のテキストにある「アイコン付きリンク行」の数。"""
+    from space_finder_mcp import img_common as _ic
+    n = 0
+    for c in (getattr(result, "content", None) or []):
+        if getattr(c, "type", "") != "text":
+            continue
+        for line in (getattr(c, "text", "") or "").split(chr(10)):
+            if _ic.is_media_link_line(line):
+                n += 1
+    return n
+
+
+def delivery_issues() -> list:
+    """`server._threaded`（全ツールの唯一の出口）が content を整形して配送するかを検査する。
+
+    ゲートは同期関数（`.sync_fn`）を直接叩くため、出口の整形は別途ここで確かめる。
+    融合したリンクを含む結果を流し、配送後に空行で区切られていることを見る。
+    """
+    from space_finder_mcp.server import _threaded
+    from mcp.types import CallToolResult, TextContent
+    from space_finder_mcp import img_common as _ic
+
+    def fake_tool():
+        return CallToolResult(
+            content=[TextContent(type="text", text=chr(10).join([
+                "caption",
+                "🖼️ [画像を開く: A](https://example.invalid/a.jpg)",
+                "🖼️ [画像を開く: B](https://example.invalid/b.jpg)",
+                "tail"]))],
+            structuredContent={"image_url": "https://example.invalid/a.jpg"})
+
+    out = []
+    r = asyncio.run(_threaded(fake_tool)())
+    text = chr(10).join(getattr(c, "text", "") for c in (getattr(r, "content", None) or []))
+    lines = text.split(chr(10))
+    for i, line in enumerate(lines):
+        if not _ic.is_media_link_line(line):
+            continue
+        prev = lines[i - 1] if i > 0 else ""
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        if prev.strip() or nxt.strip():
+            out.append("配信時（_threaded）にリンク行が空行で区切られていません: {}"
+                       .format(line.strip()[:80]))
+    if r is not None and getattr(r, "structuredContent", None) != \
+            {"image_url": "https://example.invalid/a.jpg"}:
+        out.append("配信時に structuredContent が失われています")
+    return out
+
+
 def media_issues(tool, result) -> list:
     """メディアを含む結果の「リンク先行」検査。
 
@@ -209,10 +295,16 @@ def media_issues(tool, result) -> list:
     has_image = _has_key(sc, ("image_url",))
     has_audio = _has_key(sc, ("audio_url",))
     has_video = _has_key(sc, ("video_url",))
-    if "image" not in kinds and not has_image and not has_audio and not has_video:
-        return []
-    out = []
     text = chr(10).join(getattr(c, "text", "") for c in blocks if getattr(c, "type", "") == "text")
+    # メディアを返さないツールでも、リンクがあるなら見た目・改行の規約は検査する。
+    # 検査は配信時（`server._delivered`）と同じく「テキストブロック単位」で行う
+    # （ブロックをまたいだ連結は描画側の段落とは限らないため）。
+    out = []
+    for blk in blocks:
+        if getattr(blk, "type", "") == "text":
+            out.extend(_media_text_issues(getattr(blk, "text", "") or ""))
+    if "image" not in kinds and not has_image and not has_audio and not has_video:
+        return out
     if "image" in kinds:
         idx = kinds.index("image")
         before = chr(10).join(getattr(c, "text", "") for c in blocks[:idx])
@@ -449,7 +541,8 @@ def media_extra_rows(timeout=180.0) -> list:
         blocks = [getattr(c, "type", "?") for c in (getattr(r, "content", None) or [])]
         issues = media_issues(tool_name, r)
         rows.append({"tool": label, "status": "MEDIA_INVALID" if issues else "OK",
-                     "seconds": round(dt, 2), "blocks": blocks, "media_issues": issues})
+                     "seconds": round(dt, 2), "blocks": blocks,
+                     "media_links": count_media_links(r), "media_issues": issues})
     return rows
 
 
@@ -522,6 +615,7 @@ def run_all(only=None, timeout=180, offline=False) -> list:
                      "seconds": round(dt, 2), "blocks": kinds,
                      "has_structured_content": isinstance(sc, dict),
                      "figure": fsum, "figure_issues": fissues,
+                     "media_links": count_media_links(r),
                      "media_issues": missues,
                      "detail": (sc.get("error") if _is_error(r) else None)})
 
@@ -939,8 +1033,12 @@ def main() -> int:
 
     if args.media_links:
         rows = run_all(only=only, timeout=args.timeout, offline=False)
-        out = [r for r in rows if "image" in (r.get("blocks") or [])]
+        out = [r for r in rows
+               if "image" in (r.get("blocks") or []) or (r.get("media_links") or 0) > 0]
         out = out + (media_extra_rows(timeout=args.timeout) if not only else [])
+        dissues = delivery_issues()
+        out.append({"tool": "delivery(_threaded)", "blocks": ["text"], "media_links": 3,
+                    "status": "MEDIA_INVALID" if dissues else "OK", "media_issues": dissues})
         bad = [r for r in out if r["status"] in ("TIMEOUT", "LEAKED_EXCEPTION", "MEDIA_INVALID")
                or r.get("media_issues")]
         if args.json:
@@ -956,6 +1054,8 @@ def main() -> int:
                 for i in r.get("media_issues") or []:
                     print("      ! " + i)
             print("  検査した画像系ツール:", len(out), "／ 問題:", len(bad))
+            print("  検査内容: リンク先行（規約13）・リンク形式の統一・改行（空行区切り）"
+                  "・structuredContent のURL/保存パス・配信時（_threaded）の整形")
         return 1 if bad else 0
 
     if args.figures:

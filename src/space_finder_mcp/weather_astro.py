@@ -190,7 +190,7 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
             image_blocks.append(TextContent(type="text", text=figure_text_block(_ri["figure"])))
             for _img in _ri["images"]:
                 _p = save_output(_img["bytes"], "astronomy_weather_jma", "jpg")
-                _link = media_link_line(_img["label"] + "を開く",
+                _link = media_link_line(_img["label"],
                                         url=_img["page_url"], path=_p, kind="image")
                 # 単一改行で繋ぐと Markdown が同一段落に畳み込み、画像を連続で
                 # 返したときに caption とリンクが 1 行に融合する（クライアント描画で

@@ -2219,7 +2219,7 @@ def _comet_orbit_result(name, when_iso=None):
     # インライン画像を描けないハーネス向け: 保存してリンクを先頭に出す
     out_path = save_output(png, "solar_system_comet_orbit", "png")
     lines = [
-        media_link_line("生成した画像を開く（{} の彗星軌道面ビュー）".format(
+        media_link_line("{} の彗星軌道面ビュー".format(
             el.get("fullname") or cid), path=out_path, kind="figure"),
         "☄️ **{} の軌道（彗星自身の軌道面を真横から見た図）**".format(el.get("fullname") or cid),
         "時刻: {}".format(tstr),
@@ -2380,7 +2380,7 @@ def _comet_multi_result(names, when_iso=None):
     imgc = ImageContent(type="image", data=base64.b64encode(png).decode("ascii"),
                         mimeType="image/png",
                         altText="彗星{}天体の軌道（各パネルはその彗星自身の軌道面）".format(len(panels)))
-    lines = [media_link_line("生成した画像を開く（彗星{}天体の軌道パネル）".format(len(panels)),
+    lines = [media_link_line("彗星{}天体の軌道パネル".format(len(panels)),
                              path=out_path, kind="figure"),
              "☄️ **彗星{}天体の軌道（1彗星=1パネル／各パネルはその彗星自身の軌道面）**".format(len(panels)),
              "時刻: {}".format(tstr)]
@@ -2491,7 +2491,7 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
             に出典付きで列挙する（黙って消さない）。対数版は下限も範囲に合わせて下がる。
 
     インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
-    content の先頭へ「🖼️ [生成した画像を開く（…）](file:///…) ｜ 保存先: `…`」という
+    content の先頭へ「🖼️ [生成した画像を開く: …](file:///…) ｜ 保存先: `…`」という
     アイコン付きリンクを必ず出します（画像は %LOCALAPPDATA%\\Temp\\space_finder_mcp\\out に
     保存し、同じパスを structuredContent.image_path にも入れます）。
     回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
@@ -2611,7 +2611,7 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
     # インライン画像を描けないハーネス向け: 保存してリンクを先頭に出す
     out_path = save_output(png, "solar_system_now", "png")
     lines = [
-        media_link_line("生成した画像を開く（太陽系俯瞰図・{}）".format(eng_label),
+        media_link_line("太陽系俯瞰図・{}".format(eng_label),
                         path=out_path, kind="figure"),
         "☀️ **太陽系俯瞰図（太陽中心・{}）**".format(eng_label),
         "時刻: {}".format(scene["time_utc"]),

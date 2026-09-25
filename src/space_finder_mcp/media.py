@@ -193,7 +193,7 @@ def search_space_images(query: str, limit: int = 3, show_inline: bool = True,
             structuredContent.results[].image_url に入る。
 
     content の各項目には、メディア本体より前に「🖼️ [画像を開く: タイトル](URL)」
-    「🎧 [音声を開く: タイトル](URL)」「🎬 [動画を再生: タイトル](URL)」というアイコン付き
+    「🎧 [音声を開く: タイトル](URL)」「🎬 [動画を開く: タイトル](URL)」というアイコン付き
     リンクを出します（インライン表示を描画できない CLI/Android 系ハーネスでも開けるように）。
     回答時はこのリンクをそのまま提示してください。
     """
@@ -235,7 +235,7 @@ def search_space_images(query: str, limit: int = 3, show_inline: bool = True,
             # インライン画像を描けないハーネス（CLI/Android 系）でも開けるよう、
             # 画像本体より前にアイコン付きリンクを置く
             lines.append("   " + media_link_line(
-                f"画像を開く: {r['title']}", url=r["image_url"], kind="image"))
+                r["title"], url=r["image_url"], kind="image"))
     lines.append("出典: NASA Image and Video Library (images.nasa.gov) ／ このMCPは画像をJSON+インライン表示で返します。")
     content_blocks.append(TextContent(type="text", text="\n".join(lines)))
 
@@ -297,7 +297,7 @@ def search_space_audio(query: str, limit: int = 3, kind: str = "auto") -> CallTo
               "sound_effect"(短い宇宙の音・効果音)。
 
     content の各項目には、メディア本体より前に「🖼️ [画像を開く: タイトル](URL)」
-    「🎧 [音声を開く: タイトル](URL)」「🎬 [動画を再生: タイトル](URL)」というアイコン付き
+    「🎧 [音声を開く: タイトル](URL)」「🎬 [動画を開く: タイトル](URL)」というアイコン付き
     リンクを出します（インライン表示を描画できない CLI/Android 系ハーネスでも開けるように）。
     回答時はこのリンクをそのまま提示してください。
     """
@@ -374,7 +374,7 @@ def search_space_audio(query: str, limit: int = 3, kind: str = "auto") -> CallTo
         if r.get("audio_url"):
             # メディアより前にアイコン付きリンク（非リッチなハーネスでも開ける）
             lines.append("   " + media_link_line(
-                f"音声を開く: {r['title']}", url=r["audio_url"], kind="audio"))
+                r["title"], url=r["audio_url"], kind="audio"))
     lines.append(f"出典: {_SOUND_FX_SOURCE} / NASA Image and Video Library")
     return CallToolResult(
         content=[TextContent(type="text", text="\n".join(lines))],
@@ -428,7 +428,7 @@ def search_space_videos(query: str, limit: int = 3, show_poster: bool = True) ->
         show_poster: ポスター画像をチャットにインライン表示するか（既定 True）。
 
     content の各項目には、メディア本体より前に「🖼️ [画像を開く: タイトル](URL)」
-    「🎧 [音声を開く: タイトル](URL)」「🎬 [動画を再生: タイトル](URL)」というアイコン付き
+    「🎧 [音声を開く: タイトル](URL)」「🎬 [動画を開く: タイトル](URL)」というアイコン付き
     リンクを出します（インライン表示を描画できない CLI/Android 系ハーネスでも開けるように）。
     回答時はこのリンクをそのまま提示してください。
     """
@@ -470,14 +470,14 @@ def search_space_videos(query: str, limit: int = 3, show_poster: bool = True) ->
         if r.get("video_url"):
             # メディアより前にアイコン付きリンク（非リッチなハーネスでも再生できる）
             lines.append("   " + media_link_line(
-                f"動画を再生: {r['title']}", url=r["video_url"], kind="video"))
+                r["title"], url=r["video_url"], kind="video"))
     lines.append("出典: NASA Image and Video Library (images.nasa.gov) ／ 動画はURLから再生（base64埋め込みは行わない）。")
 
     # ポスター画像（インライン表示できてもできなくても、リンクを先に出しておく）
     for r in records:
         if r.get("poster_url"):
             lines.append("   " + media_link_line(
-                f"ポスター画像を開く: {r['title']}", url=r["poster_url"], kind="image"))
+                f"{r['title']} のポスター", url=r["poster_url"], kind="image"))
             break
     content_blocks = [TextContent(type="text", text="\n".join(lines))]
 

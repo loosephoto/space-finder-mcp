@@ -167,7 +167,7 @@ def eodashboard_detail(identifier: str, show_image: bool = True) -> CallToolResu
     content に表示用サマリ＋サムネイル画像(インライン)、structuredContent に JSON を返す。
 
     インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
-    画像本体より前に「🖼️ [サムネイル画像を開く: …](URL)」というアイコン付きリンクを必ず出します
+    画像本体より前に「🖼️ [画像を開く: … のサムネイル](URL)」というアイコン付きリンクを必ず出します
     （同じURLを structuredContent.image_url にも入れます）。
     回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
 
@@ -218,7 +218,7 @@ def eodashboard_detail(identifier: str, show_image: bool = True) -> CallToolResu
     if img_url:
         # インライン描画できないハーネス（CLI/Android 系）でも開けるよう、画像本体より前に出す
         lines.append("   " + media_link_line(
-            "サムネイル画像を開く: {}".format(meta["title"]), url=img_url, kind="image"))
+            "{} のサムネイル".format(meta["title"]), url=img_url, kind="image"))
     lines.append("出典: github.com/ESA-eodashboards/eodashboard-catalog（EO Dashboard, NASA×ESA×JAXA）")
     content_blocks = [TextContent(type="text", text="\n".join(lines))]
 

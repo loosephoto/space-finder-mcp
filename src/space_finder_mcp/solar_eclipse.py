@@ -272,7 +272,7 @@ def solar_eclipse_series(date: Optional[str] = None, place: Optional[str] = None
         max_magnitude: True で最大食のみの単一パネルを返す（既定 False=時系列）。
 
     インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
-    content の先頭へ「🖼️ [生成した画像を開く（…）](file:///…) ｜ 保存先: `…`」という
+    content の先頭へ「🖼️ [生成した画像を開く: …](file:///…) ｜ 保存先: `…`」という
     アイコン付きリンクを必ず出します（画像は %LOCALAPPDATA%\\Temp\\space_finder_mcp\\out に
     保存し、同じパスを structuredContent.image_path にも入れます）。
     回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
@@ -589,7 +589,7 @@ def _finalize(ev, place_ja, date_disp, ll):
     # インライン画像を描けないハーネス向け: 保存してリンクを先頭に出す
     out_path = save_output(png, "solar_eclipse_series", "png")
     lines = [
-        media_link_line("生成した画像を開く（{} の時系列パネル）".format(ev["kind"]),
+        media_link_line("{} の時系列パネル".format(ev["kind"]),
                         path=out_path, kind="figure"),
         "🌞 **{}（{} ・ {}）**".format(ev["kind"], place_ja, date_disp),
         "最大食分: {:.3f}（{}%）".format(ev["max_mag"], int(ev["max_mag"] * 100)),

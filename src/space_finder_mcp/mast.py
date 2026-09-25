@@ -361,7 +361,7 @@ def mast_observations(object_name: Optional[str] = None, ra: Optional[float] = N
                                                     head["mission"], head["instrument"]))
         if image_url:
             # メディア本体より前に必ずリンクを置く（規約13）
-            link = media_link_line("観測プレビュー画像を開く（{}）".format(head["obs_id"]),
+            link = media_link_line("観測プレビュー画像（{}）".format(head["obs_id"]),
                                    url=image_url, path=image_path, kind="image")
             if link:
                 lines_extra.append(link)

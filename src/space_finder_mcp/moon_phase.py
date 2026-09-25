@@ -442,7 +442,7 @@ def moon_phase_map(date: Optional[str] = None, place: Optional[str] = None,
         days: layout="lunation" のパネル枚数（3〜12・既定8）。calendar では無視。
 
     インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
-    content の先頭へ「🖼️ [生成した画像を開く（…）](file:///…) ｜ 保存先: `…`」という
+    content の先頭へ「🖼️ [生成した画像を開く: …](file:///…) ｜ 保存先: `…`」という
     アイコン付きリンクを必ず出します（画像は出力ディレクトリに保存し、同じパスを
     structuredContent.image_path にも入れます）。
     回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
@@ -635,7 +635,7 @@ def _moon_phase_map_impl(date, place, lat, lon, layout, days):
     png = _png_bytes(img)
     out_path = save_output(png, "moon_phase_map", "png")
     label = period.get("month") or "{:.0f}日間".format(period.get("span_days") or 0.0)
-    lines = [media_link_line("生成した画像を開く（月齢マップ {}）".format(label),
+    lines = [media_link_line("月齢マップ {}".format(label),
                             path=out_path, kind="figure"),
              "🌙 **{}**".format(title)]
     if layout_note:

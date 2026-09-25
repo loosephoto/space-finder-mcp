@@ -697,7 +697,7 @@ def _impact_site_result(body_cfg: dict, info: dict, span_deg: float = 60.0,
                         mimeType="image/jpeg",
                         altText=f"{info['ja']} の{body_cfg['ja']}面落下地点")
     lines = [
-        media_link_line(f"生成した画像を開く（{info['ja']} の{body_cfg['ja']}面 落下地点マップ）",
+        media_link_line(f"{info['ja']} の{body_cfg['ja']}面 落下地点マップ",
                         path=out_path, kind="figure"),
         f"📍 **{info['ja']} の{body_cfg['ja']}面落下地点（判明・JAXA 公表）**",
         f"座標: {ns} {abs(lat):.1f}° / {ew} {abs(lon):.1f}°（{imp.get('place', '')}）",
@@ -1147,8 +1147,8 @@ def _sites_result(body: str, key, out_px: int = 1000):
         verify=mv)
     imgc = ImageContent(type="image", data=base64.b64encode(jpeg).decode("ascii"),
                         mimeType="image/jpeg", altText=title)
-    lines = [media_link_line("生成した画像を開く（{}）".format(
-        "{}の{}マップ".format(body_ja, pt_label)), path=out_path, kind="figure"),
+    lines = [media_link_line("{}の{}マップ".format(body_ja, pt_label),
+                             path=out_path, kind="figure"),
         "🌕 **{}**".format(title)]
     for m, st in zip(marks, picked):
         ns = "北緯" if st["lat"] >= 0 else "南緯"
@@ -1211,7 +1211,7 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
             **自然衝突ではマクゲッチンが最新**（この規模は月で平均 132 年に1回）。
 
     インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
-    content の先頭へ「🖼️ [生成した画像を開く（…）](file:///…) ｜ 保存先: `…`」という
+    content の先頭へ「🖼️ [生成した画像を開く: …](file:///…) ｜ 保存先: `…`」という
     アイコン付きリンクを必ず出します（画像は %LOCALAPPDATA%\\Temp\\space_finder_mcp\\out に
     保存し、同じパスを structuredContent.image_path にも入れます）。
     回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
@@ -1489,7 +1489,7 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
         verify=mv,
     )
     lines = [
-        media_link_line(f"生成した画像を開く（{ja} の{body_cfg['ja']}面軌道マップ）",
+        media_link_line(f"{ja} の{body_cfg['ja']}面軌道マップ",
                         path=out_path, kind="figure"),
         f"🛰 **{ja}** の{body_cfg['ja']}面位置（{tstr}）:",
         f"📍 {body_cfg['ja']}面: {ns} {abs(lat0):.2f}° / {ew} {abs(lon0):.2f}°",

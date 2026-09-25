@@ -15,6 +15,7 @@ import glob as _glob
 import io
 import math
 import os
+import re
 import sys
 import threading
 import time
@@ -837,6 +838,28 @@ OUTPUT_DIR = os.path.join(os.path.dirname(CACHE_ROOT), "out")
 
 _MEDIA_ICONS = {"image": "🖼️", "figure": "🖼️", "audio": "🎧", "video": "🎬", "file": "📄"}
 
+# リンクの文言（動詞）は kind から機械的に決める。ツールごとに手書きすると
+# 「画像を開く: 」「サムネイル画像を開く: 」「動画を再生: 」のようにばらついて
+# 見た目が揃わないため、呼び出し側は「対象」だけを渡す（統一はここで担保する）。
+_MEDIA_VERBS = {
+    "image": "画像を開く",
+    "figure": "生成した画像を開く",
+    "audio": "音声を開く",
+    "video": "動画を開く",
+    "file": "ファイルを開く",
+}
+
+# 旧来の呼び出し（動詞込みのラベル）が混ざっても「画像を開く: 画像を開く: …」に
+# ならないよう、先頭の動詞だけ落として対象名に正規化する。
+_MEDIA_VERB_PREFIX_RE = re.compile(
+    r"^(?:生成した画像|サムネイル画像|ポスター画像|観測プレビュー画像|画像|音声|動画|ファイル|文書)"
+    r"を(?:開く|再生)\s*[:：]?\s*")
+
+# 「アイコン + markdownリンク」の行かどうか（先頭の空白＝リスト内の継続行は許容）。
+# ラベル（[] の中身）は見た目の統一検査（canonical_media_label）で使うため捕捉する。
+_MEDIA_LINK_LINE_RE = re.compile(
+    r"^(?:🖼|🎧|🎬|📄)\uFE0F?\s*\[([^\]]+)\]\((?:https?://|file://)")
+
 
 def file_uri(path: str) -> str:
     """ローカルパスを file:// URI に変換する（Windows の C:\\... も可）。"""
@@ -889,20 +912,76 @@ def markdown_link_url(url: str) -> str:
     return "".join(out)
 
 
-def media_link_line(label: str, *, url: Optional[str] = None, path: Optional[str] = None,
+def media_link_line(subject: str = "", *, url: Optional[str] = None, path: Optional[str] = None,
                     kind: str = "image", note: Optional[str] = None) -> str:
-    """メディア本体より前に置く「アイコン付きリンク行」を作る。
+    """メディア本体より前に置く「アイコン付きリンク行」を作る（形式はここで統一）。
+
+    返すのは `🖼️ [画像を開く: 対象](URL)` の1行。動詞は kind から決まる
+    （image→画像を開く / figure→生成した画像を開く / audio→音声を開く /
+    video→動画を開く / file→ファイルを開く）ので、呼び出し側は**対象名だけ**を渡す。
+    旧来の「◯◯を開く: …」を渡しても先頭の動詞は落として二重にしない。
 
     url があればそれを、無ければ保存した path を file:// URI にしてリンクにする。
     リンク先を作れないときは空文字を返す（呼び出し側で行ごと落とせる）。
     """
     icon = _MEDIA_ICONS.get(kind, "🔗")
+    verb = _MEDIA_VERBS.get(kind, "開く")
     target = markdown_link_url(url) if url else (file_uri(path) if path else "")
     if not target:
         return ""
+    subject_text = _MEDIA_VERB_PREFIX_RE.sub("", str(subject or "")).strip()
+    # 旧式の「◯◯を開く（対象）」は動詞を落とすと丸括弧だけが残るので外す。
+    if (subject_text.startswith("（") and subject_text.endswith("）")
+            and subject_text.count("（") == 1):
+        subject_text = subject_text[1:-1].strip()
+    label = "{}: {}".format(verb, subject_text) if subject_text else verb
     line = "{} [{}]({})".format(icon, label, target)
     if path:
         line += " ｜ 保存先: `{}`".format(path)
     if note:
         line += " ｜ {}".format(note)
     return line
+
+
+def media_link_label(line: str) -> Optional[str]:
+    """その行が「アイコン付きリンク行」ならラベル（[] の中身）を返す。違えば None。"""
+    m = _MEDIA_LINK_LINE_RE.match(str(line or "").lstrip())
+    return m.group(1) if m else None
+
+
+def is_media_link_line(line: str) -> bool:
+    """その行が「アイコン付きリンク行」か（先頭の空白＝リスト内の継続行は無視）。"""
+    return media_link_label(line) is not None
+
+
+def canonical_media_label(label: str) -> bool:
+    """ラベルが統一形式（`<動詞>` または `<動詞>: 対象`）かどうか。
+
+    `<動詞>` は kind から決まる `_MEDIA_VERBS` の5種のみ。ゲート
+    （`scripts/check-tools.py --media-links`）がこれを使って見た目の統一を検査する。
+    """
+    text = str(label or "")
+    return any(text == v or text.startswith(v + ": ") for v in _MEDIA_VERBS.values())
+
+
+def layout_media_links(text: str) -> str:
+    """メディアのリンク行を独立した段落にする（前後に空行を入れる）。
+
+    Markdown の単一改行は「ソフト改行」で、描画時に同一段落へ畳み込まれる。そのため
+    画像を複数返すとリンク行どうしや直前の caption と融合して1行になる（クライアント
+    描画で実測）。ここで空行を補って段落を分ける。行頭の空白（番号付きリストの継続行）
+    はそのまま残すので、リスト内のリンクはその項目に属したままになる。冪等。
+    """
+    lines = str(text or "").split("\n")
+    out: List[str] = []
+    for i, ln in enumerate(lines):
+        if not is_media_link_line(ln):
+            out.append(ln)
+            continue
+        if out and out[-1].strip():
+            out.append("")                      # 直前の行と融合させない
+        out.append(ln)
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        if nxt.strip():
+            out.append("")                      # 次の行（リンクでも本文でも）と融合させない
+    return "\n".join(out)

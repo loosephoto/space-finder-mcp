@@ -101,7 +101,7 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
         out_px: 出力画像の長辺ピクセル(既定1000, 最大2000)。
 
     インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
-    content の先頭へ「🖼️ [生成した画像を開く（…）](file:///…) ｜ 保存先: `…`」という
+    content の先頭へ「🖼️ [生成した画像を開く: …](file:///…) ｜ 保存先: `…`」という
     アイコン付きリンクを必ず出します（画像は %LOCALAPPDATA%\\Temp\\space_finder_mcp\\out に
     保存し、同じパスを structuredContent.image_path にも入れます）。
     回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
@@ -253,7 +253,7 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
                     panel_overlaps_marker=bool(panel_hidden)),
     )
     lines = [
-        media_link_line(f"生成した画像を開く（{rover_ja} の{body_cfg['ja']}現在地マップ）",
+        media_link_line(f"{rover_ja} の{body_cfg['ja']}現在地マップ",
                         path=out_path, kind="figure"),
         f"🔴 **{rover_ja}（{rv}）の{body_cfg['ja']}現在地マップ**:",
         f"📍 座標: {clat:.4f}° {'N' if clat >= 0 else 'S'} / {clon:.4f}°E ・ sol {wp.get('sol')}",

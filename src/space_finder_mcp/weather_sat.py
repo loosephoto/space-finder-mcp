@@ -73,7 +73,7 @@ def weather_satellite_now(satellite="himawari9", band="visible", size=550):
     戻り: structuredContent に JSON（衛星・帯域・鮮度・画像URL/保存パス）、content に
     表示用テキスト＋インライン画像。鮮度（観測時刻/取得時刻/遅延分）は必ず含める。
     インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
-    画像本体より前に「🖼️ [生成した画像を開く（…）](URL または file:///…)」という
+    画像本体より前に「🖼️ [生成した画像を開く: …](URL または file:///…)」という
     アイコン付きリンクを必ず出します。回答時はこのリンクをそのまま提示してください
     （画像が描画されない環境では唯一の導線）。
 
@@ -156,7 +156,7 @@ def weather_satellite_now(satellite="himawari9", band="visible", size=550):
     latency_line = ("⏱ 配信遅延: 約 {} 分".format(latency_min)
                     if latency_min is not None else "⏱ 配信遅延: 測定不能")
     text_lines = [
-        media_link_line("生成した画像を開く（ひまわり9号 最新画像）", path=out_path, kind="image"),
+        media_link_line("ひまわり9号 最新画像", path=out_path, kind="image"),
         "🛰 **ひまわり9号（HIMAWARI-9）** の最新実画像（{}）:".format(band_spec["name"]),
         "🕐 観測時刻: {}（UTC）".format(obs_disp),
         latency_line,
@@ -228,6 +228,6 @@ def weather_satellite_now_extended(satellite="himawari9",band="visible",size=550
  try:u,b,o,product,source=_ext_fetch(s,size);from PIL import Image;im=Image.open(io.BytesIO(b)).convert("RGB");jpg=encode_jpeg(im)
  except (ValueError,requests.RequestException) as e:return CallToolResult(content=[TextContent(type="text",text=str(e))],structuredContent={"error":"fetch_failed","satellite":satellite,"message":str(e)})
  except Exception as e:return CallToolResult(content=[TextContent(type="text",text=str(e))],structuredContent={"error":"image_decode_failed","satellite":satellite})
- retrieved=datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00","Z");path=save_output(jpg,"weather_satellite_now","jpg");text="\n".join([media_link_line("生成した画像を開く",url=u,kind="image"),"🛰 **"+str(satellite)+"**（"+product+"）","観測: "+str(o or "配信元非公開"),"取得: "+retrieved,"出典: "+source])
+ retrieved=datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00","Z");path=save_output(jpg,"weather_satellite_now","jpg");text="\n".join([media_link_line("",url=u,kind="image"),"🛰 **"+str(satellite)+"**（"+product+"）","観測: "+str(o or "配信元非公開"),"取得: "+retrieved,"出典: "+source])
  payload={"satellite":satellite,"canonical":s,"product":product,"source":source,"observed_at_utc":o,"retrieved_at_utc":retrieved,"image_url":u,"image_path":path,"size_px":[im.width,im.height],"image_semantics":"image_product"}
  return CallToolResult(content=[TextContent(type="text",text=text),ImageContent(type="image",data=base64.b64encode(jpg).decode("ascii"),mimeType="image/jpeg",altText=str(satellite)+" 気象衛星画像")],structuredContent=payload)
