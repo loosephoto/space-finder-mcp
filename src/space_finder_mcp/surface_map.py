@@ -375,11 +375,17 @@ def _regional_view(src, tl, gx, gy, W, H, span_deg, out_px, dim):
 
 def image_view(url: str, lon: float, lat: float, span_deg: float, out_px: int, *,
                credit: str = "", subdir: str = "basemap", headers: Optional[dict] = None,
-               whole_dim: Optional[float] = None, regional_dim: Optional[float] = None) -> dict:
+               whole_dim: Optional[float] = None, regional_dim: Optional[float] = None,
+               left_edge_lon: Optional[float] = None) -> dict:
     """全球等角図（画像1枚）をベースマップにしたビューを作る（Trek と同じ投影契約）。
 
     タイル化された全球データが無い天体でも、**1枚の全球図**があれば同じ描画・検証の
-    経路に乗せられる。アスペクト比が 2:1 でない等角図は **2:1 に補正**する
+    経路に乗せられる。`left_edge_lon` は「その画像の左端が何度（東向き正）か」。
+    USGS/PDS の全球モザイクや Hubble OPAL は**左端が 0°E**（実測: 冥王星の .lbl は
+    CenterLongitude=180・最小経度 0.0、OPAL の readme は「left edge = 0 System III W」）
+    で、このモジュールの前提（左端 = -180°E）と 180° ずれるため、**横に半周回して**
+    合わせる（全球図なので端の折り返しは幾何的に正しい）。
+    アスペクト比が 2:1 でない等角図は **2:1 に補正**する
     （「どのあたりか」が分かればよい用途では、厳密な幾何より可用性を優先。補正の有無と
     元の AR は戻り値に入れ、呼び出し側が注記に出す）。画像は不変資産なのでディスク
     キャッシュ経由（2回目以降は再取得しない）。
@@ -401,6 +407,12 @@ def image_view(url: str, lon: float, lat: float, span_deg: float, out_px: int, *
     W = w0
     H = max(1, int(round(W / 2.0)))
     img2 = src if abs(ar0 - 2.0) < 1e-6 else src.resize((W, H), Image.LANCZOS)
+    roll_deg = 0.0
+    if left_edge_lon is not None:
+        roll_deg = (float(left_edge_lon) + 180.0) % 360.0
+        if roll_deg:                      # 左端 0°E の地図を左端 -180°E の前提へ回す
+            from PIL import ImageChops
+            img2 = ImageChops.offset(img2, int(round(roll_deg / 360.0 * W)), 0)
     gx = (lon + 180.0) / 360.0 * W
     gy = (90.0 - lat) / 180.0 * H
     if span_deg >= 360.0:
@@ -422,7 +434,9 @@ def image_view(url: str, lon: float, lat: float, span_deg: float, out_px: int, *
         res = _regional_view(img2, (0, 0), gx, gy, W, H, span_deg, out_px, regional_dim)
         res["mode"] = "image_regional"
     res.update({"source_ar": round(ar0, 4), "ar_corrected": bool(abs(ar0 - 2.0) > 1e-6),
-                "pixels": [w0, h0], "credit": credit, "zoom": None})
+                "pixels": [w0, h0], "credit": credit, "zoom": None,
+                "left_edge_lon": None if left_edge_lon is None else float(left_edge_lon),
+                "lon_roll_deg": round(roll_deg, 4)})
     return res
 
 

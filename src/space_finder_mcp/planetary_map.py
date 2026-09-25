@@ -296,11 +296,14 @@ MAP_BODIES: dict = {
     "moon": {"ja": "月", "en": "Moon", "basemap": "trek"},
     "mars": {"ja": "火星", "en": "Mars", "basemap": "trek"},
     "mercury": {"ja": "水星", "en": "Mercury", "basemap": "trek"},
+    # 金星: USGS/NASA の Magellan 全球モザイク。左端 -180°E は USGS の .lbl で確認
+    # （CenterLongitude=0.0・最小経度 -180.0・最大 180.0・PositiveEast）＝この図の前提と同じなので
+    # 回転は不要（left_edge_lon=-180.0 を明示しておく）。
     "venus": {"ja": "金星", "en": "Venus", "basemap": "image",
               "image": {"url": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/"
                                "Venus_Magellan_C3-MDIR_ClrTopo_Global_Mosaic_6600m.tif",
                         "credit": "USGS/NASA Magellan C3-MDIR 全球モザイク（6600m/px・地形で彩色）",
-                        "src_ar": 2.0}},
+                        "src_ar": 2.0, "left_edge_lon": -180.0}},
     "titan": {"ja": "タイタン", "en": "Titan", "basemap": "image",
               "image": {"url": "https://upload.wikimedia.org/wikipedia/commons/b/bc/"
                                "PIA22770-SaturnMoon-Titan-Surface-20181206.jpg",
@@ -323,10 +326,51 @@ MAP_BODIES: dict = {
                  "image": {"url": "https://upload.wikimedia.org/wikipedia/commons/9/96/"
                                   "Callisto_USGS_global_small.jpg",
                            "credit": "USGS（カリスト全球モザイク・縮小版）", "src_ar": 2.06}},
-    "jupiter": {"ja": "木星", "en": "Jupiter", "basemap": "graticule"},
-    "saturn": {"ja": "土星", "en": "Saturn", "basemap": "graticule"},
-    "pluto": {"ja": "冥王星", "en": "Pluto", "basemap": "graticule"},
-    "bennu": {"ja": "ベンヌ", "en": "Bennu", "basemap": "graticule"},
+    # 気体惑星4天体: **Hubble OPAL** の全球等角図（MAST/STScI 公開。DOI 10.17909/T9G593）。
+    # OPAL は「left edge = 0 System III W, decreasing to the right」＝東向き正で左端 0°E
+    # なので left_edge_lon=0.0。実測: 木星 19.4MB(3600x1800)／土星 4.9MB(1800x900)
+    # ／天王星・海王星 0.79MB(721x361)。**その年の大気**の図なので地点の年代とは一致しない。
+    "jupiter": {"ja": "木星", "en": "Jupiter", "basemap": "image",
+                "image": {"url": "https://archive.stsci.edu/hlsps/opal/cycle32/jupiter/"
+                                 "hlsp_opal_hst_wfc3-uvis_jupiter-2025a_f395n-f502n-f631n"
+                                 "_v1_globalmap.tif",
+                          "credit": "Hubble OPAL 2025a 全球図（NASA/ESA/STScI）",
+                          "src_ar": 2.0, "left_edge_lon": 0.0, "epoch": "2025-12-11〜12"}},
+    "saturn": {"ja": "土星", "en": "Saturn", "basemap": "image",
+               "image": {"url": "https://archive.stsci.edu/hlsps/opal/cycle32/saturn/"
+                                "hlsp_opal_hst_wfc3-uvis_saturn-2025a_f395n-f502n-f631n"
+                                "_v1_globalmap.tif",
+                         "credit": "Hubble OPAL 2025a 全球図（NASA/ESA/STScI）",
+                         "src_ar": 2.0, "left_edge_lon": 0.0, "epoch": "2025年（OPAL 最新回）"}},
+    "uranus": {"ja": "天王星", "en": "Uranus", "basemap": "image",
+               "image": {"url": "https://archive.stsci.edu/hlsps/opal/cycle33/uranus/"
+                                "hlsp_opal_hst_wfc3-uvis_uranus-2025a_f657n-f547m-f467m"
+                                "_v1_globalmap.tif",
+                         "credit": "Hubble OPAL 2025a 全球図（NASA/ESA/STScI）",
+                         "src_ar": 2.0, "left_edge_lon": 0.0, "epoch": "2025年（OPAL）"}},
+    "neptune": {"ja": "海王星", "en": "Neptune", "basemap": "image",
+                "image": {"url": "https://archive.stsci.edu/hlsps/opal/cycle32/neptune/"
+                                 "hlsp_opal_hst_wfc3-uvis_neptune-2025b_f467m-f547m-f657n"
+                                 "_v1_globalmap.tif",
+                          "credit": "Hubble OPAL 2025b 全球図（NASA/ESA/STScI）",
+                          "src_ar": 2.0, "left_edge_lon": 0.0, "epoch": "2025年（OPAL）"}},
+    # 冥王星: USGS/NASA の New Horizons 全球カラー図（Commons 経由）。左端 0°E は USGS の
+    # .lbl（CenterLongitude=180・最小経度 0.0）と、スプートニク平原が図のほぼ中央に来ること
+    # （実測 f=0.499≒180°E）の二重の確認による。
+    "pluto": {"ja": "冥王星", "en": "Pluto", "basemap": "image",
+              "image": {"url": "https://upload.wikimedia.org/wikipedia/commons/a/ad/"
+                               "Pluto_color_mapmosaic.jpg",
+                        "credit": "NASA/JHUAPL/SwRI（New Horizons 全球カラー図）",
+                        "src_ar": 2.0, "left_edge_lon": 0.0}},
+    # ベンヌ: NASA GSFC/アリゾナ大の OSIRIS-REx 全球モザイク（縮小版）。USGS/PDS の同モザイクは
+    # 左端 0°E（.lbl: CenterLongitude=180・最小経度 0.0）＝ Equirectangular。
+    "bennu": {"ja": "ベンヌ", "en": "Bennu", "basemap": "image",
+              "image": {"url": "https://upload.wikimedia.org/wikipedia/commons/b/b8/"
+                               "Bennu_global_mosaic_reduced_size.png",
+                        "credit": "NASA/GSFC/アリゾナ大（OSIRIS-REx 全球モザイク）",
+                        "src_ar": 2.0, "left_edge_lon": 0.0}},
+    # リュウグウ: 全球等角図が公開されていない（USGS の全球モザイク倉庫に該当キー0件・実測、
+    # NASA Trek もベースマップ層を配る索引サービスが HTTP 500 で層IDを取れない）。座標グリッドで示す。
     "ryugu": {"ja": "リュウグウ", "en": "Ryugu", "basemap": "graticule"},
 }
 
@@ -588,9 +632,19 @@ _BODY_MAP_NOTES = {
             "マーズ2号・3号・6号・ビーグル2号は着陸に失敗または通信が確立していない",
     "jupiter": "木星は**固体表面が無い**ガス惑星。SL9 衝突地点の緯度は木星中心緯度、経度は"
                "System III（**西向き**で公表）→この図では東向き正に変換。衝突面は 100 mbar 面で、"
-               "衝突痕は数日〜数週間で大気に流されて消えた（恒久的な地形ではない）",
-    "saturn": "土星は**固体表面が無い**ガス惑星。座標は大気の緯度経度（雲頂基準）",
-    "pluto": "冥王星の全球等角図は NASA Trek に無い（実測: 404）。緯度経度グリッドで座標だけを示す",
+               "衝突痕は数日〜数週間で大気に流されて消えた（恒久的な地形ではない）。"
+               "**ベースマップは Hubble OPAL の全球図＝その年の大気**なので1994年の衝突当時の"
+               "模様ではなく、衝突痕そのものも写っていない",
+    "saturn": "土星は**固体表面が無い**ガス惑星。座標は大気の緯度経度（雲頂基準）。"
+              "ベースマップは Hubble OPAL の全球図（その年の大気）",
+    "uranus": "天王星は**固体表面が無い**ガス惑星。ベースマップは Hubble OPAL の全球図"
+              "（その年の大気。縞は淡い）",
+    "neptune": "海王星は**固体表面が無い**ガス惑星。ベースマップは Hubble OPAL の全球図"
+               "（その年の大気。大暗斑は数年で消える）",
+    "pluto": "冥王星の全球図は New Horizons（2015年7月の接近時）の**モザイク**。"
+             "左端が東経 0° の図なので半周回して描いている（緯度経度は東向き正）",
+    "bennu": "ベンヌの全球図は OSIRIS-REx の**全球モザイク**。直径約 490 m の小型天体で、"
+             "着陸候補地点（Nightingale 等）は公表座標に基づく",
 }
 # 地点が着陸地点でない場合（新クレーター等）の出典。着陸地点の出典一覧を出すと図と文が食い違う
 _SITES_SOURCE_CRATER = ("座標: LROC 公表値（月面座標系・東向き正）／地図: NASA Trek LRO WAC"
@@ -599,8 +653,9 @@ _SITES_SOURCE = ("座標: NASA NSSDC（アポロ・LRO 画像 Wagner+2017）／L
                  "サーベイヤー）／金星は Wikipedia「Venera program」飛行データ表（NSSDC 準拠）／"
                  "火星は The Planetary Society の着陸地点一覧が付す一次出典（NSSDC・Arvidson+2006・"
                  "Squyres+2006・Vasavada+2014・Golombek+2019・HiRISE 提供図）／SL9 は PDS Atmospheres"
-                 "（Chodas & Yeomans 1996, IAU Colloq.156）／地図: NASA Trek"
-                 "（全球画像が無い天体は緯度経度グリッド）")
+                 "（Chodas & Yeomans 1996, IAU Colloq.156）／地図: NASA Trek の全球タイル（月・火星・水星・ベスタ・ケレス）、各天体の1枚の"
+                 "全球図（Hubble OPAL・USGS/NASA モザイク・New Horizons・OSIRIS-REx 等。credit は"
+                 "注記のとおり）、全球画像が無い天体は緯度経度グリッド）")
 
 
 def _impact_site_result(body_cfg: dict, info: dict, span_deg: float = 60.0,
@@ -822,7 +877,8 @@ def _sites_result(body: str, key, out_px: int = 1000):
         elif mode == "image":
             sv = image_view(img_cfg["url"], _site_lon, float(site["lat"]), span_deg,
                             out_px, credit=img_cfg.get("credit", ""), headers=BASEMAP_UA,
-                            whole_dim=0.88, regional_dim=0.88)
+                            whole_dim=0.88, regional_dim=0.88,
+                            left_edge_lon=img_cfg.get("left_edge_lon"))
         else:
             # 全球地形画像が無い天体（ガス惑星・小型天体）: 緯度経度グリッドに座標だけ描く
             sv = graticule_view(_site_lon, float(site["lat"]), span_deg, out_px,
@@ -1078,6 +1134,16 @@ def _sites_result(body: str, key, out_px: int = 1000):
                          "（元 AR={}、{}×{} px）。この補正ぶんの位置ずれ（数%）は残る".format(
                              sv.get("source_ar"), (sv.get("pixels") or ["?", "?"])[0],
                              (sv.get("pixels") or ["?", "?"])[1]))
+        if sv.get("lon_roll_deg"):
+            notes.append("出典画像の左端は東経 0°（{}）で、この図の投影（左端 西経 180°）とは"
+                         "180° ずれているため、**横に半周（{}°＝{} px 分）回して**描画している".format(
+                             sv.get("left_edge_lon"), sv.get("lon_roll_deg"),
+                             int(round(float(sv.get("lon_roll_deg") or 0.0) / 360.0
+                                       * ((sv.get("pixels") or [0, 0])[0] or 0)))))
+        if img_cfg and img_cfg.get("epoch"):
+            notes.append("ベースマップは **{} の観測**の全球図（{}）で、**大気の模様はその時点の"
+                         "もの**。地点マーカーの年代とは一致しない".format(
+                             img_cfg["epoch"], attrib))
     if basemap_fallback:
         notes.append("全球画像を取得できなかったため、**緯度経度グリッドで代替**している（{}）".format(
             basemap_fallback))
@@ -1189,7 +1255,9 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
     全面表示にするには span_deg=360（既定 120）。zoom 省略時は全面(1)に自動設定。
 
     Args:
-        body: 天体名（moon, mars, mercury, titan, vesta, ceres）。
+        body: 天体名（moon, mars, mercury, venus, titan, vesta, ceres, io, europa,
+            ganymede, callisto, jupiter, saturn, uranus, neptune, pluto, bennu, ryugu）。
+            地点が登録されていない天体（ガス惑星・小天体）は sites="map" で全球図を返す。
         orbiter: 周回機名（月: lro, gateway／火星: mro, odyssey）または
             JPL Horizons の負の天体ID（例 "-74"）。和名（"かぐや"/"あかつき" 等）も可。
             過去機（kaguya 等）は運用終了のため現在位置は返さず、**落点が公表されている

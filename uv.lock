@@ -1505,7 +1505,7 @@ wheels = [
 
 [[package]]
 name = "space-finder-mcp"
-version = "0.38.0"
+version = "0.38.2"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
