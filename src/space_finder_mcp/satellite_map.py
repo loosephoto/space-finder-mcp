@@ -46,7 +46,7 @@ def _earth_image() -> bytes:
         with open(_EARTH_CACHE, "rb") as f:
             return f.read()
     os.makedirs(os.path.dirname(_EARTH_CACHE), exist_ok=True)
-    r = requests.get(_EARTH_URL, headers={"User-Agent": UA["User-Agent"]}, timeout=60)
+    r = requests.get(_EARTH_URL, headers={"User-Agent": UA["User-Agent"]}, timeout=(60, 60))
     r.raise_for_status()
     with open(_EARTH_CACHE, "wb") as f:
         f.write(r.content)

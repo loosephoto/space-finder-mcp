@@ -125,7 +125,7 @@ def _horizons_state_cached(cmd, jd):
                              "MAKE_EPHEM": "'YES'", "EPHEM_TYPE": "VECTORS",
                              "CENTER": "'500@10'", "REF_PLANE": "ECLIPTIC",
                              "TLIST": "'{:.6f}'".format(jd), "VEC_TABLE": "'2'"},
-                     headers=UA, timeout=30)
+                     headers=UA, timeout=(30, 30))
     r.raise_for_status()
     txt = r.text
     i = txt.find("$$SOE"); j = txt.find("$$EOE")
@@ -277,7 +277,7 @@ def _sbdb_elements(sstr):
     # これが無いと光度チャートが予測光度を描けない（軌道要素だけでは足りない）。
     r = requests.get("https://ssd-api.jpl.nasa.gov/sbdb.api",
                      params={"sstr": sstr, "full-prec": "true", "phys-par": "true"},
-                     headers=UA, timeout=25)
+                     headers=UA, timeout=(25, 25))
     r.raise_for_status()
     d = r.json()
     if "orbit" not in d or "elements" not in d["orbit"]:

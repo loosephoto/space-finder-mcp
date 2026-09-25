@@ -43,7 +43,7 @@ def _do_query(query: str, limit: int) -> tuple[Optional[list], Optional[str]]:
         # step1: ジョブ作成（リダイレクトを辿らない）
         r = requests.post(TAP, data={
             "REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "csv", "QUERY": query,
-        }, headers=UA, timeout=40, allow_redirects=False)
+        }, headers=UA, timeout=(40, 40), allow_redirects=False)
     except requests.RequestException as e:
         return None, f"ALMA TAP 接続失敗: {str(e)[:120]}"
     loc = r.headers.get("Location") if r.status_code in (200, 303) else None
@@ -51,7 +51,7 @@ def _do_query(query: str, limit: int) -> tuple[Optional[list], Optional[str]]:
         return None, f"ALMA TAP 応答異常（status={r.status_code}）。クエリの列・書式を確認してください。"
     try:
         # step2: 発行されたジョブ URL を GET して CSV を取得
-        g = requests.get(loc, headers=UA, timeout=60)
+        g = requests.get(loc, headers=UA, timeout=(60, 60))
         g.raise_for_status()
     except requests.RequestException as e:
         return None, f"ALMA TAP 結果取得失敗: {str(e)[:120]}"
@@ -91,7 +91,7 @@ def _datalink_products(access_url: str, max_items: int = 12) -> list:
     """
     import xml.etree.ElementTree as ET
     try:
-        r = requests.get(access_url, headers=UA, timeout=45)
+        r = requests.get(access_url, headers=UA, timeout=(45, 45))
         if r.status_code != 200:
             return []
         root = ET.fromstring(r.content)

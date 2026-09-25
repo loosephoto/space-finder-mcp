@@ -42,7 +42,7 @@ _G_SCALE_JA = {
 
 def _get_json(path: str):
     """SWPC の JSON エンドポイントを取得する（例外はそのまま伝播）。"""
-    r = requests.get(SWPC + path, headers=UA, timeout=30)
+    r = requests.get(SWPC + path, headers=UA, timeout=(30, 30))
     r.raise_for_status()
     return r.json()
 

@@ -28,7 +28,7 @@ _ENDPOINTS = {
 
 def _fetch(kind: str) -> list[dict]:
     ep, key, _ = _ENDPOINTS[kind]
-    r = requests.get(f"{BASE}/{ep}", headers=UA, timeout=25)
+    r = requests.get(f"{BASE}/{ep}", headers=UA, timeout=(25, 25))
     r.raise_for_status()
     d = r.json()
     return d.get(key, [])

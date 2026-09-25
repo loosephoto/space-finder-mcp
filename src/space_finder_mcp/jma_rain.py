@@ -91,7 +91,7 @@ LEGEND: tuple = (
 def _http_bytes(url: str) -> Optional[bytes]:
     """GET して本文を返す（失敗・空は None）。"""
     try:
-        r = requests.get(url, headers=_UA, timeout=30)
+        r = requests.get(url, headers=_UA, timeout=(30, 30))
         if r.status_code != 200 or not r.content:
             return None
         return r.content

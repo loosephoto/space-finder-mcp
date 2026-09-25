@@ -31,7 +31,7 @@ COMMON_COLLECTIONS = {
 
 
 def _fetch_collections() -> list[dict]:
-    r = requests.get(f"{STAC}/collections", headers=UA, timeout=25)
+    r = requests.get(f"{STAC}/collections", headers=UA, timeout=(25, 25))
     r.raise_for_status()
     return r.json().get("collections", [])
 
@@ -114,7 +114,7 @@ def copernicus_search(collection: str = "sentinel-2-l2a", bbox: Optional[str] = 
     if cloud is not None:
         body["filter"] = {"op": "<", "args": [{"property": "eo:cloud_cover"}, cloud]}
     try:
-        r = requests.post(f"{STAC}/search", headers=UA, json=body, timeout=35)
+        r = requests.post(f"{STAC}/search", headers=UA, json=body, timeout=(35, 35))
         r.raise_for_status()
         d = r.json()
     except requests.RequestException as e:

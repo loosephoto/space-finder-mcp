@@ -133,7 +133,7 @@ def _horizons_states(cmd: str, center: str, jds: list) -> list:
             "TLIST": tl, "VEC_TABLE": "'2'", "OUT_UNITS": "'KM-S'",
         }
         r = requests.post("https://ssd.jpl.nasa.gov/api/horizons.api", data=data,
-                          headers=UA, timeout=60)
+                          headers=UA, timeout=(60, 60))
         r.raise_for_status()
         txt = r.text
         if "No ephemeris" in txt or "No such record" in txt:
@@ -181,7 +181,7 @@ def _horizons_state_single(cmd: str, center: str, jd: float) -> tuple:
         "TLIST": "'{:.6f}'".format(jd), "VEC_TABLE": "'2'", "OUT_UNITS": "'KM-S'",
     }
     r = requests.get("https://ssd.jpl.nasa.gov/api/horizons.api", params=params,
-                     headers=UA, timeout=40)
+                     headers=UA, timeout=(40, 40))
     r.raise_for_status()
     txt = r.text
     if "No ephemeris" in txt or "No such record" in txt:
@@ -210,7 +210,7 @@ def _body_name(cmd: str) -> str:
     params = {"format": "text", "COMMAND": "'" + cmd + "'", "MAKE_EPHEM": "'NO'"}
     try:
         r = requests.get("https://ssd.jpl.nasa.gov/api/horizons.api", params=params,
-                         headers=UA, timeout=30)
+                         headers=UA, timeout=(30, 30))
         m = re.search(r"Revised:.*?([A-Za-z0-9 /().\-']+?)\s*\((-?[0-9]+)\)", r.text)
         if m:
             return m.group(1).strip()
@@ -365,6 +365,32 @@ SITES: dict = {
         "surveyor3": {"ja": "サーベイヤー3号", "en": "Surveyor 3", "lat": -3.0162, "lon": -23.418,
                       "place": "嵐の大洋", "landed": "1967-04-20",
                       "flag": "アポロ12号の乗員が訪れた（1969）"},
+        # 新しく形成されたクレーター（LROC が LRO 運用中に before/after 比較で確認した地形）。
+        # 座標は LROC 公表値（月面座標系・東向き正）。kind="crater"=自然衝突、"impact"=人工物。
+        "mcgetchin": {"ja": "マクゲッチン", "en": "McGetchin", "lat": 1.3536, "lon": 67.1765,
+                      "place": "月の東端（Dubyago N の南東・海と高地の境界）",
+                      "landed": "2024-04-11〜05-22", "kind": "crater",
+                      "event": "2024-04-11〜2024-05-22 の間",
+                      "status": "自然衝突でできた最新のクレーター（直径 222 m・深さ 43 m。"
+                                "LROC が 2025-10-24 に発見し、IAU 命名は 2026-05-04）",
+                      "note": "**マクゲッチン・クレーター**は LROC が前後比較で確認した自然形成の"
+                              "クレーター。直径 222 m・深さ 43 m・リムは平均 8 m 盛り上がり、"
+                              "壁の傾斜は平均 24°（最大 40°近く）。衝突天体は 3〜6 階建て相当で、"
+                              "この規模の衝突は月で平均 132 年に1回。形成時期は前後画像から "
+                              "2024-04-11〜2024-05-22 の間に絞られ、LROC が 2025-10-24 に発見、"
+                              "IAU が 2026-05-04 に命名。出典: LROC Featured Image 1501"
+                              "（M1542395927）／Science Advances aeh7812／IAU Gazetteer 16447"},
+        "falcon9": {"ja": "ファルコン9上段", "en": "Falcon 9 upper stage", "lat": 19.4759,
+                    "lon": 266.7138, "place": "月の表側西の縁（アインシュタイン・クレーター付近）",
+                    "landed": "2026-08-05", "kind": "impact",
+                    "event": "2026-08-05 06:35 UTC",
+                    "status": "人工物の衝突でできた痕跡（直径 18 m・深さ 3 m 未満）",
+                    "note": "**ファルコン9上段の衝突痕**は、確認された人工物の月面衝突では最も"
+                            "新しいもの。SpaceX ファルコン9の上段が 2026-08-05 06:35 UTC に"
+                            "水平から約 31° で衝突し、直径 18 m・深さ 3 m 未満のクレーターを"
+                            "作った。衝突地点は JPL CNEOS が予測し、KPLO（Danuri）が数時間後に、"
+                            "LRO が 6 日後に撮影して確認。出典: LROC Featured Image 1499"
+                            "（M1541091337）／JPL CNEOS 2025-010D"},
     },
     "venus": {
         # ヴェネラ計画の着陸地点（出典: Wikipedia「Venera program」の飛行データ表＝NSSDC 準拠）。
@@ -566,6 +592,9 @@ _BODY_MAP_NOTES = {
     "saturn": "土星は**固体表面が無い**ガス惑星。座標は大気の緯度経度（雲頂基準）",
     "pluto": "冥王星の全球等角図は NASA Trek に無い（実測: 404）。緯度経度グリッドで座標だけを示す",
 }
+# 地点が着陸地点でない場合（新クレーター等）の出典。着陸地点の出典一覧を出すと図と文が食い違う
+_SITES_SOURCE_CRATER = ("座標: LROC 公表値（月面座標系・東向き正）／地図: NASA Trek LRO WAC"
+                        "（全球画像が無い天体は緯度経度グリッド）")
 _SITES_SOURCE = ("座標: NASA NSSDC（アポロ・LRO 画像 Wagner+2017）／LROC 2016 座標表（嫦娥3・ルノホート・"
                  "サーベイヤー）／金星は Wikipedia「Venera program」飛行データ表（NSSDC 準拠）／"
                  "火星は The Planetary Society の着陸地点一覧が付す一次出典（NSSDC・Arvidson+2006・"
@@ -711,6 +740,17 @@ def _sites_result(body: str, key, out_px: int = 1000):
     keys = split_names(key) or ["all"]
     map_only = len(keys) == 1 and keys[0].strip().lower() in ("map", "地図", "only")
     _APOLLO = ["apollo11", "apollo12", "apollo14", "apollo15", "apollo16", "apollo17"]
+    # 月に新しく作られたクレーター（人工物の衝突を含む・新しい順）
+    _NEW_CRATERS = ["falcon9", "mcgetchin"]
+    _NEW_CRATER_KEYS = ("newcrater", "newcraters", "new_crater", "new_craters",
+                        "新クレーター", "新しいクレーター", "最新クレーター")
+    if len(keys) == 1 and keys[0].strip().lower() in _NEW_CRATER_KEYS:
+        if b != "moon":
+            msg = "'{}' は月面専用の指定です。天体 {} の地点: {}".format(
+                keys[0], body_ja, ", ".join(sorted(table)) or "なし")
+            return CallToolResult(content=[TextContent(type="text", text=msg)],
+                                  structuredContent={"error": "wrong body", "body": b})
+        keys = list(_NEW_CRATERS)
     if len(keys) == 1 and keys[0].lower() in ("all", "apollo", "アポロ"):
         if keys[0].lower() in ("apollo", "アポロ") and b != "moon":
             msg = "'{}' は月面専用の指定です。天体 {} の地点: {}".format(
@@ -761,7 +801,9 @@ def _sites_result(body: str, key, out_px: int = 1000):
     if len(picked) > 1:
         def _min_sep(px_w: float) -> float:
             k = px_w / 360.0
-            return min(math.hypot((a["lon"] - b["lon"]) * k, (a["lat"] - b["lat"]) * k)
+            def _delta_lon(a, b):
+                return ((float(a["lon"]) - float(b["lon"]) + 180.0) % 360.0) - 180.0
+            return min(math.hypot(_delta_lon(a, b) * k, (a["lat"] - b["lat"]) * k)
                        for i, a in enumerate(picked) for b in picked[i + 1:])
         for cand in (out_px, 1200, 1600):
             out_px = max(out_px, cand)
@@ -769,25 +811,28 @@ def _sites_result(body: str, key, out_px: int = 1000):
                 break
         r_gap = max(6, int(_min_sep(out_px) / 2.0 - 3.0))
         upscaled = out_px if out_px == requested_out_px else out_px  # 下で注記に使う
+    # 経度は公表値が 0〜360°E のことがある（例: ファルコン9上段 266.7138°E）。地図の投影は
+    # -180〜180° を前提とするため、ここで折り返す（折り返さないと画像サイズが負になる：実測）。
+    _site_lon = ((float(site["lon"]) + 180.0) % 360.0) - 180.0
     basemap_fallback = None
     try:
         if mode == "trek":
-            sv = surface_view(cfg, float(site["lon"]), float(site["lat"]), span_deg, zoom, out_px,
+            sv = surface_view(cfg, _site_lon, float(site["lat"]), span_deg, zoom, out_px,
                               whole_dim=0.80, regional_dim=0.80)
         elif mode == "image":
-            sv = image_view(img_cfg["url"], float(site["lon"]), float(site["lat"]), span_deg,
+            sv = image_view(img_cfg["url"], _site_lon, float(site["lat"]), span_deg,
                             out_px, credit=img_cfg.get("credit", ""), headers=BASEMAP_UA,
                             whole_dim=0.88, regional_dim=0.88)
         else:
             # 全球地形画像が無い天体（ガス惑星・小型天体）: 緯度経度グリッドに座標だけ描く
-            sv = graticule_view(float(site["lon"]), float(site["lat"]), span_deg, out_px,
+            sv = graticule_view(_site_lon, float(site["lat"]), span_deg, out_px,
                                 body_ja=body_ja)
     except Exception as e:
         if mode == "image":
             # 画像が取れないときは座標グリッドへ落として描く（図を返さずに終わらせない）
             basemap_fallback = "{}: {}".format(type(e).__name__, str(e)[:120])
             try:
-                sv = graticule_view(float(site["lon"]), float(site["lat"]), span_deg, out_px,
+                sv = graticule_view(_site_lon, float(site["lat"]), span_deg, out_px,
                                     body_ja=body_ja)
                 mode, attrib = "graticule", "緯度経度グリッド（全球画像を取得できず代替）"
             except Exception as e2:
@@ -814,7 +859,7 @@ def _sites_result(body: str, key, out_px: int = 1000):
         _lon = ((float(st["lon"]) + 180.0) % 360.0) - 180.0
         x, y = g2px(_lon, float(st["lat"]))
         marks.append({"id": st["en"].lower().replace(" ", ""), "label": st["ja"],
-                      "lat": round(float(st["lat"]), 5), "lon": round(float(st["lon"]), 5),
+                      "lat": round(float(st["lat"]), 5), "lon": round(_lon, 5),
                       "px": [round(x), round(y)], "radius": r,
                       "numeral": "①②③④⑤⑥⑦⑧⑨⑩"[i - 1] if i <= 10 else str(i)})
     # マーカーの半径は**画像サイズ基準**で決める（最小間隔に合わせると全部が点になる。
@@ -877,16 +922,38 @@ def _sites_result(body: str, key, out_px: int = 1000):
                 break
             else:
                 skipped_numerals.append(m["label"])
-    # パネル（タイトル＋凡例／情報）。天体に応じて「着陸地点」/「衝突地点」を切り替える
-    pt_label = "衝突地点" if b == "jupiter" else "着陸地点"
-    event_word = "衝突" if b == "jupiter" else "着陸"
+    # 地点ごとの種別を使い、混在する指定では特定種別に誤分類しない。
+    _KIND_LABEL = {"landing": ("着陸地点", "着陸"), "crater": ("クレーター", "形成"),
+                   "impact": ("衝突地点", "衝突")}
+    _kinds = {st.get("kind", "impact" if b == "jupiter" else "landing")
+              for st in picked}
+    _kind1 = (next(iter(_kinds)) if len(_kinds) == 1 else
+              ("impact" if b == "jupiter" else ("mixed" if _kinds else "landing")))
+    _mixed_labels = list(dict.fromkeys(_KIND_LABEL.get(k, _KIND_LABEL["landing"])[0]
+                                       for k in (st.get("kind", "landing") for st in picked)))
+    pt_label = (_KIND_LABEL.get(_kind1, ("地点", "イベント"))[0]
+                if _kind1 != "mixed" else "地点（{}）".format("・".join(_mixed_labels)))
+    def _terms(st):
+        default_kind = "impact" if b == "jupiter" else "landing"
+        return _KIND_LABEL.get(st.get("kind", default_kind), _KIND_LABEL["landing"])
+    def _ev(st):
+        """表示用の時刻。形成時期の範囲や時刻つきの衝突は event を使う"""
+        return st.get("event") or (str(st["landed"]) + " UTC")
+    def _lon_txt(lon):
+        """経度の表示。公表値が 180° を超える場合は折り返した値（西経）も併記する"""
+        v = float(lon)
+        if v > 180.0:
+            return "東経 {:.5f}°（＝西経 {:.5f}°）".format(v, 360.0 - v)
+        if v < -180.0:
+            return "西経 {:.5f}°（＝東経 {:.5f}°）".format(abs(v), 360.0 + v)
+        return "{} {:.5f}°".format("東経" if v >= 0 else "西経", abs(v))
     def _sttxt(st):
         return st.get("flag") or st.get("status") or "データあり"
     if single:
         ns = "北緯" if site["lat"] >= 0 else "南緯"
-        ew = "東経" if site["lon"] >= 0 else "西経"
         rows = [f"{site['ja']}（{site['place']}）の{pt_label}",
-                f"座標: {ns} {abs(site['lat']):.5f}° / {ew} {abs(site['lon']):.5f}°　{event_word} {site['landed']} UTC",
+                f"座標: {ns} {abs(site['lat']):.5f}° / {_lon_txt(site['lon'])}　"
+                f"{_terms(site)[1]} {_ev(site)}",
                 f"{'米国旗' if site.get('flag') else '状態'}: {_sttxt(site)}",
                 f"地図: {attrib}"]
     elif not picked:
@@ -898,7 +965,7 @@ def _sites_result(body: str, key, out_px: int = 1000):
             _merge = merged.get(m["label"]) or []
             rows.append("{}{} {}（{}） {:.3f}°{} {:.3f}°{} {}｜{}".format(
                 m["numeral"], "＊" if _merge else "", st["ja"], st["place"], abs(st["lat"]), ns,
-                abs(st["lon"]), ew, st["landed"], _sttxt(st))
+                abs(st["lon"]), ew, _ev(st), _sttxt(st))
                 + ("　（この付近に{}点をまとめて表示）".format(len(_merge) + 1) if _merge else ""))
     # 凡例・タイトルは地図の**下の帯**に置く（地図に重ねると地点マーカーが文字で隠れる。
     # 実測: アポロ6地点の図で 1 地点が中心まで黒く潰れ、他の地点も文字が被った）
@@ -944,16 +1011,49 @@ def _sites_result(body: str, key, out_px: int = 1000):
         mv["numerals_skipped"] = skipped_numerals
     mv["map_height_px"] = int(map_h)
     mv["ok"] = bool(mv["ok"] and mv["markers_inside_map"])
-    # ラベルがマーカーを覆っていないか（単一時のみ名前ラベルを出す）
+    # 名前ラベルは実文字幅で配置し、マーカー非重複とキャンバス内を検証する。
+    skipped_labels = []
+    label_overlap = False
+    labels_inside = True
     if single:
         x, y0 = marks[0]["px"]
-        d.rounded_rectangle([x + r * 3, y0 - 14, x + r * 3 + 260, y0 + 18], radius=8,
-                            fill=(200, 0, 0, 235))
-        d.text((x + r * 3 + 8, y0 - 9), f"{site['ja']} 着陸地点", font=f_mid, fill=(255, 255, 255))
-        mv["labels_overlap_marker"] = bool(x + r * 3 <= x <= x + r * 3 + 260)
+        site_label = _terms(site)[0]
+        label_text = f"{site['ja']} {site_label}"
+        left, top, right, bottom = f_mid.getbbox(label_text)
+        text_w, text_h = max(1, right - left), max(1, bottom - top)
+        pad_x, pad_y = 8, 6
+        box_w, box_h = text_w + 2 * pad_x, text_h + 2 * pad_y
+        candidates = [(x + 3 * r, y0 - box_h // 2),
+                      (x - 3 * r - box_w, y0 - box_h // 2)]
+        chosen = None
+        for lx, ly in candidates:
+            rx, by = lx + box_w, ly + box_h
+            if not (0 <= lx and rx < iw and 0 <= ly and by < map_h):
+                continue
+            near_x = min(max(x, lx), rx)
+            near_y = min(max(y0, ly), by)
+            if (near_x - x) ** 2 + (near_y - y0) ** 2 < r ** 2:
+                continue
+            chosen = (lx, ly, rx, by)
+            break
+        if chosen:
+            lx, ly, rx, by = chosen
+            d.rounded_rectangle([lx, ly, rx, by], radius=8, fill=(200, 0, 0, 235))
+            d.text((lx + pad_x - left, ly + pad_y - top), label_text, font=f_mid,
+                   fill=(255, 255, 255))
+            label_overlap = ((min(max(x, lx), rx) - x) ** 2
+                             + (min(max(y0, ly), by) - y0) ** 2 < r ** 2)
+            labels_inside = bool(0 <= lx <= rx <= iw and 0 <= ly <= by <= map_h)
+        else:
+            skipped_labels.append(label_text)
+        mv["labels_overlap_marker"] = label_overlap
+        mv["labels_inside_canvas"] = labels_inside
+        mv["label_bounds_px"] = list(chosen) if chosen else None
+        mv["ok"] = bool(mv["ok"] and labels_inside and not label_overlap)
     jpeg = encode_jpeg(img)
     out_path = save_output(jpeg, "planetary_landing_sites", "jpg")
     notes = []
+    _site_notes = [st["note"] for st in picked if st.get("note")]
     if b == "moon":
         notes += [
             "マーカーは **NASA NSSDC / LROC が公表した座標**（アポロは月着陸船(LM)の値。LRO 画像から"
@@ -966,6 +1066,10 @@ def _sites_result(body: str, key, out_px: int = 1000):
         notes += [
             "マーカーは公表された地点座標そのもの（出典は下記）。座標の基準面・基準系は天体ごとに異なる",
         ]
+    # 各地点固有の出典・解説は共通の座標系注記を残したうえで追加する。
+    notes.extend(_site_notes)
+    if skipped_labels:
+        notes.append("画面内に配置できず省略した地点ラベル: " + "、".join(skipped_labels))
     if mode == "image":
         notes.append("ベースマップは**1枚の全球等角図**（{}）。**地形図ではなく概要画像**で、"
                      "おおよその位置把握用".format(attrib))
@@ -980,7 +1084,7 @@ def _sites_result(body: str, key, out_px: int = 1000):
     if not picked:
         notes.append("この図には**地点マーカーを描いていない**（sites=\"map\"＝地図のみ）")
     notes += [
-        "等角図法のため高緯度ほど東西方向が圧縮されて見える"
+        "等角図法のため高緯度ほど東西方向が圧縮されて見える。"
         "表示は{}。{}".format(
             '局所 {:.0f}°'.format(span_deg) if single else "天体全面",
             {"trek": "地形は地図タイル（{}）に依存する".format(attrib),
@@ -991,8 +1095,9 @@ def _sites_result(body: str, key, out_px: int = 1000):
     if _BODY_MAP_NOTES.get(b):
         notes.append(_BODY_MAP_NOTES[b])
     for m, st in zip(marks, picked):
-        notes.append("{} {}（{}）: 緯度 {:.5f}° / 経度 {:.5f}°・{} {}・{}".format(
-            m["numeral"], st["ja"], st["place"], st["lat"], st["lon"], event_word, st["landed"],
+        _label, _event_word = _terms(st)
+        notes.append("{} {}（{}）: 緯度 {:.5f}° / 経度 {}・{} {}・{}".format(
+            m["numeral"], st["ja"], st["place"], st["lat"], _lon_txt(st["lon"]), _event_word, _ev(st),
             _sttxt(st)))
     for _host, _members in merged.items():
         notes.append("{} の位置に**まとめて1点で表示**した地点（重なるため。座標は "
@@ -1002,16 +1107,32 @@ def _sites_result(body: str, key, out_px: int = 1000):
                      "（間隔 {}px・半径 {}px）".format(requested_out_px, out_px, round(_min_sep(out_px), 1), r))
     if skipped_numerals:
         notes.append("図中に番号を置けなかった地点（凡例の番号で参照）: " + "、".join(skipped_numerals))
-    notes.append(_SITES_SOURCE)
+    _wrapped = [st for st in picked if float(st["lon"]) > 180.0]
+    if _wrapped:
+        notes.append("経度は東向き正の値で公表されている（{}）。図の投影は -180〜180° なので"
+                     "折り返して描いており、同一の地点を指す".format(
+                         "、".join("{} {:.4f}°E＝西経 {:.4f}°".format(
+                             st["ja"], float(st["lon"]), 360.0 - float(st["lon"]))
+                             for st in _wrapped)))
+    _sources = []
+    _has_crater_source = b == "moon" and any(
+        st.get("kind") in {"crater", "impact"} for st in picked)
+    if not _has_crater_source or "landing" in _kinds:
+        _sources.append(_SITES_SOURCE)
+    if _has_crater_source:
+        _sources.append(_SITES_SOURCE_CRATER)
+    _src = "／".join(_sources) if _sources else _SITES_SOURCE
+    notes.append(_src)
     title = (f"{site['ja']}（{site['place']}）の{pt_label}（{attrib}）" if single else
              (f"{body_ja}の{pt_label} {len(picked)} 地点（{attrib}）" if picked else
               f"{body_ja}の全球図（{attrib}）"))
     fig = figure_payload(
         kind=(("body_map" if not picked else
-               ("impact_site_map" if b == "jupiter" else "landing_site_map"))), title=title,
+               ("landing_site_map" if _kinds == {"landing"} else
+                ("impact_site_map" if not (_kinds & {"landing"}) else "site_map")))), title=title,
         view=view_spec("body_surface", "equirectangular",
                        f"{body_ja}面の緯度経度図（等角図法）。赤●＝{pt_label}",
-                       why="着陸地点は天体面の座標なので、天体面の地図に置くのが最も誤読が少ない"),
+                       why="地点は天体面の座標なので、天体面の地図に置くのが最も誤読が少ない"),
         primary=primary_spec(body_ja, "surface_map",
                              note="天体面の地図なので主天体は図の中心に置いていない"),
         scale=scale_spec("linear", to_scale=True, unit="deg",
@@ -1020,8 +1141,9 @@ def _sites_result(body: str, key, out_px: int = 1000):
         caption="{}。マーカーは公表された地点座標に置いたもの{}。".format(
             title + "。" + "、".join("{} {}°{} {}°{}".format(
                 m["numeral"], abs(st["lat"]), "N" if st["lat"] >= 0 else "S",
-                abs(st["lon"]), "E" if st["lon"] >= 0 else "W") for m, st in zip(marks, picked))
-            , ("（旗の位置は公開表に無い）" if b == "moon" else "")),
+                abs(m["lon"]), "E" if m["lon"] >= 0 else "W") for m, st in zip(marks, picked))
+            , ("（旗の位置は公開表に無い）"
+               if (b == "moon" and _kind1 == "landing") else "")),
         verify=mv)
     imgc = ImageContent(type="image", data=base64.b64encode(jpeg).decode("ascii"),
                         mimeType="image/jpeg", altText=title)
@@ -1029,19 +1151,22 @@ def _sites_result(body: str, key, out_px: int = 1000):
         "{}の{}マップ".format(body_ja, pt_label)), path=out_path, kind="figure"),
         "🌕 **{}**".format(title)]
     for m, st in zip(marks, picked):
-        ns = "北緯" if st["lat"] >= 0 else "南緯"; ew = "東経" if st["lon"] >= 0 else "西経"
-        lines.append("{} {}（{}）: {} {:.5f}° / {} {:.5f}°・{} {} ・ {}".format(
+        ns = "北緯" if st["lat"] >= 0 else "南緯"
+        _label, _event_word = _terms(st)
+        lines.append("{} {}（{}）: {} {:.5f}° / {}・{} {} ・ {}".format(
             m["numeral"] if not single else "📍", st["ja"], st["place"], ns, abs(st["lat"]),
-            ew, abs(st["lon"]), event_word, st["landed"], _sttxt(st)))
-    lines += ["", figure_text_block(fig), "出典: " + _SITES_SOURCE]
+            _lon_txt(st["lon"]), _event_word, _ev(st), _sttxt(st)))
+    lines += ["", figure_text_block(fig), "出典: " + _src]
     return CallToolResult(
         content=[TextContent(type="text", text="\n".join(lines)), imgc],
         structuredContent={
             "body": body_ja, "sites": [dict(m, place=st["place"], landed=st["landed"],
-                                                  status=_sttxt(st), en=st["en"])
+                                                event=_ev(st), kind=st.get(
+                                                    "kind", "impact" if b == "jupiter" else "landing"),
+                                                status=_sttxt(st), en=st["en"])
                                               for m, st in zip(marks, picked)],
             "count": len(picked), "span_deg": span_deg, "zoom": sv["zoom"],
-            "figure": fig, "image_path": out_path, "source": _SITES_SOURCE,
+            "figure": fig, "image_path": out_path, "source": _src,
         })
 
 
@@ -1057,6 +1182,7 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
     「かぐやの月面落下地点は？」（過去機は運用終了を案内し、落点が公表されていれば
     その地点を月面図にマーカーで示した図を返す）
     「アポロの着陸地点を月面図で」「アポロ11号の着陸地点は？」（sites 指定＝地点マーカー図）
+    「月に出来た一番新しいクレーターの位置は？」（sites="newcrater"＝新クレーター2地点）
     JPL Horizons が返す中心天体の状態ベクトルを IAU 自転モデルで天体固定座標
     (緯度経度・高度) に変換し、NASA Trek の等角図法地図に重ねて描画。認証不要。
 
@@ -1075,9 +1201,14 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
         span_deg: 表示する経度幅（度。360=天体全面, 既定 120, 最大 360）。
         out_px: 出力画像の長辺ピクセル（既定 900, 最大 1600）。
         sites: **地点マーカー図**にする場合の地点指定（例 "apollo"=アポロ6地点すべて、
-            "apollo11"="apollo17"=個別）。指定すると周回機の計算を行わず、NASA NSSDC が
-            公表した着陸船(LM)座標にマーカーを置いた図を返す（1地点なら局所図、複数なら
-            天体全面図＋凡例）。旗の位置は公開表に無いため、注記でその旨を明示する。
+            "apollo11"="apollo17"=個別、"map"=地図のみ、"newcrater"=月に新しくできた
+            クレーター2点）。指定すると周回機の計算を行わず、公表座標にマーカーを置いた図を
+            返す（1地点なら局所図、複数なら天体全面図＋凡例）。旗の位置は公開表に無いため、
+            注記でその旨を明示する。sites="newcrater" は **マクゲッチン**（2024-04-11〜
+            05-22 に自然衝突で形成。直径 222 m・1.3536°N 67.1765°E）と **ファルコン9上段の
+            衝突痕**（2026-08-05 06:35 UTC。直径 18 m・19.4759°N 266.7138°E）を返す。
+            記録上いちばん新しいのは人工物の衝突（ファルコン9上段, 2026-08-05）、
+            **自然衝突ではマクゲッチンが最新**（この規模は月で平均 132 年に1回）。
 
     インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
     content の先頭へ「🖼️ [生成した画像を開く（…）](file:///…) ｜ 保存先: `…`」という

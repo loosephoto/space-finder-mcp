@@ -60,7 +60,7 @@ def _local_tz(lat, lon):
         rr = _rq.get("https://api.open-meteo.com/v1/forecast",
                      params={"latitude": lat, "longitude": lon, "timezone": "auto",
                              "current_weather": "false", "forecast_days": 1},
-                     headers={"User-Agent": "space-finder-mcp/0.22 (MCP)"}, timeout=20)
+                     headers={"User-Agent": "space-finder-mcp/0.22 (MCP)"}, timeout=(20, 20))
         rr.raise_for_status()
         sec = rr.json().get("utc_offset_seconds")
         if sec is not None:

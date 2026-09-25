@@ -310,6 +310,14 @@ FIGURES_EXTRA_CALLS = (
      {"body": "moon", "sites": "apollo"}, {"figure_kind": "landing_site_map"}),
     ("planetary_orbiter_track[アポロ11号]", "planetary_orbiter_track",
      {"body": "moon", "sites": "apollo11"}, {"figure_kind": "landing_site_map"}),
+    # 新しくできたクレーター（自然衝突の最新＝マクゲッチン／人工物衝突の最新＝ファルコン9上段）。
+    # 人工物の地点は経度が 0〜360°E で公表されるため、折り返し描画の経路もここで通す。
+    ("planetary_orbiter_track[月の新クレーター2地点]", "planetary_orbiter_track",
+     {"body": "moon", "sites": "newcrater"}, {"figure_kind": "impact_site_map"}),
+    ("planetary_orbiter_track[マクゲッチン]", "planetary_orbiter_track",
+     {"body": "moon", "sites": "mcgetchin"}, {"figure_kind": "impact_site_map"}),
+    ("planetary_orbiter_track[ファルコン9上段]", "planetary_orbiter_track",
+     {"body": "moon", "sites": "falcon9"}, {"figure_kind": "impact_site_map"}),
     # 全球地形画像が無い天体（木星）: 座標グリッドに衝突地点を描く経路
     ("planetary_orbiter_track[木星SL9衝突地点]", "planetary_orbiter_track",
      {"body": "jupiter", "sites": "all"}, {"figure_kind": "impact_site_map"}),

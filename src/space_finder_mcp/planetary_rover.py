@@ -57,7 +57,7 @@ def _mmgis_waypoint(mid: str) -> Optional[dict]:
     """MMGIS からローバー現在地(最終waypoint)を取得。{lat, lon, sol, dist_km, rmc}"""
     url = f"https://mars.nasa.gov/mmgis-maps/{mid}/Layers/json/{mid}_waypoints_current.json"
     try:
-        r = requests.get(url, headers=UA, timeout=25)
+        r = requests.get(url, headers=UA, timeout=(25, 25))
         r.raise_for_status()
         f = r.json().get("features", [{}])[0].get("properties", {})
         return {
@@ -73,7 +73,7 @@ def _mmgis_route(mid: str) -> Optional[list]:
     """MMGIS からローバーの走行経路(全waypoint: (lon,lat) 列)を取得。"""
     url = f"https://mars.nasa.gov/mmgis-maps/{mid}/Layers/json/{mid}_waypoints.json"
     try:
-        r = requests.get(url, headers=UA, timeout=30)
+        r = requests.get(url, headers=UA, timeout=(30, 30))
         r.raise_for_status()
         return [(f["properties"]["lon"], f["properties"]["lat"])
                 for f in r.json().get("features", [])

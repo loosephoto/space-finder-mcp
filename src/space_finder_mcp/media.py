@@ -91,7 +91,7 @@ def _search(q: str, media_type: str, limit: int) -> dict:
         f"{IMAGES_API}/search",
         params={"q": q, "media_type": media_type, "page_size": min(limit, 100)},
         headers=UA,
-        timeout=25,
+        timeout=(25, 25),
     )
     r.raise_for_status()
     return r.json()
@@ -116,7 +116,7 @@ def _search_or_error(q: str, media_type: str, limit: int):
 def _asset_hrefs(nasa_id: str) -> list[str]:
     """nasa_id の実ファイルURL(群)を取得する。"""
     try:
-        r = requests.get(f"{IMAGES_API}/asset/{nasa_id}", headers=UA, timeout=20)
+        r = requests.get(f"{IMAGES_API}/asset/{nasa_id}", headers=UA, timeout=(20, 20))
         r.raise_for_status()
         return [i.get("href") for i in r.json().get("collection", {}).get("items", [])
                 if isinstance(i, dict) and isinstance(i.get("href"), str)]

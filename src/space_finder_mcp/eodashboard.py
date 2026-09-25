@@ -49,7 +49,7 @@ def _fetch_collection_list(force: bool = False) -> list[dict]:
         return _collections_cache
     out: list[dict] = []
     try:
-        r = requests.get(TREE_API, headers=UA, timeout=30)
+        r = requests.get(TREE_API, headers=UA, timeout=(30, 30))
         r.raise_for_status()
         tree = r.json().get("tree", [])
         ids = [t["path"].split("/")[-1][:-5] for t in tree
@@ -70,7 +70,7 @@ def _fetch_collection_list(force: bool = False) -> list[dict]:
 def _fetch_meta(cid: str) -> Optional[dict]:
     """1コレクションのメタデータJSONを取得する。"""
     try:
-        r = requests.get(f"{RAW}/{cid}.json", headers=UA, timeout=20)
+        r = requests.get(f"{RAW}/{cid}.json", headers=UA, timeout=(20, 20))
         if r.status_code != 200:
             return None
         d = r.json()
@@ -225,7 +225,7 @@ def eodashboard_detail(identifier: str, show_image: bool = True) -> CallToolResu
     # サムネイル画像のインライン表示
     if show_image and img_url:
         try:
-            r = requests.get(img_url, headers=UA, timeout=25)
+            r = requests.get(img_url, headers=UA, timeout=(25, 25))
             if r.status_code == 200 and len(r.content) <= 3_500_000:
                 data = r.content
                 mime = "image/jpeg"

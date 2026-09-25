@@ -65,7 +65,7 @@ def radio_sources_now(lat: Optional[float] = None,
         r = requests.get(CATALOG, params={"lat": lat, "lon": lon,
                                           "alt": as_float(alt, DEFAULT_ALT, -500.0, 9000.0),
                                           "ele": as_float(elevation, 10.0, 0.0, 90.0)},
-                         headers=UA, timeout=30)
+                         headers=UA, timeout=(30, 30))
         r.raise_for_status()
         data = r.json()
     except requests.RequestException as e:

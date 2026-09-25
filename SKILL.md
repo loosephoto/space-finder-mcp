@@ -151,6 +151,8 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 「かぐやの月面落下地点は？」                      → planetary_orbiter_track(orbiter="かぐや", body="moon")  # 落点マップ（figure.kind=impact_site_map）
 「アポロの着陸地点を月面図で」                    → planetary_orbiter_track(body="moon", sites="apollo")   # 6地点＋凡例（figure.kind=landing_site_map）
 「アポロ11号の着陸地点は？」                      → planetary_orbiter_track(body="moon", sites="apollo11") # 局所図
+「月に出来た一番新しいクレーターの位置は？」      → planetary_orbiter_track(body="moon", sites="newcrater") # 新クレーター2点（自然衝突の最新＝マクゲッチン／人工物の最新＝ファルコン9上段）
+地点の種別が混在する `sites="all"` は、各行で着陸・形成・衝突を区別します。図の `figure.kind` は混在図=`site_map`、着陸地点のみ=`landing_site_map`、衝突・クレーターのみ=`impact_site_map` です。
 「木星に衝突した彗星の地点は？」                  → planetary_orbiter_track(body="jupiter", sites="all")   # SL9 23破片（座標グリッド）
 「金星の着陸地点は？」                            → planetary_orbiter_track(body="venus", sites="all")     # USGS/NASA Magellan 全球図（2:1 補正）
 「タイタンのホイヘンス着陸点は？」                → planetary_orbiter_track(body="titan", sites="all")     # Cassini 全球図の局所図

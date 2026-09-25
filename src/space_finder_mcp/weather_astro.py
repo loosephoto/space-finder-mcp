@@ -158,7 +158,7 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
         "forecast_days": days,
     }
     try:
-        r = requests.get(API, params=params, headers=UA, timeout=30)
+        r = requests.get(API, params=params, headers=UA, timeout=(30, 30))
         r.raise_for_status()
         d = r.json()
     except requests.RequestException as e:
@@ -347,7 +347,7 @@ def _geocode(place: str) -> Optional[dict]:
         try:
             r = requests.get("https://geocoding-api.open-meteo.com/v1/search",
                              params={"name": name, "count": 1, "format": "json"},
-                             headers=UA, timeout=20)
+                             headers=UA, timeout=(20, 20))
             r.raise_for_status()
             results = r.json().get("results") or []
             if results:
@@ -382,7 +382,7 @@ def _geocode_nominatim(place: str) -> Optional[dict]:
         r = requests.get("https://nominatim.openstreetmap.org/search",
                          params={"q": query, "format": "json", "limit": 1,
                                  "addressdetails": 1},
-                         headers=ua, timeout=20)
+                         headers=ua, timeout=(20, 20))
         r.raise_for_status()
         res = r.json()
         if res:

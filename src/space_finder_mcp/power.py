@@ -111,7 +111,7 @@ def power_climate(latitude: float, longitude: float,
               "start": start_d.strftime("%Y%m%d"), "end": end_d.strftime("%Y%m%d"),
               "format": "JSON"}
     try:
-        r = requests.get(API, params=params, headers=UA, timeout=40)
+        r = requests.get(API, params=params, headers=UA, timeout=(40, 40))
         r.raise_for_status()
         d = r.json()
     except requests.RequestException as e:

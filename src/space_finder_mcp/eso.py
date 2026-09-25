@@ -61,7 +61,7 @@ def eso_seeing(hours: int = 12, fields: str = _DEFAULT_FIELDS) -> CallToolResult
     errs = []
     for f in field_list:
         try:
-            r = requests.get(API, params={"from": fr, "to": to, "fields": f}, headers=UA, timeout=30)
+            r = requests.get(API, params={"from": fr, "to": to, "fields": f}, headers=UA, timeout=(30, 30))
             r.raise_for_status()
             d = r.json()
             if f in d:

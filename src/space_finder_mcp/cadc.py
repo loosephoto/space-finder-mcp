@@ -32,7 +32,7 @@ def _do_query(query: str, limit: int = 10) -> tuple[Optional[list[list]], Option
         r = requests.post(TAP, data={
             "REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "csv",
             "QUERY": q,
-        }, headers=UA, timeout=40)
+        }, headers=UA, timeout=(40, 40))
         r.raise_for_status()
     except requests.RequestException as e:
         return None, f"CADC TAP 接続失敗: {str(e)[:120]}"

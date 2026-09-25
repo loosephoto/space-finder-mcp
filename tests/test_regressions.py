@@ -860,3 +860,120 @@ class RangeAuTests(unittest.TestCase):
                  if ring.get("kind") == "probe_projection"}
         self.assertEqual(names, {"Voyager 1", "Voyager 2"}, verified)
         self.assertTrue(verified["ok"], verified)
+
+
+class NewCraterSiteTests(unittest.TestCase):
+    """月に新しくできたクレーター（LROC 公表値）の回帰テスト。
+
+    経度が 0〜360°E で公表される地点（ファルコン9上段 266.7138°E）を折り返さずに
+    投影へ渡すと画像サイズが負になり図が返らなかった実測バグの再発防止を含む。
+    """
+
+    def _tbl(self):
+        from space_finder_mcp import planetary_map
+        return planetary_map.SITES["moon"]
+
+    def test_lroc_published_coordinates(self):
+        t = self._tbl()
+        self.assertAlmostEqual(t["mcgetchin"]["lat"], 1.3536, places=4)
+        self.assertAlmostEqual(t["mcgetchin"]["lon"], 67.1765, places=4)
+        self.assertEqual(t["mcgetchin"]["kind"], "crater")
+        self.assertAlmostEqual(t["falcon9"]["lat"], 19.4759, places=4)
+        self.assertAlmostEqual(t["falcon9"]["lon"], 266.7138, places=4)
+        self.assertEqual(t["falcon9"]["kind"], "impact")
+
+    def test_east_longitude_is_wrapped_for_projection(self):
+        lon = self._tbl()["falcon9"]["lon"]
+        self.assertAlmostEqual(((lon + 180.0) % 360.0) - 180.0, -93.2862, places=3)
+
+    def test_sites_result_returns_result_without_network(self):
+        from space_finder_mcp import planetary_map
+        old_get = requests.get
+
+        def boom(*args, **kwargs):
+            raise OSError("network disabled for test")
+
+        requests.get = boom
+        try:
+            r = planetary_map._sites_result("moon", "newcrater")
+        finally:
+            requests.get = old_get
+        self.assertTrue(r.content)
+        self.assertIn("月", r.content[0].text)
+        self.assertAlmostEqual(r.structuredContent["sites"][0]["lon"], -93.2862, places=3)
+        self.assertEqual(r.structuredContent["sites"][0]["event"], "2026-08-05 06:35 UTC")
+
+    def test_all_keeps_landing_provenance_and_labels_each_site_by_kind(self):
+        from space_finder_mcp import planetary_map
+        old_get = requests.get
+        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(OSError("offline"))
+        try:
+            r = planetary_map._sites_result("moon", "all")
+        finally:
+            requests.get = old_get
+        text = r.content[0].text
+        figure = r.structuredContent["figure"]
+        notes = "\n".join(figure["notes"])
+        self.assertIn("月の地点", figure["title"])
+        self.assertIn("NASA NSSDC", notes)
+        self.assertIn("LROC 公表値", notes)
+        self.assertIn("・形成 2024-04-11", text)
+        self.assertIn("衝突 2026-08-05", text)
+        landing_rows = text[text.find("① アポロ11号"):text.find("### ⚠️ 図の注記")]
+        self.assertIn("・着陸 1969-07-20", landing_rows)
+        self.assertIn("・形成 2024-04-11", landing_rows)
+        self.assertNotIn("・着陸 2024-04-11", landing_rows)
+
+    def test_newcrater_event_text_and_figure_kind_are_consistent(self):
+        from space_finder_mcp import planetary_map
+        old_get = requests.get
+        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(OSError("offline"))
+        try:
+            r = planetary_map._sites_result("moon", "newcrater")
+        finally:
+            requests.get = old_get
+        text = r.content[0].text
+        self.assertEqual(r.structuredContent["figure"]["kind"], "impact_site_map")
+        self.assertIn("・衝突 2026-08-05 06:35 UTC", text)
+        self.assertNotIn("UTC（衝突）", text)
+        self.assertIn("・形成 2024-04-11", text)
+
+    def test_single_site_label_is_inside_canvas_and_validated(self):
+        from space_finder_mcp import planetary_map
+        old_get = requests.get
+        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(OSError("offline"))
+        try:
+            r = planetary_map._sites_result("moon", "falcon9", out_px=1000)
+        finally:
+            requests.get = old_get
+        verify = r.structuredContent["figure"]["verify"]
+        self.assertTrue(verify["labels_inside_canvas"], verify)
+        self.assertFalse(verify["labels_overlap_marker"], verify)
+        self.assertTrue(verify["ok"], verify)
+
+    def test_falcon9_place_is_near_western_nearside_limb(self):
+        place = self._tbl()["falcon9"]["place"]
+        self.assertIn("表側", place)
+        self.assertIn("アインシュタイン", place)
+        self.assertNotIn("裏側", place)
+
+    def test_map_only_has_no_empty_mixed_kind_label(self):
+        from space_finder_mcp import planetary_map
+        old_get = requests.get
+        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(OSError("offline"))
+        try:
+            r = planetary_map._sites_result("moon", "map")
+        finally:
+            requests.get = old_get
+        self.assertNotIn("地点（）", r.content[0].text)
+
+    def test_jupiter_sl9_sites_remain_impact_site_map(self):
+        from space_finder_mcp import planetary_map
+        old_get = requests.get
+        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(OSError("offline"))
+        try:
+            r = planetary_map._sites_result("jupiter", "all")
+        finally:
+            requests.get = old_get
+        self.assertEqual(r.structuredContent["figure"]["kind"], "impact_site_map")
+        self.assertNotIn("LROC 公表値", r.structuredContent["source"])

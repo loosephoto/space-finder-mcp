@@ -42,7 +42,7 @@ def inpe_collections(limit: int = 30) -> CallToolResult:
     """
     limit = as_int(limit, 30, 1, 100)
     try:
-        r = requests.get(f"{STAC}/collections", headers=UA, timeout=30)
+        r = requests.get(f"{STAC}/collections", headers=UA, timeout=(30, 30))
         r.raise_for_status()
         cols = r.json().get("collections", [])
     except requests.RequestException as e:
@@ -105,7 +105,7 @@ def inpe_search(collection: str = "CB4-WFI-L4-SR-1", bbox: Optional[str] = None,
     if cloud is not None:
         body["filter"] = {"op": "<", "args": [{"property": "eo:cloud_cover"}, cloud]}
     try:
-        r = requests.post(f"{STAC}/search", headers=UA, json=body, timeout=35)
+        r = requests.post(f"{STAC}/search", headers=UA, json=body, timeout=(35, 35))
         r.raise_for_status()
         d = r.json()
     except requests.RequestException as e:

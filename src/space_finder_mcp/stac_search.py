@@ -52,7 +52,7 @@ def stac_collections() -> CallToolResult:
         （なし）
     """
     try:
-        r = requests.get(f"{STAC}/collections", headers=UA, timeout=30)
+        r = requests.get(f"{STAC}/collections", headers=UA, timeout=(30, 30))
         r.raise_for_status()
         cols = r.json().get("collections", [])
     except requests.RequestException as e:
@@ -141,7 +141,7 @@ def stac_search(collection: str = "sentinel-2-l2a", bbox: Optional[str] = None,
         body["query"] = {"eo:cloud_cover": {"lt": cloud}}
 
     try:
-        r = requests.post(f"{STAC}/search", headers=UA, json=body, timeout=35)
+        r = requests.post(f"{STAC}/search", headers=UA, json=body, timeout=(35, 35))
         r.raise_for_status()
         d = r.json()
     except requests.RequestException as e:

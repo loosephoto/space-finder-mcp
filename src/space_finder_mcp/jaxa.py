@@ -17,7 +17,7 @@ UA = {"User-Agent": "space-finder-mcp/0.2 (MCP; JAXA Earth STAC)"}
 
 
 def _get_json(url: str) -> dict:
-    r = requests.get(url, headers=UA, timeout=30)
+    r = requests.get(url, headers=UA, timeout=(30, 30))
     r.raise_for_status()
     return r.json()
 

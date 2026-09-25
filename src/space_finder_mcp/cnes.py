@@ -28,7 +28,7 @@ def cnes_status() -> CallToolResult:
     report = {}
     for name, url in (("THEIA", THEIA), ("GEODES", GEODES)):
         try:
-            r = requests.get(url, headers=UA, timeout=25, allow_redirects=True)
+            r = requests.get(url, headers=UA, timeout=(25, 25), allow_redirects=True)
             report[name] = {"reachable": True, "http": r.status_code, "url": r.url}
         except requests.RequestException as e:
             report[name] = {"reachable": False, "error": str(e)[:120]}

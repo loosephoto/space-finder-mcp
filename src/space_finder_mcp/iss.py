@@ -26,7 +26,7 @@ def iss_now() -> CallToolResult:
         CallToolResult: ISS の現在位置情報。
     """
     try:
-        r = requests.get(f"{BASE}/iss-now.json", headers=UA, timeout=20)
+        r = requests.get(f"{BASE}/iss-now.json", headers=UA, timeout=(20, 20))
         r.raise_for_status()
         d = r.json()
     except requests.RequestException as e:

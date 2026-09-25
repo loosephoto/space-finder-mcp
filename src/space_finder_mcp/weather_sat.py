@@ -55,7 +55,7 @@ def _latest_himawari_frame(band_code, size):
         ts = t.strftime("%Y/%m/%d/%H%M%S")
         url = _HIMAWARI_BASE.format(band=band_code, size=size, ts=ts)
         try:
-            r = requests.get(url, headers=_UA, timeout=20)
+            r = requests.get(url, headers=_UA, timeout=(20, 20))
         except requests.RequestException:
             continue
         if r.status_code == 200 and r.content:

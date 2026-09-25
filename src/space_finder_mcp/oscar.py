@@ -52,7 +52,7 @@ _STATUS_RANK = {"operational": 0, "commissioning": 1, "planned": 2,
 
 def _fetch_page(page: int) -> dict:
     """OSCAR の衛星一覧を1ページ取得する（1ページ=30件）。"""
-    r = requests.get(f"{OSCAR}/satellites", params={"page": page}, headers=UA, timeout=30)
+    r = requests.get(f"{OSCAR}/satellites", params={"page": page}, headers=UA, timeout=(30, 30))
     r.raise_for_status()
     return r.json()
 

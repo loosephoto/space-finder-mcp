@@ -56,7 +56,7 @@ def cnsa_status() -> CallToolResult:
     report = {}
     for name, cfg in PORTALS.items():
         try:
-            r = requests.get(cfg["url"], headers=UA, timeout=25, allow_redirects=True)
+            r = requests.get(cfg["url"], headers=UA, timeout=(25, 25), allow_redirects=True)
             report[name] = {"reachable": True, "http": r.status_code, "url": r.url,
                             "about": cfg["about"], "download_auth": cfg["download_auth"]}
         except requests.RequestException as e:

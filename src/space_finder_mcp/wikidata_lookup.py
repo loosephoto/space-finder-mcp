@@ -126,7 +126,7 @@ SELECT DISTINCT {select_vars} WHERE {{
 LIMIT {as_int(limit, 5, 1, 100)}
 """
     try:
-        resp = requests.get(SPARQL_ENDPOINT, params={"query": query}, headers=HEADERS, timeout=30)
+        resp = requests.get(SPARQL_ENDPOINT, params={"query": query}, headers=HEADERS, timeout=(30, 30))
         resp.raise_for_status()
         rows = resp.json().get("results", {}).get("bindings", [])
     except requests.RequestException as e:
@@ -175,7 +175,7 @@ def _resolve_country(name: str) -> Optional[str]:
         "type": "item",
     }
     try:
-        r = requests.get(api, params=params, headers=HEADERS, timeout=20)
+        r = requests.get(api, params=params, headers=HEADERS, timeout=(20, 20))
         r.raise_for_status()
         results = r.json().get("search", [])
         # instance of は country(P17) に使える国(Q6256) を優先で取るのは複雑なので先頭候補を返す

@@ -70,7 +70,7 @@ def _classify(url: str, title: str) -> str:
 @ttl_cache(TTL_SHORT, maxsize=16)
 def _parse_feed(url: str) -> list[dict]:
     """RSS 2.0 / Atom フィードを取得して記事レコードを返す。失敗時は例外を送出する。"""
-    r = requests.get(url, headers=UA, timeout=25)
+    r = requests.get(url, headers=UA, timeout=(25, 25))
     r.raise_for_status()
     tree = ET.fromstring(r.text)  # 非XML(HTMLチャレンジ等)なら ParseError
     ns = "{http://www.w3.org/2005/Atom}"

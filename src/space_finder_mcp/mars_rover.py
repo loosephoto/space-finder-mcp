@@ -41,7 +41,7 @@ def _get_mars_weather(rover: str) -> dict:
     cat = _ROVER_CATEGORY.get(rover, rover)
     r = requests.get(MARS_WEATHER, params={
         "feed": "weather", "category": cat, "feedtype": "json", "ver": "1.0",
-    }, headers=UA, timeout=25)
+    }, headers=UA, timeout=(25, 25))
     r.raise_for_status()
     d = r.json()
     soles = d.get("soles", [])

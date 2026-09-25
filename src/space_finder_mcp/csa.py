@@ -43,7 +43,7 @@ _session.mount("https://", _SystemCAAdapter())
 
 
 def _ckan(action: str, params: Optional[dict] = None) -> dict:
-    r = _session.get(f"{CKAN}/{action}", headers=UA, params=params or {}, timeout=30)
+    r = _session.get(f"{CKAN}/{action}", headers=UA, params=params or {}, timeout=(30, 30))
     r.raise_for_status()
     return r.json()
 
