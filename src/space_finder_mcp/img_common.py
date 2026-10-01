@@ -595,7 +595,7 @@ def conic_from_elements(a: Optional[float] = None, e: Optional[float] = None, *,
 
 def figure_notes(conic: Optional[Conic] = None, *, primary: str = "", unit: str = "km",
                  periapsis_label: str = "近点", apoapsis_label: str = "遠点",
-                 extra: Iterable[str] = ()) -> List[str]:
+                 orbiting_body: str = "彗星", extra: Iterable[str] = ()) -> List[str]:
     """図の注記を数値から生成する（手書きしない＝図と文がドリフトしない）。"""
     notes: List[str] = []
     if conic is not None:
@@ -622,8 +622,9 @@ def figure_notes(conic: Optional[Conic] = None, *, primary: str = "", unit: str 
         if conic.incl_deg is not None:
             retro = conic.incl_deg > 90.0
             notes.append(
-                "黄道面基準の軌道傾斜角 {:.2f}°{}。この図は彗星自身の軌道面を真横から見た模式図で、"
-                "傾斜は別の見方になる".format(conic.incl_deg, "（逆行軌道）" if retro else ""))
+                "黄道面基準の軌道傾斜角 {:.2f}°{}。この図は{}自身の軌道面を真横から見た模式図で、"
+                "傾斜は別の見方になる".format(conic.incl_deg, "（逆行軌道）" if retro else "",
+                                               orbiting_body))
     notes.extend(n for n in extra if n)
     return notes
 

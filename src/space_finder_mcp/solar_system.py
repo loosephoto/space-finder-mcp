@@ -1983,13 +1983,19 @@ def _ecliptic_to_perifocal(x, y, z, i_deg, node_deg, argp_deg):
     return ca * x1 + sa * y2, -sa * x1 + ca * y2
 
 
-def _render_comet_orbit(cid, el, pos_xyz, when_str):
-    """彗星の軌道を「彗星自身の軌道面を真横から見た図」として描く。
+def _render_orbit_plane(cid, el, pos_xyz, when_str, body_kind="comet"):
+    """天体自身の軌道面を真横から見た円錐曲線図として描く。
 
-    太陽は円錐曲線の焦点（楕円の中心ではない）。e>=1 の C/彗星は双曲線の枝として
-    近日点から有限距離(r_max)までを描く。返すのは (PIL画像, figure ブロック)。
+    太陽は円錐曲線の焦点（楕円の中心ではない）。彗星は開いた軌道の枝にも対応する。
+    返すのは (PIL画像, figure ブロック)。
     """
     from PIL import Image, ImageDraw, ImageFilter
+    body_labels = {"comet": "彗星", "asteroid": "小惑星"}
+    if body_kind not in body_labels:
+        raise ValueError("未知の軌道天体種別です")
+    body_label = body_labels[body_kind]
+    body_color = _COMET_COLOR if body_kind == "comet" else symbol_rgb("asteroid_label")
+    orbit_color = _COMET_ORBIT_COLOR if body_kind == "comet" else symbol_rgb("asteroid_label")
     W, H = 1400, 900
     sun_r_px = 12.0                     # 誇張した太陽円盤の半径(px)。描画・注記・検証で共有
     a, e, q = el.get("a"), float(el["e"]), float(el["q"])
@@ -2048,7 +2054,7 @@ def _render_comet_orbit(cid, el, pos_xyz, when_str):
         skipped_labels.append(text)
         return False
 
-    dr.line(pts_px, fill=_COMET_ORBIT_COLOR, width=3)
+    dr.line(pts_px, fill=orbit_color, width=3)
     # ラベル配置用マスク: 描いた曲線を膨張させ、文字が線に載らない候補だけを採る
     # （720点の頂点サンプルだけでは、頂点間隔の粗い針状軌道で隙間をすり抜ける）
     _mask = Image.new("1", (W, H), 0)
@@ -2077,7 +2083,7 @@ def _render_comet_orbit(cid, el, pos_xyz, when_str):
            (X0 - 46, Y0 + sr + 34, "la"), (X0 - 46, Y0 - sr - 54, "la")],
           "太陽＝焦点", f_m, (255, 235, 170))
     cx_, cy_ = to_px(xp, yp)
-    dr.ellipse([cx_ - 7, cy_ - 7, cx_ + 7, cy_ + 7], fill=_COMET_COLOR,
+    dr.ellipse([cx_ - 7, cy_ - 7, cx_ + 7, cy_ + 7], fill=body_color,
                outline=(255, 255, 255), width=2)
     label([(cx_ + 14, cy_ - 40, "la"), (cx_ + 14, cy_ + 16, "la"),
            (cx_ - 250, cy_ - 40, "la"), (cx_ - 250, cy_ + 16, "la"),
@@ -2112,7 +2118,8 @@ def _render_comet_orbit(cid, el, pos_xyz, when_str):
     dr.line([(pl + 10, pb + 62), (pl + 10 + 1.0 * ppau, pb + 62)], fill=(210, 214, 230), width=3)
     dr.text((pl + 14, pb + 36), "1 AU", font=f_b, fill=(210, 214, 230))
 
-    title = "{} の軌道（彗星自身の軌道面を真横から見た図）".format(el.get("fullname") or cid)
+    title = "{} の軌道（{}自身の軌道面を真横から見た図）".format(
+        el.get("fullname") or cid, body_label)
     dr.text((36, 26), title, font=f_t, fill=(238, 242, 255))
     dr.text((36, 66), "e={:.6f}・近日点 {} AU{}".format(
         e, _au_fmt(q), "・遠日点 {} AU".format(_au_fmt(apo)) if apo else "・遠日点なし（閉じない軌道）"),
@@ -2128,11 +2135,17 @@ def _render_comet_orbit(cid, el, pos_xyz, when_str):
 
     conic = conic_from_elements(a=a, e=e, q=q, incl_deg=incl)
     extra = [
-        "●は{}時点の彗星位置（日心距離 {:.3f} AU・この軌道面内の実際の位置）".format(when_str, r_now),
+        "●は{}時点の{}位置（日心距離 {:.3f} AU・この軌道面内の実際の位置）".format(
+            when_str, body_label, r_now),
         "太陽・マーカーの大きさは誇張している（軌道の縮尺と同一ではない）",
         "惑星や地球の位置は描いていない。目盛の 1 AU は地球軌道の半径（距離の目安）",
-        "要素は指定時刻付近の接触軌道要素。惑星の摂動で実際の道は変わる",
     ]
+    if body_kind == "asteroid":
+        epoch = (el.get("_raw") or {}).get("epoch")
+        extra.append("JPL SBDB の osculating elements（epoch JD {}）をケプラー二体で伝播。"
+                     "惑星の摂動は含まない".format("不明" if epoch is None else "{:.5f}".format(epoch)))
+    else:
+        extra.append("要素は指定時刻付近の接触軌道要素。惑星の摂動で実際の道は変わる")
     # 超長距離の楕円では近日点が誇張した太陽円盤の内側に入り、画素からは近点距離を
     # 確認できない（曲線の右端画素は円盤の縁になる）。「確認できない」ことを注記にも
     # 数値から生成して残す（黙って合格にしない）。
@@ -2147,10 +2160,11 @@ def _render_comet_orbit(cid, el, pos_xyz, when_str):
             "／".join(skipped_labels)))
     notes = figure_notes(
         conic, primary="太陽", unit="AU", periapsis_label="近日点", apoapsis_label="遠日点",
-        extra=extra)
+        orbiting_body=body_label, extra=extra)
     caption = ("{} の軌道。太陽を焦点とする{}（e={:.6f}、近日点 {} AU{}）。{}時点の日心距離は {:.3f} AU。".format(
         el.get("fullname") or cid, "楕円" if e < 1.0 else "双曲線の枝", e, _au_fmt(q),
         "・遠日点 {} AU".format(_au_fmt(apo)) if apo else "・遠日点なし", when_str, r_now))
+    view_description = "{}自身の軌道面を真横から見た図（太陽は円錐曲線の焦点）".format(body_label)
     markers = [{"id": "periapsis", "label": "近日点", "au": q, "px": [round(hx), round(hy)]},
                {"id": "current", "label": "現在位置", "au": r_now, "px": [round(cx_), round(cy_)]}]
     if apo:
@@ -2158,20 +2172,106 @@ def _render_comet_orbit(cid, el, pos_xyz, when_str):
                         "px": [round(ax_), round(ay_)]})
     fig = figure_payload(
         kind="orbit_plane", title=title,
-        view=view_spec("orbital_plane", "side",
-                       "彗星の軌道面を真横から見た図（太陽は円錐曲線の焦点）",
-                       why="上から見た黄道面俯瞰では高傾斜・高離心率の彗星軌道が潰れて見え、"
+        view=view_spec("orbital_plane", "side", view_description,
+                       why="上から見た黄道面俯瞰では高傾斜・高離心率の軌道が潰れて見え、"
                            "焦点と中心の違いも判別できないため"),
         primary=primary_spec("太陽", "focus", center_offset=conic.c, unit="AU"),
         scale=scale_spec("linear", to_scale=True, px_per_unit=ppau, unit="AU",
                          exaggerated=["太陽の円盤", "近日点・現在位置のマーカー"]),
         conic=conic, markers=markers, notes=notes, caption=caption,
-        verify=verify_curve(img, color=_COMET_ORBIT_COLOR, focus_xy=(X0, Y0),
+        verify=verify_curve(img, color=orbit_color, focus_xy=(X0, Y0),
                             px_per_unit=ppau, periapsis=q, apoapsis=apo,
                             tol_ratio=0.06, label_boxes=boxes,
                             occluders=[(X0, Y0, sun_r_px)]),
     )
     return img, fig
+
+
+def _render_comet_orbit(cid, el, pos_xyz, when_str):
+    """彗星の軌道面図（既存呼び出しとの互換ラッパー）。"""
+    return _render_orbit_plane(cid, el, pos_xyz, when_str, body_kind="comet")
+
+
+def _render_asteroid_orbit(cid, el, pos_xyz, when_str):
+    """小惑星の楕円軌道面図。"""
+    return _render_orbit_plane(cid, el, pos_xyz, when_str, body_kind="asteroid")
+
+
+def _asteroid_orbit_result(name, when_iso=None):
+    """JPL SBDB の軌道要素から小惑星の閉じた楕円軌道図を返す。"""
+    import base64
+
+    try:
+        loader, _eph = _load()
+        ts = loader.timescale()
+        t = _resolve_when(when_iso, ts)
+    except Exception as e:
+        msg = "小惑星の軌道図を準備できませんでした（{}）".format(str(e)[:150])
+        return CallToolResult(content=[TextContent(type="text", text=msg)],
+                              structuredContent={"error": msg, "query": str(name)})
+    if t is None:
+        msg = "when の形式が不正です (ISO8601: YYYY-MM-DDTHH:MM[:SS])"
+        return CallToolResult(content=[TextContent(type="text", text=msg)],
+                              structuredContent={"error": msg})
+    jd = t.tt
+    tstr = t.utc_strftime("%Y-%m-%d %H:%M UTC")
+    query = str(name).strip()
+    sstr = _ASTEROID_ALIASES.get(query.lower()) or _ASTEROID_ALIASES.get(query) or query
+    try:
+        raw = _sbdb_elements(sstr)
+        a, e = float(raw["a"]), float(raw["e"])
+        if not math.isfinite(a) or not math.isfinite(e) or a <= 0.0 or not (0.0 <= e < 1.0):
+            raise ValueError("閉じた小惑星楕円には a>0、0≤e<1 の要素が必要です")
+        el = {
+            "typ": "sbdb", "fullname": raw.get("fullname") or sstr,
+            "e": e, "a": a, "_raw": raw, "q": a * (1.0 - e),
+            "i_deg": math.degrees(raw["i"]),
+            "node_deg": math.degrees(raw["node"]),
+            "argp_deg": math.degrees(raw["argp"]),
+            "source": "JPL SBDB（小惑星の楕円軌道要素 + ケプラー伝播）",
+        }
+        x, y, z, rr, lon, lat = _kepler_position(raw, jd)
+    except Exception as e:
+        msg = "小惑星の楕円軌道要素・位置を取得できませんでした（{}）: {}".format(
+            query, str(e)[:150])
+        return CallToolResult(content=[TextContent(type="text", text=msg)],
+                              structuredContent={"error": msg, "query": query,
+                                                 "id": sstr, "source": "JPL SBDB"})
+    try:
+        img, fig = _render_asteroid_orbit(sstr, el, (x, y, z), tstr)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        png = buf.getvalue()
+    except Exception as e:
+        msg = "小惑星軌道図の生成に失敗しました: {}".format(str(e)[:150])
+        return CallToolResult(content=[TextContent(type="text", text=msg)],
+                              structuredContent={"error": msg, "query": query})
+    fullname = el["fullname"]
+    imgc = ImageContent(type="image", data=base64.b64encode(png).decode("ascii"),
+                        mimeType="image/png",
+                        altText="{} の楕円軌道（軌道面を真横から見た図）".format(fullname))
+    out_path = save_output(png, "solar_system_asteroid_orbit", "png")
+    lines = [
+        media_link_line("{} の小惑星軌道面ビュー".format(fullname),
+                        path=out_path, kind="figure"),
+        "🪨 **{} の軌道（小惑星自身の軌道面を真横から見た図）**".format(fullname),
+        "時刻: {}".format(tstr),
+        "離心率 e={:.6f} ・ 近日点 {:.6f} AU ・ 遠日点 {:.6f} AU（閉じた楕円）".format(
+            e, el["q"], a * (1.0 + e)),
+        "指定時刻の日心距離: {:.3f} AU ・ 黄経 {:.1f}° ・ 黄緯 {:.1f}°".format(rr, lon, lat),
+        "", figure_text_block(fig),
+        "出典: {} ／ 描画: Pillow".format(el["source"]),
+    ]
+    return CallToolResult(
+        content=[TextContent(type="text", text="\n".join(lines)), imgc],
+        structuredContent={
+            "time_utc": tstr, "asteroid": fullname, "query": query, "id": sstr,
+            "e": e, "a_au": a, "q_au": el["q"], "apo_au": a * (1.0 + e),
+            "incl_deg": el["i_deg"], "element_epoch_jd": raw.get("epoch"),
+            "au": rr, "eclLon": lon, "eclLat": lat,
+            "figure": fig, "image_path": out_path, "source": el["source"],
+        },
+    )
 
 
 def _comet_orbit_result(name, when_iso=None):
@@ -2445,7 +2545,7 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
 
     Args:
         when: 時刻 ISO8601（例 "2026-09-09T11:00:00Z"）。省略時は現在時刻。
-        asteroid: 小惑星（例 "イトカワ"/"itokawa"/"25143", "ベンヌ", "アポフィス"）。
+        asteroid: 小惑星（例 "イトカワ"/"itokawa"/"25143", "ベンヌ", "アポフィス"）。view="asteroid_orbit" では楕円軌道全体を描く。
         asteroid2: 2つ目の小惑星。
         probe: 遠方探査機（例 "ボイジャー1号"/"voyager1"/"パイオニア10号"/"はやぶさ2"/
             "hayabusa2"）。1光日に達していない探査機では、投影での1光日リング・到達時の
@@ -2457,10 +2557,13 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
         comet2: 2つ目の彗星。
         engine: "simple"(既定/Pillow) / "accurate"(matplotlib)。
         view: "system"(既定)=太陽系俯瞰図 / "comet_orbit"=彗星の軌道面ビュー /
+            "asteroid_orbit"=小惑星の閉じた楕円軌道面ビュー /
             "apparition"=彗星の見え方チャート（地心距離・日心距離・予想光度・太陽離角の
             推移。comet の指定が必須で、1天体ずつ）。
             comet_orbit は comet の指定が必須で、彗星自身の軌道面を真横から見た図
             （太陽＝円錐曲線の焦点）を返す。e>=1 の C/彗星は閉じない双曲線の枝として描く。
+            asteroid_orbit は asteroid の指定が必須で、JPL SBDB の osculating elements に基づく
+            小惑星の楕円全体と指定時刻の現在位置を軌道面から描く（1天体ずつ）。
             **comet にカンマ区切りで複数（または comet2 を併用、最大4天体）指定すると、
             1彗星=1パネルで並べた1枚の画像**を返す（パネルごとに軌道面と縮尺が異なる。
             その旨は figure.notes に数値から生成して入る）。
@@ -2497,6 +2600,22 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
     回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
     """
     vw = str(view or "system").strip().lower()
+    if vw in ("asteroid_orbit", "asteroid-orbit", "小惑星軌道"):
+        names = _split_object_names(asteroid) + _split_object_names(asteroid2)
+        unique_names = []
+        for name in names:
+            if name not in unique_names:
+                unique_names.append(name)
+        if not unique_names:
+            msg = "view='asteroid_orbit' には小惑星の指定が必要です（例: asteroid='ベンヌ'）。"
+            return CallToolResult(content=[TextContent(type="text", text=msg)],
+                                  structuredContent={"error": msg, "known_asteroids": sorted(_ASTEROID_ALIASES)})
+        if len(unique_names) > 1:
+            msg = "view='asteroid_orbit' は1天体ずつです（{} が指定されました）。".format(
+                "、".join(unique_names))
+            return CallToolResult(content=[TextContent(type="text", text=msg)],
+                                  structuredContent={"error": msg, "asteroids": unique_names})
+        return _asteroid_orbit_result(unique_names[0], when)
     if vw in ("apparition", "comet_apparition", "light_curve", "見え方"):
         from .comet_apparition import comet_apparition_result   # 循環 import を避ける
         first = comet or comet2

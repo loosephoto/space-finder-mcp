@@ -330,6 +330,8 @@ def media_issues(tool, result) -> list:
 FIGURES_EXTRA_CALLS = (
     ("solar_system_now[comet_orbit/ellipse]", "solar_system_now",
      {"comet": "ハレー彗星", "view": "comet_orbit"}, {"conic_kind": "ellipse"}),
+    ("solar_system_now[asteroid_orbit/ellipse]", "solar_system_now",
+     {"asteroid": "ベンヌ", "view": "asteroid_orbit"}, {"conic_kind": "ellipse"}),
     ("solar_system_now[comet_orbit/hyperbola]", "solar_system_now",
      {"comet": "C/2023 A3", "view": "comet_orbit"}, {"conic_kind": "hyperbola"}),
     # 超長距離の楕円（a≳10^4 AU）: 近日点が画面で数px以下になり、誇張した太陽円盤の
@@ -508,6 +510,8 @@ MEDIA_EXTRA_CALLS = (
     # 通過経路を重ねた俯瞰図も画像を返す（リンク先行と image_path を機械的に検査）
     ("solar_system_now[route]", "solar_system_now",
      {"comet": "エンケ彗星", "route": True}),
+    ("solar_system_now[asteroid_orbit]", "solar_system_now",
+     {"asteroid": "ベンヌ", "view": "asteroid_orbit"}),
 )
 
 
