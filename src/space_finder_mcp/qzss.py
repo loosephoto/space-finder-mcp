@@ -273,8 +273,7 @@ def qzss_status(kind: str = "orbit", count: int = 5,
                                "source": "QZSS (Cabinet Office, Japan)"})
 
     now = _dt.datetime.now(_dt.timezone.utc)
-    idx = min(range(len(epochs)), key=lambda i: abs((epochs[i] - now).total_seconds()))
-    epoch_used = epochs[idx]
+    epoch_used = min(epochs, key=lambda t: abs((t - now).total_seconds()))
     delta_min = (epoch_used - now).total_seconds() / 60.0
     gap = int((epochs[1] - epochs[0]).total_seconds()) if len(epochs) > 1 else 0
     qzss = sorted(s for s in sats if s.startswith("J"))
@@ -289,7 +288,7 @@ def qzss_status(kind: str = "orbit", count: int = 5,
     lines.append("収録衛星: QZSS {}機 / GPS {}機".format(len(qzss), len(gps)))
     lines.append("")
 
-    records = []
+    records, invalid_satellites = [], []
     for sat in qzss:
         series = sats.get(sat) or []
         if not series:
@@ -297,30 +296,48 @@ def qzss_status(kind: str = "orbit", count: int = 5,
         prn, ja, formal, orbit = QZSS_SATS.get(
             sat, ("不明", "QZSS {}".format(sat), sat, "公表の PRN 表に無い ID"))
         mapped = "公表の PRN 表に無い ID" not in orbit
-        geo_all = [_ecef_to_geodetic(*p) for p in series]
+        valid_series = [(i, p) for i, p in enumerate(series)
+                        if len(p) == 3 and all(math.isfinite(v) for v in p)
+                        and any(abs(v) > 1e-9 for v in p)]
+        if not valid_series:
+            invalid_satellites.append({"sp3_id": sat, "reason": "no valid positions"})
+            lines.append("{} {}（{}）: {}SP3 の位置データが全て無効なため表示を省略しました".format(
+                ja, formal, sat, WARN))
+            continue
+        geo_all = [_ecef_to_geodetic(*p) for _, p in valid_series]
         lats = [g[0] for g in geo_all]
         alts = [g[2] for g in geo_all]
-        radii = [math.sqrt(sum(c * c for c in p)) for p in series]
-        j = min(idx, len(series) - 1)
-        lat, lon, alt = _ecef_to_geodetic(*series[j])
-        el, az, _rng = _look_angles(series[j][0], series[j][1], series[j][2],
-                                    TOKYO[0], TOKYO[1])
+        series_index, position = min(
+            valid_series,
+            key=lambda item: abs((epochs[min(item[0], len(epochs) - 1)] - epoch_used).total_seconds()))
+        epoch_index = min(series_index, len(epochs) - 1)
+        epoch_sat = epochs[epoch_index]
+        delta_sat_min = (epoch_sat - now).total_seconds() / 60.0
+        lat, lon, alt = _ecef_to_geodetic(*position)
+        radius = math.sqrt(sum(c * c for c in position))
+        el, az, _rng = _look_angles(*position, TOKYO[0], TOKYO[1])
         lines.append("{} {}（{}）— PRN {}".format(ja, formal, sat, prn))
         lines.append("    - 軌道種別: {}".format(orbit))
         if not mapped:
             lines.append("    - " + WARN + "SP3 の ID は公表の PRN 表と対応づけられていないため、"
                          "推測せず ID のまま表示します")
-        lines.append("    - 現在位置（採用エポック）: 緯度 {:.2f}° / 経度 {:.2f}° / "
-                     "高度 {:.0f} km（地心距離 {:.0f} km）".format(lat, lon, alt, radii[j]))
+        if len(valid_series) < len(series):
+            lines.append("    - " + WARN + "無効な {} 件の座標を除外しました".format(
+                len(series) - len(valid_series)))
+        lines.append("    - 現在位置（{}）: 緯度 {:.2f}° / 経度 {:.2f}° / "
+                     "高度 {:.0f} km（地心距離 {:.0f} km）".format(
+                         _fmt_epoch(epoch_sat), lat, lon, alt, radius))
         lines.append("    - 東京からの見え方: 仰角 {:.1f}° / 方位 {:.1f}°{}".format(
             el, az, "（地平線より下）" if el < 0 else ""))
         lines.append("    - 期間内の振れ幅: 緯度 {:.1f}°〜{:.1f}° / 高度 {:.0f}〜{:.0f} km".format(
             min(lats), max(lats), min(alts), max(alts)))
         records.append({"sp3_id": sat, "prn": prn, "name": ja, "formal_name": formal,
                         "orbit_type": orbit, "mapped_to_official_table": mapped,
+                        "epoch_used": epoch_sat.isoformat(),
+                        "epoch_used_delta_minutes": round(delta_sat_min, 1),
+                        "invalid_position_count": len(series) - len(valid_series),
                         "latitude_deg": round(lat, 3), "longitude_deg": round(lon, 3),
-                        "altitude_km": round(alt, 1),
-                        "geocentric_radius_km": round(radii[j], 1),
+                        "altitude_km": round(alt, 1), "geocentric_radius_km": round(radius, 1),
                         "elevation_from_tokyo_deg": round(el, 1),
                         "azimuth_from_tokyo_deg": round(az, 1),
                         "latitude_range_deg": [round(min(lats), 2), round(max(lats), 2)],
@@ -351,6 +368,7 @@ def qzss_status(kind: str = "orbit", count: int = 5,
                            "product_epoch_start": epochs[0].isoformat(),
                            "product_epoch_end": epochs[-1].isoformat(),
                            "satellites": records, "qzss_count": len(qzss),
+                           "qzss_valid_count": len(records), "invalid_satellites": invalid_satellites,
                            "gps_count": len(gps),
                            "look_angles_from": {"place": "東京", "lat": TOKYO[0],
                                                 "lon": TOKYO[1]},

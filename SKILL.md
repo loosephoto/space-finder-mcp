@@ -85,6 +85,7 @@ category: space
 | `planetary_rover_location_map` | 任意の天体面を移動する探査ローバーの現在地をその天体の地図中心に示した画像（走行経路・着陸点）。NASA MMGIS の位置データと NASA Trek の等角地図を合成。現状データは火星ローバー（Perseverance/Curiosity） | NASA MMGIS + Trek WMTS | 不要 |
 | `weather_satellite_now` | GEO/LEO気象衛星19機の公開画像（ひまわり9号・GOES-18/19・Meteosat-12/11/10/9・FY-4B/2H/2G・GK-2A・INSAT-3DR/3DS・NOAA-20/-21・SNPP・Metop-B/C・FY-3D）。GEO=最新フレーム/LEO=日次全球合成、取得不可は理由コード | JMA/NOAA STAR/EUMETSAT WMS/NSMC/KMA/IMD/NASA GIBS | 不要 |
 | `satellite_status` | 世界中の気象・地球観測衛星の運用ステータス・軌道・打ち上げ日（Roscosmos等）。**全1,044件を走査**し query は一致度順（acronym 完全/前方一致 → 語境界 → 部分一致のみ）。失敗ページは failed_pages で報告 | WMO OSCAR | 不要 |
+| `qzss_status` | みちびき（QZSS）の精密軌道・補強信号データ。SP3の無効座標は除外し、`structuredContent.invalid_satellites` に記録 | 内閣府 QZSS 公開アーカイブ API | 不要（非商用利用のみ） |
 | `cnsa_status` | 中国CNSA系衛星データポータル（風雲/NSMC・高分/CNSA-GEO・CBERS/CRESDA）の到達状態・概要＋認証不要の代替経路 | CNSA各公式ポータル | 不要(ダウンロードは要登録) |
 | `tiangong_now` | 天宮（Tiangong）中国宇宙ステーションの現在位置（SGP4伝播＋Googleマップ表示） | CelesTrak TLE + SGP4 | 不要 |
 

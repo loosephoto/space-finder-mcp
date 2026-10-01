@@ -80,6 +80,30 @@ class GeometryTests(unittest.TestCase):
         self.assertAlmostEqual(el2, -90.0, places=6)
 
 
+class QzssInvalidPositionTests(unittest.TestCase):
+    def test_zero_position_sentinel_is_reported_without_aborting_other_satellites(self):
+        from space_finder_mcp import qzss
+
+        text = "\n".join([
+            "*  2026  9 22 18  0  0.00000000",
+            _pline("J02", -25395.234792, 33664.478246, -113.403156),
+            _pline("J07", 0.0, 0.0, 0.0),
+        ])
+        old_search, old_product = qzss._search_ids, qzss._product_text
+        qzss._search_ids = lambda _segment: ["fixture.sp3"]
+        qzss._product_text = lambda _segment, _product: text
+        try:
+            result = qzss.qzss_status()
+        finally:
+            qzss._search_ids, qzss._product_text = old_search, old_product
+
+        data = result.structuredContent or {}
+        self.assertEqual([sat["sp3_id"] for sat in data.get("satellites", [])], ["J02"])
+        self.assertEqual(data.get("invalid_satellites"), [{"sp3_id": "J07", "reason": "no valid positions"}])
+        self.assertIn("J07", result.content[0].text)
+        self.assertIn("無効", result.content[0].text)
+
+
 class NameAndFormatTests(unittest.TestCase):
     def test_exoplanet_name_terms(self):
         from space_finder_mcp import exoplanet

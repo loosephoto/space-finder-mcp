@@ -330,7 +330,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `calendar_event_add` | **自分の予定をカレンダーに追加**（ローカル保存・外部送信なし）。日付は `2026-10-24` / `10月24日` 形式、時刻・終了日・繰り返し（毎日/毎週/毎月/毎年）対応。**フローティングなローカル日時**なので `place` を変えても予定の日付は動かない | ローカル（`%LOCALAPPDATA%\space-finder-mcp`） | 不要 |
 | `calendar_event_remove` | 自分の予定を削除（id か title[+date]）。冪等（既に無ければエラーにしない）。同名が複数あるときは**削除せず候補を提示**して停止 | ローカル | 不要 |
 | `satellite_status` | 世界中の気象・地球観測衛星の運用ステータス・軌道・打ち上げ日（Roscosmos等）。**カタログ全1,000件超を走査**し、query は一致度順（acronym 完全/前方一致 → 名称の語境界 → 部分一致のみ）で提示 | WMO OSCAR | 不要 |
-| `qzss_status` | **みちびき（準天頂衛星システム QZSS）**。既定では**超速報 SP3（192エポック×15分≒48時間分の精密軌道）**を解析し、各機の**現在の緯度・経度・高度**、**東京からの仰角・方位**、準天頂軌道の**8の字の振れ幅**を返す（J07 から PRN 表へ対応づけ、未対応 ID は ID のまま表示）。`rapid-orbit` / `clock` / `erp` / `almanac` / `ephemeris` / `l1s` / `l6` / `anpi`（安否確認）/ `naqu` は最新ファイル一覧＋DLリンク。⚠️ 提供元明記の**非商用利用のみ・正確性非保証** | 内閣府 QZSS 公開アーカイブ API | 不要 |
+| `qzss_status` | **みちびき（準天頂衛星システム QZSS）**。既定では**超速報 SP3（192エポック×15分≒48時間分の精密軌道）**を解析し、各機の**現在の緯度・経度・高度**、**東京からの仰角・方位**、準天頂軌道の**8の字の振れ幅**を返す（J07 から PRN 表へ対応づけ、未対応 ID は ID のまま表示）。SP3 の全ゼロ座標など無効値は除外し、`structuredContent.invalid_satellites` に理由を返します。`rapid-orbit` / `clock` / `erp` / `almanac` / `ephemeris` / `l1s` / `l6` / `anpi`（安否確認）/ `naqu` は最新ファイル一覧＋DLリンク。⚠️ 提供元明記の**非商用利用のみ・正確性非保証** | 内閣府 QZSS 公開アーカイブ API | 不要 |
 | `cnsa_status` | 中国CNSA系衛星データポータル（風雲/NSMC・高分/CNSA-GEO・CBERS/CRESDA）の到達状態・概要＋認証不要の代替経路 | CNSA各公式ポータル | 不要(ダウンロードは要登録) |
 | `tiangong_now` | 天宮（Tiangong）中国宇宙ステーションの現在位置（SGP4伝播＋Googleマップ表示） | CelesTrak TLE + SGP4 | 不要 |
 
