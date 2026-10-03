@@ -284,7 +284,7 @@ def _compose_rain(panels: list, px: tuple, name: str, area: tuple) -> tuple:
     """解析雨量・降水予報のパネルを1枚に合成し、(JPEGバイト, 検証dict) を返す。
 
     パネルは 940x783 → 470px に縮小して 2x2 に並べる。地点マーカーと公式凡例を
-    重ねる。検証は合成後の画像に対して画素で行う（マーカー・非一様性）。
+    重ねる。検証は合成後の画像に対して画素で行う（地点マーカーの可視性）。
     """
     from PIL import Image, ImageDraw
 
@@ -315,11 +315,11 @@ def _compose_rain(panels: list, px: tuple, name: str, area: tuple) -> tuple:
         d.rectangle([x - 1, y + LBL - 1, x + S, y + LBL + S], outline=(72, 72, 84))
         mx, my = x + px[0] * k, y + LBL + px[1] * k
         _draw_marker(d, mx, my, label=name, font=f_sm)
-        # 自己検証: マーカー近傍に白十字があるか・パネルが一様でないか
+        # 自己検証: マーカー近傍に白十字が残っているか
         if pixel_near(cv, (mx, my), (255, 255, 255), tol=60, r=6) < 8:
             ok = False
-        if len(set(im.resize((64, 64)).convert("RGB").getdata())) < 16:
-            ok = False
+        # 降水レイヤーは透明画素＋降水強度色の疎なラスタが正常（無降水なら全面透明）なので、
+        # 色数で有効性を判定しない。_cached_image が PNG デコードと寸法を検証済み。
     _draw_legend(d, PAD + S + PAD + S + PAD, HEAD + PAD + LBL, load_font(20), f_sm)
     d.text((PAD, h - FOOT + 14), _FOOTER, font=f_f, fill=(160, 165, 178))
     d.text((PAD, h - FOOT + 40),

@@ -7,7 +7,7 @@ uv run python -m compileall -q src/space_finder_mcp   # 1. 構文
 uv run python scripts/check-tools.py --dead-code      # 2. デッドコード走査（0件を維持）
 uv run python scripts/check-tools.py --offline        # 3. ネットワーク全断で例外漏れ0
 uv run python scripts/check-tools.py --fuzz           # 3'. 数値引数へ不正値（"abc" 等）を注入して例外漏れ0
-uv run python scripts/check-tools.py                  # 4. 全53ツール実呼び出し（数分）
+uv run python scripts/check-tools.py                  # 4. 全62ツール実呼び出し（数分）
 uv run python scripts/check-tools.py --figures        # 5. 描画系の figure/1（注記・caption・verify.ok）
 uv run python scripts/check-tools.py --media-links    # 6. 画像/音声/動画の「リンク先行」0件
 uv run python scripts/check-tools.py --fonts          # 6'. 日本語フォントの解決（Win/mac/Linux 共通・豆腐回避）

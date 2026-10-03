@@ -25,7 +25,7 @@ category: space
 - 打ち上げ: Launch Library 2
 - 図法・画像素材: NASA Blue Marble、NASA Trek WMTS（月・火星・水星・タイタン・ベスタ・ケレス）
 
-## ツール一覧（58種）
+## ツール一覧（62種）
 
 | ツール | できること | データ源 | 認証 |
 |:--|:--|:--|:--|

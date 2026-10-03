@@ -158,6 +158,23 @@ class RegressionTests(unittest.TestCase):
         self.assertAlmostEqual(lon, 135.7681, places=6)
         self.assertAlmostEqual(lat, 35.0116, places=6)
 
+    def test_jma_rain_sparse_overlay_is_not_rejected_as_blank(self):
+        """無降水の透明ラスタも正常な気象庁画像として扱い、図検証を通す。"""
+        import io
+        from PIL import Image
+        from space_finder_mcp import jma_rain
+
+        source = Image.new("RGBA", (940, 783), (0, 0, 0, 0))
+        buf = io.BytesIO()
+        source.save(buf, format="PNG")
+        area = jma_rain._pick_area(35.68, 139.69)
+        panels = [{"bytes": buf.getvalue(), "title": "降水", "disp": "10/03 12:00", "ft": i}
+                  for i in range(4)]
+        _image, verify = jma_rain._compose_rain(
+            panels, jma_rain._point_px(35.68, 139.69, area), "東京", area)
+
+        self.assertTrue(verify["ok"], verify)
+
     def test_moon_phase_terminator_area_matches_illumination(self):
         """輝面の輪郭（半円＋半楕円）の面積比が照度と厳密に一致すること。
 

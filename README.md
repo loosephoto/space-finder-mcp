@@ -252,7 +252,7 @@ codex mcp list
 |:--|:--|
 | [`CLAUDE.md`](CLAUDE.md) | Claude Code 用プロジェクトガイド（セットアップ・規約・検証・リリース手順） |
 | [`AGENTS.md`](AGENTS.md) | Codex など `AGENTS.md` を読むエージェント向けガイド |
-| [`SKILL.md`](SKILL.md) | エージェント向けスキル定義（53ツールの仕様・使用例・キャッシュ・注意事項） |
+| [`SKILL.md`](SKILL.md) | エージェント向けスキル定義（62ツールの仕様・使用例・キャッシュ・注意事項） |
 | [`.claude/rules/`](.claude/rules/) | 開発規約（コーディング・検証ゲート・データ出典） |
 
 ### Hermes Agent
@@ -884,7 +884,7 @@ ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカ�
 # 1. 構文チェック
 uv run python -m compileall -q src/space_finder_mcp
 
-# 2. 全53ツールを実呼び出し（例外漏れ・structuredContent欠落・タイムアウトを検出。数分）
+# 2. 全62ツールを実呼び出し（例外漏れ・structuredContent欠落・タイムアウトを検出。数分）
 uv run python scripts/check-tools.py
 
 # 3. ネットワーク全断を注入して「例外が外へ漏れないか」を検査
@@ -930,7 +930,7 @@ hermes mcp test space-finder-mcp
 src/space_finder_mcp/
 ├── __init__.py          # main() → mcp.run()
 ├── __main__.py          # python -m space_finder_mcp 用の入口
-├── server.py            # FastMCP サーバー定義・53ツール登録
+├── server.py            # FastMCP サーバー定義・62ツール登録
 ├── stac_common.py       # STAC系共通の入力検証ヘルパー（bbox/雲量。ツール定義なし）
 ├── input_utils.py       # 引数の防御的数値変換 as_int/as_float（不正値でも例外を漏らさない）
 ├── img_common.py        # 画像合成の共通ヘルパー（フォント探索/JPEG化/アンチメリジアン分割。ツール定義なし）
@@ -991,7 +991,7 @@ src/space_finder_mcp/
 space-finder-mcp/
 ├── CLAUDE.md                # Claude Code 用プロジェクトガイド
 ├── AGENTS.md                # Codex など AGENTS.md を読むエージェント向け
-├── SKILL.md                 # エージェント向けスキル定義（53ツール仕様）
+├── SKILL.md                 # エージェント向けスキル定義（62ツール仕様）
 ├── mcp.json                 # MCPクライアント設定の例
 ├── .env.example             # 環境変数の例（NASA_API_KEY は任意）
 ├── .claude/rules/           # 開発規約（coding-conventions / testing-and-verification / data-and-sources）

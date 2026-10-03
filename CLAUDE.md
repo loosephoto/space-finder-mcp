@@ -62,21 +62,25 @@ ISSの現在位置を地球地図で →  mcp__space-finder__sat_ground_track
 
 ---
 
-## 利用可能なツール（58種）
+## 利用可能なツール（62種）
 
-| カテゴリ | 本数 | ツール |
-|:--|:--|:--|
-| 打ち上げ・逆引き | 4 | `reverse_lookup` `upcoming_launches` `china_launches` `russia_launches` |
-| NASA 日次・宇宙天気 | 3 | `apod` `neo_today` `space_weather` |
-| メディア（画像/音声/動画） | 3 | `search_space_images` `search_space_audio` `search_space_videos` |
-| 各国宇宙機関・地球観測 | 16 | `isro_data` `copernicus_collections` `copernicus_search` `jaxa_datasets` `jaxa_dataset_search` `csa_dataset_search` `inpe_collections` `inpe_search` `uk_stac_collections` `uk_stac_search` `cnes_status` `cnsa_status` `stac_collections` `stac_search` `eodashboard_collections` `eodashboard_detail` |
-| 衛星・軌道 | 5 | `sat_tle` `satellite_status` `sat_ground_track` `iss_now` `tiangong_now` |
-| 天体位置・画像合成 | 7 | `constellation_now` `sky_map_with_satellites` `solar_system_now` `solar_eclipse_series` `moon_phase_map` `planetary_orbiter_track` `planetary_rover_location_map` |
-| 観測支援・天文データ | 8 | `astronomy_weather` `astronomy_news` `eso_seeing` `cadc_observations` `alma_search` `radio_sources_now` `power_climate` `mars_rover_status` |
-| 気象衛星の実画像 | 1 | `weather_satellite_now` |
-| 宇宙・天文カレンダー | 4 | `space_calendar` `calendar_events` `calendar_event_add` `calendar_event_remove` |
+最新の全ツール一覧・引数・データ源は `README.md` の「ツール一覧」を参照してください（一覧を重複管理すると実装とのずれが起きるため、このガイドではカテゴリ別の本数のみ示します）。
 
-各ツールの引数・データ源の詳細は `README.md` のツール一覧、エージェント向け仕様は `SKILL.md` を参照。
+| カテゴリ | 本数 |
+|:--|--:|
+| 宇宙・天文イベントカレンダー | 4 |
+| ロケット打ち上げ・逆引き | 4 |
+| NASA 日次・宇宙天気 | 3 |
+| メディア（画像/音声/動画） | 3 |
+| 各国宇宙機関・地球観測 | 16 |
+| 衛星・軌道 | 6 |
+| 天体位置・画像合成 | 7 |
+| 観測支援・天文データ | 13 |
+| 気象衛星の実画像 | 1 |
+| 天体異常系 | 3 |
+| 学術文献 | 2 |
+
+合計 62 ツール。エージェント向け仕様は `SKILL.md` を参照。
 
 ## 利用パターン（ハマりどころ）
 

@@ -2,7 +2,7 @@
 """全ツールの回帰検証スクリプト（依存追加なし・標準ライブラリのみ）。
 
 使い方（リポジトリ直下で実行）:
-    uv run python scripts/check-tools.py              # 全47ツールを実呼び出し
+    uv run python scripts/check-tools.py              # 全62ツールを実呼び出し
     uv run python scripts/check-tools.py --offline    # ネットワーク全断を注入して例外漏れを検査
     uv run python scripts/check-tools.py --dead-code  # 未参照定義・未使用importの走査
     uv run python scripts/check-tools.py --only sat_tle,apod
