@@ -73,7 +73,7 @@ category: space
 | `calendar_event_remove` | 予定の削除（冪等・同名複数は候補提示で停止） | ローカル | 不要 |
 | `eodashboard_collections` | EO Dashboard（NASA×ESA×JAXA共同）の173データセットをテーマ・機関・キーワードで検索 | EO Dashboard (GitHub catalog) | 不要 |
 | `eodashboard_detail` | EO Dashboardの1データセットの詳細（衛星・センサー・説明・画像・参照リンク） | EO Dashboard (GitHub catalog) | 不要 |
-| `space_weather` | 宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象）。**NASA が枠切れ/障害なら認証不要の NOAA SWPC へ自動切替**（Kp・NOAAスケール・GOES X線・フレアイベント（直近7日）・太陽風・陽子・警報・黒点。出典と切替理由を明記） | NASA DONKI → **NOAA SWPC** | 不要（SWPC）/キー任意（DONKI） |
+| `space_weather` | 宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象）。**DONKI が障害/URL変更なら認証不要の NOAA SWPC へ自動切替**（Kp・NOAAスケール・GOES X線・フレアイベント（直近7日）・太陽風・陽子・警報・黒点。出典と切替理由を明記） | NASA DONKI（CCMC）→ **NOAA SWPC** | 不要 |
 | `fireball_reports` | **火球（大気圏突入）の観測記録**（`days` 1〜1825・`min_impact_energy_kt`・`limit`・`require_location`）。緯度経度・突入高度・衝突エネルギー(kt)・放射エネルギー(10^10 J)・突入速度（vx,vy,vz から算出）。広島型原爆(約15kt)との比を併記。⚠️ 隕石の回収ではなく**突入の観測**。**呼ぶと結果がカレンダーへ蓄積**（`calendar_stored`） | NASA/JPL CNEOS Fireball Data | 不要 |
 | `neo_close_approach` | **小惑星・彗星の地球接近**（`days` 1〜365・`max_distance_au`・`hazardous_only`）。地心距離を au / km / 月距離(LD) で併記、既知の直径（無ければ H とアルベド0.14 から**推定**）と不確かさ(3σ)。⚠️ 接近≠衝突・時刻は **TDB**（UTC と最大約1分差）。**呼ぶと結果がカレンダーへ蓄積**（`calendar_stored`） | NASA/JPL CNEOS SBDB CAD | 不要 |
 | `impact_risk` | **将来の衝突リスク**（JPL Sentry）。`min_probability` 以上の天体を確率順に（確率＋「何回に1回」・パレルモスケール・想定時期）。`designation`（**仮符号/番号のみ・和名は400で拒否**）で VI 一覧まで。**削除済みは HTTP 200 + `error`**。日付が無い（数十年〜百年の幅）ので**カレンダーには置かない** | NASA/JPL CNEOS Sentry | 不要 |
@@ -170,7 +170,7 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 「今月の予定だけ一覧で」                  → calendar_events()  # 図を描かない軽い経路
 「今夜の観測に向く時間帯は？」                → astronomy_weather(place="東京")  # 日本国内は気象庁の雨雲・降水画像も同時に返る（figure.notes を要約せず引用）
 「東京の今夜の空に何が見える？」              → sky_map_with_satellites(place="東京")
-「いま宇宙天気はどう？」                      → space_weather()  # NASA が枠切れなら NOAA SWPC に自動切替（出典が変わる）
+「いま宇宙天気はどう？」                      → space_weather()  # DONKI が障害なら NOAA SWPC に自動切替（出典が変わる）
 「最近の太陽フレアは？」                      → space_weather(kind="flare")
 「最近の火球は？」                            → fireball_reports(days=30)
 「今週地球に接近する小惑星は？」              → neo_close_approach(days=7)  # 呼ぶと結果がカレンダーにも蓄積される
@@ -264,7 +264,7 @@ uv run python scripts/check-tools.py                  # 全56ツール実呼び�
 |:--|:--|:--|:--|
 | 不変アセット | Trekタイル / NASA画像資産 / 星空背景 | ディスク（`%LOCALAPPDATA%\Temp\space_finder_mcp\cache`） | 30日 |
 | 揮発データ | RSS・打ち上げ・STAC検索・ESO | メモリ | 10分 |
-| 〃 | DONKI（**カテゴリ単位**＝種別を変えても取り直さない。`DEMO_KEY` は4エンドポイント/回を消費）/ NOAA SWPC（フォールバック時に7項目） | メモリ | 10分 |
+| 〃 | DONKI（**カテゴリ単位**＝種別を変えても取り直さない。認証不要・`DEMO_KEY` の枠を消費しない）/ NOAA SWPC（フォールバック時に7項目） | メモリ | 10分 |
 | 〃 | 天体観測用天気・メディア検索・ALMA/CADC | メモリ | 30分 |
 | 〃 | APOD / NEO / EO Dashboard | メモリ | 1時間 |
 | 〃 | データセット一覧・ジオコーディング・POWER・Wikidata | メモリ | 24時間 |
@@ -279,7 +279,7 @@ uv run python scripts/check-tools.py                  # 全56ツール実呼び�
 ## 注意事項
 
 1. **出典表示**: 結果には出典URLが含まれます。回答時は必ず引用元を表示してください（NASA / ESA / JAXA / ISRO / CSA / INPE / UK / CNSA / Wikidata など）。
-2. **レート制限**: `DEMO_KEY` は 30リクエスト/時/IP の共有枠（`apod`・`neo_today`・`space_weather` で共有）。`space_weather` は枠切れ時に**認証不要の NOAA SWPC へ自動切替**するので、宇宙天気だけは 429 中でも返ります（`space_weather` 以外の NASA 系は待機が必要）。サーバー側で使用数を数えており、枠を使い切ると HTTP を出さずに回復目安を返し、429 を受けた場合は `Retry-After` を尊重します（`structuredContent.budget` に上限・使用数・残りを添付）。**CelesTrak** も短時間の連続リクエストで IP 単位に遮断され（403、または TCP が返らない blackhole）、その間は 1 回の呼び出しが分単位で固まります。接続は (connect 10 秒, read 25 秒) で打ち切り、遮断を受けたら**セッション内で記憶して以降は HTTP を出さずに即座に案内**を返します（`sat_tle` / `sat_ground_track` / `tiangong_now` / `sky_map_with_satellites` が該当）。 さらに **TLE は代替源へ自動フォールバック**します — CelesTrak 遮断中は認証不要の公開ミラー（tle.ivanstanojevic.me → db.satnogs.org）から同じ衛星の TLE を取得し、**content / structuredContent にどちらから取ったかを明示**します（`tle_source`）。グループ検索（`group=`）は代替源に無いので、遮断中はその旨を案内します。
+2. **レート制限**: `DEMO_KEY` は 30リクエスト/時/IP の共有枠（`apod`・`neo_today` で共有）。`space_weather`(DONKI) は 2026-09-30 の URL 移転で**認証不要の別ホスト**（`ccmc.gsfc.nasa.gov/DONKI-API`）になり、この枠を消費しません（`nasa_budget` を通しません。**キーを持たないホストへ `api_key` を渡さない**）。DONKI が障害のときは**認証不要の NOAA SWPC へ自動切替**するので、宇宙天気だけは止まりません（`space_weather` 以外の NASA 系は待機が必要）。サーバー側で使用数を数えており、枠を使い切ると HTTP を出さずに回復目安を返し、429 を受けた場合は `Retry-After` を尊重します（`structuredContent.budget` に上限・使用数・残りを添付）。**CelesTrak** も短時間の連続リクエストで IP 単位に遮断され（403、または TCP が返らない blackhole）、その間は 1 回の呼び出しが分単位で固まります。接続は (connect 10 秒, read 25 秒) で打ち切り、遮断を受けたら**セッション内で記憶して以降は HTTP を出さずに即座に案内**を返します（`sat_tle` / `sat_ground_track` / `tiangong_now` / `sky_map_with_satellites` が該当）。 さらに **TLE は代替源へ自動フォールバック**します — CelesTrak 遮断中は認証不要の公開ミラー（tle.ivanstanojevic.me → db.satnogs.org）から同じ衛星の TLE を取得し、**content / structuredContent にどちらから取ったかを明示**します（`tle_source`）。グループ検索（`group=`）は代替源に無いので、遮断中はその旨を案内します。
 3. **曖昧入力**: 衛星名などで候補が複数ある場合は推測せず、NORAD ID 付きの候補を提示して停止します。
 4. **過去ミッション**: かぐや（SELENE）・あかつき等は「現在位置を表示できない」と正直に返します。落点が公表されている機体（かぐや＝南緯65.5°／東経80.4° Gill クレータ付近、2009-06-10 18:25 UTC）は落点を `structuredContent.impact_site` に出典つきで返します（「落点は判明しているか」に MCP だけで答えられます）。和名（かぐや/あかつき）も英語キーへ展開してから判定します。
 5. **描画エンジン**: `simple`（Pillow合成・学生向け視認性重視・JPEG・既定）と `accurate`（matplotlib・正確座標・PNG）。天体・記号の色は `img_common.BODY_COLORS`（惑星・月・太陽の実物色）/ `SYMBOL_COLORS`（環・縞・極冠・小惑星・彗星）が単一の出典で、`sky_map_with_satellites` と `solar_system_now` の両エンジンが同じ値を参照し、`accurate` の凡例は実際に描いたマーカーだけを色コード付きで出します。遠方探査機・彗星は線形縮尺では枠外のため自動的に `simple` を使用します。

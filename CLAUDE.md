@@ -16,7 +16,7 @@
 
 ### 1. APIキー（任意）
 
-NASA Open API のキーは **任意**です。未設定でも `DEMO_KEY` で動作しますが、`DEMO_KEY` は **30リクエスト/時/IP の共有枠**で `apod`・`neo_today`・`space_weather` が取り合うため、実用時は無料キー（https://api.nasa.gov/）を推奨します。
+NASA Open API のキーは **任意**です。未設定でも `DEMO_KEY` で動作しますが、`DEMO_KEY` は **30リクエスト/時/IP の共有枠**で `apod`・`neo_today` が取り合うため、実用時は無料キー（https://api.nasa.gov/）を推奨します（`space_weather`(DONKI) は 2026-09-30 の URL 移転で認証不要の別ホスト `ccmc.gsfc.nasa.gov/DONKI-API` になり、この枠を消費しません）。
 
 キーの置き場所は2通り（**優先順位: MCPクライアントの env > リポジトリ直下の .env**）:
 
@@ -85,7 +85,7 @@ ISSの現在位置を地球地図で →  mcp__space-finder__sat_ground_track
 ## 利用パターン（ハマりどころ）
 
 - **描画エンジン**: `sky_map_with_satellites` / `solar_system_now` は `engine="simple"`（既定・Pillow合成・学生向け視認性重視）と `engine="accurate"`（matplotlib・正確座標）。`simple` は JPEG、`accurate` は PNG を返します。
-- **レート制限**: api.nasa.gov を使うツール（`apod`・`neo_today`・`space_weather`）は `nasa_budget` を通して**投げる前に**枠を確認し、429 は `Retry-After` を尊重します（同じ 429 を繰り返し踏みに行かない）。
+- **レート制限**: api.nasa.gov を使うツール（`apod`・`neo_today`）は `nasa_budget` を通して**投げる前に**枠を確認し、429 は `Retry-After` を尊重します（同じ 429 を繰り返し踏みに行かない）。`space_weather`(DONKI) は 2026-09-30 の URL 移転で認証不要の別ホスト（`ccmc.gsfc.nasa.gov/DONKI-API`）になり、この枠を通しません。
 - **キャッシュ**: データの性質ごとに3層（不変アセット=ディスク / 揮発データ=TTLメモリ 10分〜24時間 / 高コスト計算=日食探索など）。**同じ質問を繰り返しても外部APIを叩き直しません**。現在位置系（`iss_now`・`tiangong_now`・各位置計算）はリアルタイム性を優先しキャッシュ対象外です。
 - **レート制限**: `DEMO_KEY` 使用時は 429 になり得ます。エラー応答は対処方法込みで返し、キャッシュもしません（再試行されます）。
 - **曖昧な衛星名**: `sentinel` のように候補が複数ある場合は推測せず、NORAD ID 付きの候補を提示して停止します。

@@ -172,7 +172,7 @@ uv run python scripts/check-tools.py --fonts
 
 ### （任意）NASA APIキー
 
-`apod`・`neo_today` は [api.nasa.gov](https://api.nasa.gov) の無料キーを使います。未設定でも `DEMO_KEY` で動作しますが、**レート制限 30 req/hr/IP** と低く、`space_weather`(DONKI) も同じ枠を共有するため、キー未設定だと3ツールが枠を取り合います。実用にはキーを推奨します。なお **`fireball_reports` / `neo_close_approach` / `impact_risk`（JPL CNEOS）と `space_weather` の SWPC フォールバックは認証不要**で、この枠を消費しません。
+`apod`・`neo_today` は [api.nasa.gov](https://api.nasa.gov) の無料キーを使います。未設定でも `DEMO_KEY` で動作しますが、**レート制限 30 req/hr/IP** と低く、2ツールが同じ枠を取り合います。実用にはキーを推奨します。なお **`space_weather`(DONKI) は 2026-09-30 の URL 移転で認証不要の別ホスト**（`ccmc.gsfc.nasa.gov/DONKI-API`）になり、`fireball_reports` / `neo_close_approach` / `impact_risk`（JPL CNEOS）と `space_weather` の SWPC フォールバックも**認証不要**なので、この枠を消費しません。
 
 **呼び出し回数はサーバー側で管理しています**（`nasa_budget.py`）— 直近1時間の使用数を数え、枠を使い切っていたら**HTTP を投げずに**回復までの目安（例:「約30分後に自動的に回復します」）を返します。実際に 429 を受けた場合は `Retry-After` を尊重し、その間は再試行しません（同じ 429 を繰り返し踏みに行かない）。**CelesTrak** も短時間の連続リクエストで IP 単位に遮断され（403、または TCP が返らない blackhole）、その間は 1 回の呼び出しが分単位で固まります。接続は (connect 10 秒, read 25 秒) で打ち切り、遮断を受けたら**セッション内で記憶して以降は HTTP を出さずに即座に案内**を返します（`sat_tle` / `sat_ground_track` / `tiangong_now` / `sky_map_with_satellites` が該当）。 さらに **TLE は代替源へ自動フォールバック**します — CelesTrak 遮断中は認証不要の公開ミラー（tle.ivanstanojevic.me → db.satnogs.org）から同じ衛星の TLE を取得し、**content / structuredContent にどちらから取ったかを明示**します（`tle_source`。代替源の TLE を「CelesTrak の TLE」と書かないため）。グループ検索（`group=`）は代替源に無いので、遮断中はその旨を案内します。
 
@@ -314,7 +314,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `moon_phase_map` | **月齢マップ**（月の満ち欠け）。`layout="calendar"`（既定）で1か月の日別格子（日月火水木金土・月齢・照度・月相）、`layout="lunation"` で1朔望月（朔→朔）の時系列パネル。輝面の向きは太陽の位置角から計算（月齢からの決め打ちをしない）。朔・望・上弦・下弦の時刻を現地時間で併記 | JPL DE421+Skyfield | 不要 |
 | `eodashboard_collections` | EO Dashboard（NASA×ESA×JAXA共同）の173データセットをテーマ・機関・キーワードで検索 | EO Dashboard (GitHub catalog) | 不要 |
 | `eodashboard_detail` | EO Dashboardの1データセットの詳細（衛星・センサー・説明・画像・参照リンク） | EO Dashboard (GitHub catalog) | 不要 |
-| `space_weather` | 宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象）。**NASA が枠切れ・障害のときは認証不要の NOAA SWPC（Kp・NOAAスケール・GOES X線・フレアイベント（直近7日）・太陽風・陽子・警報・黒点）へ自動切替**（出典を明記） | NASA DONKI → **NOAA SWPC（フォールバック）** | 不要（SWPC）/キー任意（DONKI） |
+| `space_weather` | 宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象）。**DONKI が障害・URL 変更のときは認証不要の NOAA SWPC（Kp・NOAAスケール・GOES X線・フレアイベント（直近7日）・太陽風・陽子・警報・黒点）へ自動切替**（出典を明記） | NASA DONKI（CCMC）→ **NOAA SWPC（フォールバック）** | 不要 |
 | `fireball_reports` | **火球（大気圏突入）の観測記録**（直近1〜1825日・衝突エネルギーの下限指定可）。緯度経度・突入高度・**衝突エネルギー(kt)**・放射エネルギー(J)・突入速度（成分から算出）。広島型原爆（約15kt）との比を併記。⚠️ 隕石の回収情報ではなく**大気圏突入の観測**。**呼ぶと結果がカレンダーの蓄積ストアに入り、後日 `space_calendar` / `calendar_events` に出ます**（`calendar_stored` に件数） | NASA/JPL CNEOS Fireball Data | 不要 |
 | `neo_close_approach` | **小惑星・彗星の地球接近**（1〜365日先・距離上限 au）。地心距離を **au / km / 月距離**で併記し、既知の直径（無ければ絶対等級 H から**推定**・アルベド0.14 仮定）と接近時刻の不確かさを返す。`hazardous_only` で PHA のみ。⚠️ 接近は衝突ではない。**呼ぶと結果がカレンダーに蓄積され、後日 `space_calendar` / `calendar_events` に反映されます**（接近時刻は TDB・UTC とは最大約1分差） | NASA/JPL CNEOS SBDB CAD | 不要 |
 | `impact_risk` | **将来の衝突リスク**（JPL Sentry）。累積衝突確率を**確率＋「何回に1回」**で表示し、パレルモスケール・想定時期・想定衝突数を返す。`designation`（**仮符号/番号のみ・和名不可**）を指定すると仮想衝突(VI)の一覧まで。⚠️ 確率は特定の日付ではなく**数十年〜百年の幅**に対する値なので**カレンダーには置きません** | NASA/JPL CNEOS Sentry | 不要 |
@@ -564,13 +564,14 @@ A: eodashboard_detail("N1_NO2") → 詳細+サムネイル画像
 
 ### ☀️ `space_weather` — NASA 宇宙天気（DONKI）
 
-[NASA DONKI](https://api.nasa.gov/)（Database Of Notifications, Knowledge, Information）から、太陽活動に伴う宇宙環境の乱れを取得します。天体観測（オーロラ・電波）や通信・衛星運用への影響評価に使えます。
+[NASA DONKI](https://ccmc.gsfc.nasa.gov/DONKI/)（Database Of Notifications, Knowledge, Information）から、太陽活動に伴う宇宙環境の乱れを取得します。天体観測（オーロラ・電波）や通信・衛星運用への影響評価に使えます。
 
 - `kind` で取得対象を選択: `all`（既定）/ `flare`（太陽フレア）/ `cme`（コロナ質量放出）/ `gst`（地磁気嵐）/ `sep`（太陽粒子現象）
-- 期間は `start_date` / `end_date`（YYYY-MM-DD）で指定
-- 認証: 環境変数 `NASA_API_KEY`（`apod` と同じキーを使用）。未設定時は `DEMO_KEY`（低レート）
-- **フォールバック**: NASA が枠切れ（429）や障害のときは、**認証不要の NOAA SWPC**（`services.swpc.noaa.gov`）へ自動で切り替えます。Kp・NOAAスケール（R/S/G の現在値と1〜3日予測）・GOES X線クラス・**フレアイベント（直近7日・発生時刻と級の内訳）**・太陽風（速度／密度／Bt／Bz）・陽子フラックス・警報・黒点相対数を返し、**どちらの出典で答えたか**を `content` と `structuredContent.source`（`NOAA SWPC` ＋ `fallback: true` ＋ NASA 側の理由 `nasa_reason`）に明記します。SWPC 側でも取得できなかった項目は `failed` に残します
-- **枠の使い方**: 1回の呼び出しで4エンドポイント（FLR/CME/GST/SEP）を叩くため `DEMO_KEY` を4消費します。**カテゴリ単位でキャッシュ**するので、`kind` を変えた呼び出しで同じカテゴリを取り直しません（実測: `all` の直後の `flare` は HTTP 0回）。429 時は「429 後の待機」か「枠切れ」かを区別した案内を返します（自分の使用数だけを出すと、IP を共有する DEMO_KEY では数字と矛盾して見えるため）
+- 期間は `start_date` / `end_date`（YYYY-MM-DD）で指定。**CME はこの2つが必須**で、省略時は直近30日を自動補完します（実測: 移転先で無指定は 400 Bad Request。FLR/GST/SEP は省略可）
+- 認証: **不要**。2026-09-30 に DONKI の URL が移転し（旧 `api.nasa.gov/DONKI` は 301 で CCMC のお知らせページへ転送される）、新エンドポイント `ccmc.gsfc.nasa.gov/DONKI-API/get` は API キーを受け付けません（実測 `X-Rate-Limit-Remaining: 9999`）。`NASA_API_KEY` は `apod` / `neo_today` のみで使用し、DONKI は `nasa_budget` を通しません（**キーを持たないホストへキーを渡さない**）
+- **フォールバック**: DONKI が障害・URL 変更・JSON でない応答のときは、**認証不要の NOAA SWPC**（`services.swpc.noaa.gov`）へ自動で切り替えます。Kp・NOAAスケール（R/S/G の現在値と1〜3日予測）・GOES X線クラス・**フレアイベント（直近7日・発生時刻と級の内訳）**・太陽風（速度／密度／Bt／Bz）・陽子フラックス・警報・黒点相対数を返し、**どちらの出典で答えたか**を `content` と `structuredContent.source`（`NOAA SWPC` ＋ `fallback: true` ＋ DONKI 側の理由 `nasa_reason`）に明記します。SWPC 側でも取得できなかった項目は `failed` に残します
+- **転送・非 JSON の検知**: 301/302 を追跡した場合と JSON でない応答は**明示的に検知**し、「URL が転送されました（転送先）」／「JSON を返しませんでした（HTTP コード・バイト数・Content-Type）」と分かる文言で失敗させます。追跡先の HTML を `r.json()` に渡すと `Expecting value: line 1 column 1 (char 0)` という原因不明の文言になり、実測で「NASA API の一時的障害」と誤診しました
+- **キャッシュ**: **カテゴリ単位**なので、`kind` を変えた呼び出しで同じカテゴリを取り直しません（実測: `all` の直後の `flare` は HTTP 0回）。`DEMO_KEY` の共有枠は消費しません
 
 ```text
 Q: 最近の太陽フレアは?
@@ -581,7 +582,7 @@ Q: 宇宙天気の全体状況
 A: space_weather() → フレア・CME・地磁気嵐・粒子現象をまとめて表示
 ```
 
-出典: api.nasa.gov（NASA Space Weather）
+出典: ccmc.gsfc.nasa.gov/DONKI-API（NASA CCMC / M2M-SWAO）
 
 ### ☄️ `fireball_reports` / `neo_close_approach` / `impact_risk` — 天体異常系（JPL CNEOS）
 
@@ -842,7 +843,7 @@ ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカ�
 |----|------|------|-----|
 | ① 不変アセット | Trek 地図タイル / NASA 画像資産 / 星空マップ背景 | **ディスク**（`%LOCALAPPDATA%\Temp\space_finder_mcp\cache`） | 30日（実質無期限） |
 | ② 揮発データ | RSS・打ち上げ(LL2)・STAC検索・天気・ESO | プロセス内メモリ | **10分** |
-| | 宇宙天気(DONKI) — **カテゴリ単位**（種別を変えても取り直さない。`DEMO_KEY` は1回4エンドポイントを消費するため） | プロセス内メモリ | **10分** |
+| | 宇宙天気(DONKI) — **カテゴリ単位**（種別を変えても取り直さない） | プロセス内メモリ | **10分** |
 | | 天体観測用天気・メディア検索・ALMA/CADC | プロセス内メモリ | **30分** |
 | | APOD・NEO・EO Dashboard（日次データ。`DEMO_KEY` 消費も抑制） | プロセス内メモリ | **1時間** |
 | 高コスト計算 | 探査機・彗星の Horizons 状態ベクトル（分単位でキー化）／SBDB 軌道要素 | プロセス内メモリ | 24時間（キーが1分ごとに変わる＝実質1分） |
@@ -1007,7 +1008,7 @@ space-finder-mcp/
 ## 📄 ライセンス / 注意
 
 - **ライセンス**: MIT License（本リポジトリの `LICENSE` を参照）
-- **データソース**: NASA・NASA Image & Video Library・Launch Library 2・Wikidata(Wikimedia)・ISRO・ESA Copernicus Data Space・JAXA Earth API・CSA Open Data・INPE BDC・CelesTrak（遮断時は tle.ivanstanojevic.me / SatNOGS へフォールバック）・UK EO DataHub・CNES THEIA/GEODES・CNSA（NSMC/CNSA-GEO/CRESDA）・CelesTrak（天宮TLE）・ESO ASM・ALMA Science Archive(NAOJ)・TART・CADC・JPL/Skyfield(de421)・NASA MMGIS・NASA Trek WMTS・Open-Meteo(CC BY 4.0)・EO Dashboard・NASA DONKI・NASA POWER・AWS Earth Search STAC・Open Notify・WMO OSCAR は、それぞれの利用条件・ライセンスに従います。
+- **データソース**: NASA・NASA Image & Video Library・Launch Library 2・Wikidata(Wikimedia)・ISRO・ESA Copernicus Data Space・JAXA Earth API・CSA Open Data・INPE BDC・CelesTrak（遮断時は tle.ivanstanojevic.me / SatNOGS へフォールバック）・UK EO DataHub・CNES THEIA/GEODES・CNSA（NSMC/CNSA-GEO/CRESDA）・CelesTrak（天宮TLE）・ESO ASM・ALMA Science Archive(NAOJ)・TART・CADC・JPL/Skyfield(de421)・NASA MMGIS・NASA Trek WMTS・Open-Meteo(CC BY 4.0)・EO Dashboard・NASA CCMC/DONKI・NOAA SWPC・NASA POWER・AWS Earth Search STAC・Open Notify・WMO OSCAR は、それぞれの利用条件・ライセンスに従います。
 - 宇宙データは科学的な内容を含みます。応答時は**引用元（Wikipedia / NASA / ISRO / ESA / JAXA / CSA / CNSA 等）へのリンクを必ず表示**してください。
 - 画像・動画・音声の著作権・クレジット表記は各ソースの指示に従ってください（NASA素材は NASA Media Usage Guidelines を参照）。
 

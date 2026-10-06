@@ -432,6 +432,159 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(len(result.structuredContent["failed"]),
                          len(swpc._SECTIONS_BY_KIND["all"]))
 
+    # ---- DONKI の URL 移転（2026-09-30）--------------------------------------
+    # 旧 api.nasa.gov/DONKI/* は 301 で CCMC のお知らせページ（HTML）へ転送され、
+    # 追跡先を r.json() に渡して JSONDecodeError になり、実測では「NASA API の
+    # 一時的障害」と誤診した（本物の原因は恒久的な URL 移転）。以下はその再発防止。
+
+    def test_donki_uses_post_migration_endpoint_without_api_key(self):
+        """移転先 ccmc.gsfc.nasa.gov/DONKI-API を使い、api_key を送らないこと。"""
+        from space_finder_mcp import donki, nasa_budget
+
+        self.assertEqual(donki.DONKI, "https://ccmc.gsfc.nasa.gov/DONKI-API/get")
+
+        seen = {}
+
+        def fake_get(url, params=None, headers=None, timeout=None):
+            seen["url"] = url
+            seen["params"] = dict(params or {})
+            seen["timeout"] = timeout
+            return _FakeHttpResponse(payload=[{"flrID": "2026-10-06T07:47:00-FLR-001"}])
+
+        old_get, old_check = donki.requests.get, nasa_budget.check
+        donki.requests.get = fake_get
+        # DEMO_KEY の共有枠を使い切っていても DONKI は止めない（別ホスト・別枠）
+        nasa_budget.check = lambda *a, **k: (False, 9999.0, 30)
+        try:
+            data = donki._get("FLR", {"startDate": "2026-10-06"})
+        finally:
+            donki.requests.get, nasa_budget.check = old_get, old_check
+
+        self.assertEqual(seen["url"], "https://ccmc.gsfc.nasa.gov/DONKI-API/get/FLR")
+        self.assertEqual(seen["params"], {"startDate": "2026-10-06"})   # api_key を足さない
+        self.assertIsInstance(seen["timeout"], tuple)                   # (connect, read)
+        self.assertEqual(data, [{"flrID": "2026-10-06T07:47:00-FLR-001"}])
+
+    def test_donki_reports_url_migration_as_migration(self):
+        """301 を追跡したら「JSON 解析失敗」ではなく移転として返すこと。"""
+        from space_finder_mcp import donki
+
+        def fake_get(*a, **k):
+            return _FakeHttpResponse(
+                payload=None, history=[SimpleNamespace(status_code=301)],
+                url="https://ccmc.gsfc.nasa.gov/news/major-updates")
+
+        old = donki.requests.get
+        donki.requests.get = fake_get
+        try:
+            with self.assertRaises(requests.RequestException) as cm:
+                donki._get("FLR", {})
+        finally:
+            donki.requests.get = old
+        msg = str(cm.exception)
+        self.assertIn("転送", msg)
+        self.assertIn("major-updates", msg)      # 転送先を出す（原因の切り分け用）
+        self.assertNotIn("Expecting value", msg)
+
+    def test_donki_reports_non_json_response(self):
+        """HTTP 200 でも中身が JSON でなければ、そう分かる文言で失敗させること。"""
+        from space_finder_mcp import donki
+
+        def fake_get(*a, **k):
+            return _FakeHttpResponse(payload=None, ctype="text/html; charset=utf-8")
+
+        old = donki.requests.get
+        donki.requests.get = fake_get
+        try:
+            with self.assertRaises(requests.RequestException) as cm:
+                donki._get("FLR", {})
+        finally:
+            donki.requests.get = old
+        msg = str(cm.exception)
+        self.assertIn("JSON を返しませんでした", msg)
+        self.assertIn("text/html", msg)
+
+    def test_donki_cme_supplies_required_dates(self):
+        """CME は日付が必須（実測: 無指定は 400）。無指定なら直近30日で埋めて呼ぶこと。"""
+        import datetime
+        from space_finder_mcp import donki
+
+        self.assertEqual(donki.CME_DEFAULT_DAYS, 30)
+        seen = []
+
+        def fake_get(url, params=None, headers=None, timeout=None):
+            seen.append((url, dict(params or {})))
+            return _FakeHttpResponse(payload=[])
+
+        old_get = donki.requests.get
+        donki.requests.get = fake_get
+        donki._get_cached.cache_clear()
+        donki.space_weather.cache_clear()
+        try:
+            result = donki.space_weather(kind="cme")
+        finally:
+            donki.requests.get = old_get
+            donki._get_cached.cache_clear()
+            donki.space_weather.cache_clear()
+
+        self.assertEqual(len(seen), 1)                 # 1カテゴリ＝1リクエスト
+        url, params = seen[0]
+        self.assertTrue(url.endswith("/CME"))
+        today = datetime.date.today()
+        self.assertEqual(params.get("endDate"), today.isoformat())
+        self.assertEqual(params.get("startDate"),
+                         (today - datetime.timedelta(days=30)).isoformat())
+        self.assertEqual(result.structuredContent["errors"], [])
+
+    def test_space_weather_fallback_reason_has_no_api_key_advice(self):
+        """DONKI は認証不要なので、代替理由に『NASA_API_KEY で緩和』を出さないこと。"""
+        from space_finder_mcp import donki, swpc
+
+        def donki_down(*a, **k):
+            raise requests.ConnectionError("simulated DONKI failure")
+
+        old_cached, old_fetch = donki._get_cached, swpc.fetch_all
+        donki._get_cached = donki_down
+        swpc.fetch_all = lambda: {
+            "sections": {"kp": {"time_tag": "2026-10-06T14:22:00", "current": 1,
+                                "max_3h": 3, "max_24h": 3}},
+            "failed": [], "fetched_utc": "2026-10-06T14:24:00Z"}
+        donki.space_weather.cache_clear()
+        try:
+            result = donki.space_weather(kind="all")
+        finally:
+            donki._get_cached, swpc.fetch_all = old_cached, old_fetch
+            donki.space_weather.cache_clear()
+
+        text = result.content[0].text
+        self.assertEqual(result.structuredContent["source"], "NOAA SWPC")
+        self.assertIn("DONKI の取得に失敗", result.structuredContent["nasa_reason"])
+        self.assertIn("ccmc.gsfc.nasa.gov/DONKI-API", text)   # 出典を新ホストで示す
+        self.assertNotIn("NASA_API_KEY", text)
+        self.assertNotIn("一時的障害", text)
+        self.assertNotIn("レート制限", text)
+
+
+class _FakeHttpResponse:
+    """requests.Response の最小限の代用（payload=None で非 JSON を模す）。"""
+
+    def __init__(self, payload=None, status=200, ctype="application/json",
+                 history=(), url="https://ccmc.gsfc.nasa.gov/DONKI-API/get/FLR"):
+        self._payload = payload
+        self.status_code = status
+        self.headers = {"Content-Type": ctype}
+        self.content = b'{"ok": true}'
+        self.history = list(history)
+        self.url = url
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("Expecting value: line 1 column 1 (char 0)")
+        return self._payload
+
 
 class CometApparitionTests(unittest.TestCase):
     """彗星の見え方チャート（comet_apparition）と彗星名の解決まわりの回帰テスト。"""

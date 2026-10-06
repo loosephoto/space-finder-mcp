@@ -1,9 +1,10 @@
 """NOAA SWPC — 認証不要の宇宙天気リアルタイム観測（DONKI のフォールバック）。
 
-NASA DONKI（api.nasa.gov）は DEMO_KEY が **1時間30リクエスト/IP の共有枠**で、
-他のクライアントと同じ枠を取り合うため 429 になりやすい（実測: 枠を使い切ると
-cooldown 中は宇宙天気が一切返せない）。NOAA の SWPC（Space Weather Prediction
-Center）は **認証不要** で、現在の Kp・GOES X線フラックス・フレアイベント（直近7日）・太陽風（RTSW）・
+NASA DONKI（2026-09-30 の移転後は ccmc.gsfc.nasa.gov/DONKI-API）は認証不要に
+なったが、単一ホストなので障害・URL 変更・JSON でない応答で宇宙天気が一切返せなく
+なる（実測: 旧 api.nasa.gov/DONKI が 301 で CCMC のお知らせページへ転送され、
+JSON の解析に失敗して全カテゴリが脱落した）。NOAA の SWPC（Space Weather Prediction
+Center）は **別ホスト・認証不要** で、現在の Kp・GOES X線フラックス・フレアイベント（直近7日）・太陽風（RTSW）・
 陽子フラックス・警報・黒点相対数を JSON で公開している。そこで DONKI が
 使えないときのフォールバックとして本モジュールを使う。
 
@@ -346,7 +347,7 @@ def _advice(sections: dict) -> str:
 def space_weather_now(kind: str = "all", nasa_reason: str = "") -> CallToolResult:
     """NOAA SWPC（認証不要）による宇宙天気の現況を返す（DONKI のフォールバック）。
 
-    NASA DONKI がレート制限や障害で使えないときに呼ぶ。Kp・NOAA スケール・
+    NASA DONKI（ccmc.gsfc.nasa.gov/DONKI-API）が障害・URL 変更などで使えないときに呼ぶ。Kp・NOAA スケール・
     GOES X線・フレアイベント（7日）・太陽風（RTSW）・陽子フラックス・警報・
     黒点相対数を返し、
     **どの項目が取得できなかったか**も数値で示す。出典は SWPC と明記し、
@@ -378,7 +379,7 @@ def space_weather_now(kind: str = "all", nasa_reason: str = "") -> CallToolResul
     keys = _SECTIONS_BY_KIND.get(kind, ())
     lines = ["☀️ **宇宙天気（NOAA SWPC・リアルタイム）** 出典: services.swpc.noaa.gov（認証不要）"]
     if nasa_reason:
-        lines.append("⚠️ NASA DONKI（api.nasa.gov）が使えないため、認証不要の NOAA SWPC で"
+        lines.append("⚠️ NASA DONKI（ccmc.gsfc.nasa.gov/DONKI-API）が使えないため、認証不要の NOAA SWPC で"
                      "代替しています。理由: " + nasa_reason)
     if kind == "cme":
         lines.append("※ この経路では CME のイベント一覧は提供していません"

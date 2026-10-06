@@ -22,7 +22,7 @@ def _rate_limit_text(e: "requests.RequestException") -> str:
     status = getattr(getattr(e, "response", None), "status_code", None)
     if status == 429:
         return ("NASA API のレート制限に達しました。DEMO_KEY は 30リクエスト/時/IP の共有枠で、"
-                "apod / neo_today / space_weather(DONKI) が同じ枠を取り合います。"
+                "apod / neo_today が同じ枠を取り合います（space_weather(DONKI) は認証不要の別ホストで、この枠を消費しません）。"
                 "しばらく待つか、環境変数 NASA_API_KEY に無料の開発者キーを設定してください。")
     return ""
 

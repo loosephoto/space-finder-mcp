@@ -2,8 +2,8 @@
 
 「天体異常系」として次の3種類を扱う（いずれも `https://ssd-api.jpl.nasa.gov` の
 公開 API で **APIキー不要**。したがって api.nasa.gov の DEMO_KEY
-（30リクエスト/時/IP の共有枠）を消費せず、`apod` / `neo_today` /
-`space_weather`(DONKI) の枠争いを悪化させない）。
+（30リクエスト/時/IP の共有枠）を消費せず、`apod` / `neo_today` の枠争いを
+悪化させない。`space_weather`(DONKI) も 2026-09-30 の移転後は認証不要の別ホスト）。
 
 - 火球（大気圏突入）: Fireball Data API (v1.2) — 放射エネルギー・衝突エネルギー・
   突入高度・緯度経度・突入速度成分
