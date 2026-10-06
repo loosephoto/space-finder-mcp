@@ -536,6 +536,53 @@ class RegressionTests(unittest.TestCase):
                          (today - datetime.timedelta(days=30)).isoformat())
         self.assertEqual(result.structuredContent["errors"], [])
 
+    def test_donki_returns_newest_events_not_oldest(self):
+        """`data[:lim]` は最古を返していた。新しい順に取ること（実測の再発防止）。"""
+        import random
+        from space_finder_mcp import donki
+
+        asc = [{"activityID": "2026-09-%02dT00:00:00-CME-001" % d,
+                "startTime": "2026-09-%02dT00:00Z" % d} for d in range(1, 21)]
+        got = donki._newest(asc, 3, donki._TIME_KEY["CME"])
+        self.assertEqual([r["startTime"] for r in got],
+                         ["2026-09-20T00:00Z", "2026-09-19T00:00Z", "2026-09-18T00:00Z"])
+        # サーバの並び順に依存しない（シャッフルしても同じ結果）
+        shuffled = asc[:]
+        random.Random(0).shuffle(shuffled)
+        self.assertEqual(donki._newest(shuffled, 3, "startTime"),
+                         donki._newest(asc, 3, "startTime"))
+        # 空・壊れた入力でも例外にしない
+        self.assertEqual(donki._newest(None, 5, "startTime"), [])
+        self.assertEqual(donki._newest([{"x": 1}, "junk"], 5, "startTime"),
+                         [{"x": 1}])
+
+    def test_space_weather_shows_latest_cmes(self):
+        """kind="cme" が 95 件中の**最新**を返すこと（最古ではない）。"""
+        from space_finder_mcp import donki
+
+        def fake_get(url, params=None, headers=None, timeout=None):
+            return _FakeHttpResponse(payload=[
+                {"activityID": "old", "startTime": "2026-09-07T01:48Z"},
+                {"activityID": "new", "startTime": "2026-10-06T06:23Z"},
+            ])
+
+        old_get = donki.requests.get
+        donki.requests.get = fake_get
+        donki._get_cached.cache_clear()
+        donki.space_weather.cache_clear()
+        try:
+            result = donki.space_weather(kind="cme", limit=1)
+        finally:
+            donki.requests.get = old_get
+            donki._get_cached.cache_clear()
+            donki.space_weather.cache_clear()
+
+        text = result.content[0].text
+        self.assertIn("2026-10-06 06:23", text)
+        self.assertNotIn("2026-09-07 01:48", text)
+        self.assertEqual(
+            result.structuredContent["data"]["コロナ質量放出(CME)"][0]["id"], "new")
+
     def test_space_weather_fallback_reason_has_no_api_key_advice(self):
         """DONKI は認証不要なので、代替理由に『NASA_API_KEY で緩和』を出さないこと。"""
         from space_finder_mcp import donki, swpc

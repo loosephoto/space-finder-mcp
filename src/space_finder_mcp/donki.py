@@ -43,6 +43,25 @@ def _default_window(days: int = CME_DEFAULT_DAYS) -> dict:
     return {"startDate": (end - datetime.timedelta(days=days)).isoformat(),
             "endDate": end.isoformat()}
 
+
+# DONKI のイベント時刻フィールド（カテゴリごとに名前が違う）
+_TIME_KEY = {"FLR": "beginTime", "CME": "startTime", "GST": "startTime", "SEP": "eventTime"}
+
+
+def _newest(data, lim: int, time_key: str) -> list:
+    """イベントを**新しい順**に `lim` 件返す。
+
+    DONKI は**昇順**（古い順）で返すので、`data[:lim]` だと「最近の N 件」ではなく
+    **最古の N 件**になる（実測: 30日窓の CME は95件あり、`kind="all"` が
+    09-07〜09-09 の最古10件を表示していた。FLR は30日で10件だったため気付きにくい）。
+    サーバの並び順に依存しないよう、時刻で降順ソートする（ISO 8601 の UTC 文字列は
+    辞書順＝時系列順）。
+    """
+    rows = [r for r in (data or []) if isinstance(r, dict)]
+    rows.sort(key=lambda r: str(r.get(time_key) or ""), reverse=True)
+    return rows[:max(1, int(lim or 1))]
+
+
 # フレア規模の説明
 _FLARE_CLASS = {
     "A": "微小(観測機器でしか検知されない)", "B": "微弱", "C": "小規模（地球への大きな影響は通常なし）",
@@ -157,7 +176,7 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
 
     def _parse_flare(data, lim):
         rows, jrows = [], []
-        for r in data[:lim]:
+        for r in _newest(data, lim, _TIME_KEY["FLR"]):
             ct = r.get("classType", "?")
             cls = ct[0] if ct and ct[0] in "ABCMX" else "?"
             desc = _FLARE_CLASS.get(cls, "")
@@ -173,7 +192,7 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
 
     def _parse_cme(data, lim):
         rows, jrows = [], []
-        for r in data[:lim]:
+        for r in _newest(data, lim, _TIME_KEY["CME"]):
             speed_raw = (r.get("cmeAnalyses") or [{}])[0].get("speed") if r.get("cmeAnalyses") else None
             try:
                 speed = float(speed_raw) if speed_raw is not None else None
@@ -192,7 +211,7 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
 
     def _parse_gst(data, lim):
         rows, jrows = [], []
-        for r in data[:lim]:
+        for r in _newest(data, lim, _TIME_KEY["GST"]):
             kp_list = r.get("allKpIndex") or []
             max_kp = max((k.get("kpIndex", 0) for k in kp_list), default=0)
             lab = _kp_label(max_kp)
@@ -206,7 +225,7 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
 
     def _parse_sep(data, lim):
         rows, jrows = [], []
-        for r in data[:lim]:
+        for r in _newest(data, lim, _TIME_KEY["SEP"]):
             ev = r.get("eventTime") or ""
             row = f"- 太陽粒子現象  発生 {ev[:16].replace('T',' ')}  "
             if r.get("instruments"):
