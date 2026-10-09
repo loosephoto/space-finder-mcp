@@ -493,3 +493,222 @@ class AnomalyCalendarStoreTests(unittest.TestCase):
         colors = [self.store.KINDS[k][1] for k in self.store.KIND_ORDER]
         self.assertEqual(len(colors), len(set(colors)))
 
+
+class SwpcForecastTests(unittest.TestCase):
+    """SWPC の予報（フレア発生確率・活動領域別確率・3日予報）の回帰テスト。
+
+    DONKI は予報を持たないため、kind="forecast" は SWPC を通常経路として使う。
+    実測した癖の再発防止:
+    - solar_probabilities.json は**降順**で並ぶが、並び順に依存せず日付で最新を選ぶ
+    - solar_regions.json は**複数日分**を含む（最新の観測日だけを使う）
+    - 3-day-forecast.txt の "Rationale:" は**複数行に折り返される**（繋いで1文にする）
+    - 3日予報の Kp 行も折り返される（"...is 5.67 (NOAA Scale" + 改行 + "G2)."）
+    """
+
+    PROBS = [
+        {"date": "2026-10-06T00:00:00", "c_class_1_day": 85, "m_class_1_day": 45,
+         "x_class_1_day": 5, "10mev_protons_1_day": 10},
+        {"date": "2026-10-08T00:00:00", "c_class_1_day": 85, "c_class_2_day": 85,
+         "c_class_3_day": 80, "m_class_1_day": 40, "m_class_2_day": 40, "m_class_3_day": 40,
+         "x_class_1_day": 5, "x_class_2_day": 5, "x_class_3_day": 5,
+         "10mev_protons_1_day": 10, "10mev_protons_2_day": 10, "10mev_protons_3_day": 10,
+         "polar_cap_absorption": "green"},
+    ]
+    REGIONS = [
+        {"observed_date": "2026-10-07", "region": 4549, "location": "N10W13", "area": 150,
+         "spot_class": "Dai", "mag_class": "BGD", "number_spots": 16,
+         "c_flare_probability": 65, "m_flare_probability": 30, "x_flare_probability": 5,
+         "proton_probability": 10, "c_xray_events": 7, "m_xray_events": 0},
+        {"observed_date": "2026-10-08", "region": 4545, "location": "N17W33", "area": 70,
+         "spot_class": "Dao", "mag_class": "B", "number_spots": 9,
+         "c_flare_probability": 30, "m_flare_probability": 10, "x_flare_probability": 1,
+         "proton_probability": 1, "c_xray_events": 0, "m_xray_events": 0},
+        {"observed_date": "2026-10-08", "region": 4549, "location": "N10W29", "area": 260,
+         "spot_class": "Dki", "mag_class": "BGD", "number_spots": 29,
+         "c_flare_probability": 75, "m_flare_probability": 35, "x_flare_probability": 5,
+         "proton_probability": 10, "c_xray_events": 1, "m_xray_events": 0},
+        # 西縁の領域は area / spot_class が null で返る（実測）→ 表示は "?" にする
+        {"observed_date": "2026-10-08", "region": 4547, "location": "N15W87", "area": None,
+         "spot_class": None, "mag_class": None, "number_spots": None,
+         "c_flare_probability": 5, "m_flare_probability": 1, "x_flare_probability": 1,
+         "proton_probability": 1, "c_xray_events": 0, "m_xray_events": 0},
+    ]
+    TEXT = """
+:Product: 3-Day Forecast
+:Issued: 2026 Oct 08 1230 UTC
+# Prepared by the U.S. Dept. of Commerce, NOAA, Space Weather Prediction Center
+#
+A. NOAA Geomagnetic Activity Observation and Forecast
+
+The greatest observed 3 hr Kp over the past 24 hours was 3 (below NOAA
+Scale levels).
+The greatest expected 3 hr Kp for Oct 08-Oct 10 2026 is 5.67 (NOAA Scale
+G2).
+
+NOAA Kp index breakdown Oct 08-Oct 10 2026
+
+             Oct 08       Oct 09       Oct 10
+00-03UT       1.00         1.67         4.00
+
+Rationale: G1-G2 (Minor-Moderate) geomagnetic storms are likely on 09
+Oct due to the anticipated arrival of a CME from 06 Oct.
+
+B. NOAA Solar Radiation Activity Observation and Forecast
+
+Solar Radiation Storm Forecast for Oct 08-Oct 10 2026
+
+              Oct 08  Oct 09  Oct 10
+S1 or greater   10%     10%     10%
+
+Rationale: There is a slight chance (10%) for a greater than 10 MeV
+proton event exceeding the 10 pfu (S1-Minor) threshold through 10 Oct.
+
+C. NOAA Radio Blackout Activity and Forecast
+
+Radio Blackout Forecast for Oct 08-Oct 10 2026
+
+              Oct 08        Oct 09        Oct 10
+R1-R2           40%           40%           40%
+R3 or greater    5%            5%            5%
+
+Rationale: Solar activity is expected to be at low levels with a strong
+chance(40%) for further M-class flares (R1-R2, Minor-Moderate) through
+10 Oct, particularly from Region 4549.
+
+"""
+
+    def setUp(self):
+        from space_finder_mcp import swpc
+        self.swpc = swpc
+
+    def _fake_json(self, path):
+        if "solar_probabilities" in path:
+            return self.PROBS
+        if "solar_regions" in path:
+            return self.REGIONS
+        raise AssertionError("unexpected path: " + str(path))
+
+    def _fetch(self):
+        with mock.patch.object(self.swpc, "_get_json", self._fake_json), \
+                mock.patch.object(self.swpc, "_get_text", lambda path: self.TEXT):
+            return self.swpc.fetch_forecast.__wrapped__()
+
+    def test_probabilities_pick_latest_date_regardless_of_order(self):
+        sec = self._fetch()["sections"]["probabilities"]
+        self.assertEqual(sec["date"], "2026-10-08T00:00:00")
+        self.assertEqual(sec["probability_pct"]["M"]["1_day"], 40)     # 10-06 の 45 ではない
+        self.assertEqual(sec["probability_pct"]["X"]["3_day"], 5)
+        self.assertEqual(sec["probability_pct"]["10MeV_protons"]["2_day"], 10)
+        self.assertEqual(sec["polar_cap_absorption"], "green")
+
+    def test_regions_use_latest_observed_day_and_sort_by_m(self):
+        sec = self._fetch()["sections"]["regions"]
+        self.assertEqual(sec["observed_date"], "2026-10-08")
+        self.assertEqual(sec["count"], 3)                              # 10-07 の行は混ぜない
+        self.assertEqual([r["region"] for r in sec["regions"]], [4549, 4545, 4547])
+        self.assertEqual(sec["regions"][0]["m_flare_probability"], 35)
+
+    def test_forecast_text_digest_joins_wrapped_lines(self):
+        q = self._fetch()["sections"]["forecast_text"]["parsed"]
+        self.assertEqual(q["issued"], "2026 Oct 08 1230 UTC")
+        self.assertEqual(q["kp_expected"]["value"], 5.67)              # 折り返しを跨いで拾う
+        self.assertEqual(q["kp_expected"]["scale"], "G2")
+        self.assertEqual(q["s1_or_greater_pct"], ["10%", "10%", "10%"])
+        self.assertEqual(q["r1_r2_pct"], ["40%", "40%", "40%"])
+        self.assertEqual(q["r3_or_greater_pct"], ["5%", "5%", "5%"])
+        self.assertEqual(len(q["rationales"]), 3)
+        self.assertIn("likely on 09 Oct due to", q["rationales"][0])   # 折り返しが繋がる
+        self.assertIn("Region 4549", q["rationales"][2])
+
+    def test_tool_result_renders_numbers_and_hides_none(self):
+        data = self._fetch()
+        with mock.patch.object(self.swpc, "fetch_forecast", lambda: data):
+            res = self.swpc.space_weather_forecast(limit=2)
+            full = self.swpc.space_weather_forecast(limit=10)
+        sc = res.structuredContent
+        self.assertEqual(sc["kind"], "forecast")
+        self.assertEqual(sc["source"], "NOAA SWPC")
+        self.assertNotIn("error", sc)
+        self.assertEqual(sc["failed"], [])
+        text = res.content[0].text
+        self.assertIn("M級: 1日 40%", text)
+        self.assertIn("領域 4549", text)
+        self.assertIn("M級 35%", text)
+        self.assertIn("予想される最大 Kp: 5.67（NOAA Scale G2", text)
+        self.assertIn("…ほか 1 領域", text)                            # limit で切ったことを明示
+        self.assertIn("根拠1:", text)
+        self.assertNotIn("None", text)
+        # 欠測（area / spot_class が null）は "?" で出す（全領域を出したときだけ現れる）
+        self.assertIn("?", full.content[0].text)
+        self.assertNotIn("None", full.content[0].text)
+        self.assertNotIn("…ほか", full.content[0].text)
+
+    def test_missing_section_is_reported_not_hidden(self):
+        """3日予報だけ落ちても、確率と活動領域は返し、欠測を failed に残す。"""
+        def only_json(path):
+            return self._fake_json(path)
+
+        def no_text(path):
+            raise requests.ConnectionError("simulated text failure")
+
+        with mock.patch.object(self.swpc, "_get_json", only_json), \
+                mock.patch.object(self.swpc, "_get_text", no_text):
+            data = self.swpc.fetch_forecast.__wrapped__()
+        self.assertNotIn("forecast_text", data["sections"])
+        self.assertTrue([f for f in data["failed"] if "forecast_text" in f])
+        with mock.patch.object(self.swpc, "fetch_forecast", lambda: data):
+            res = self.swpc.space_weather_forecast()
+        self.assertIn("取得できなかった項目", res.content[0].text)
+        self.assertIn("太陽フレアの発生確率", res.content[0].text)
+        self.assertNotIn("error", res.structuredContent)
+
+    def test_all_sections_failed_returns_error_not_calm(self):
+        def boom(path):
+            raise requests.ConnectionError("simulated failure")
+
+        with mock.patch.object(self.swpc, "_get_json", boom), \
+                mock.patch.object(self.swpc, "_get_text", boom):
+            data = self.swpc.fetch_forecast.__wrapped__()
+        self.assertEqual(data["sections"], {})
+        self.assertEqual(len(data["failed"]), 3)
+        with mock.patch.object(self.swpc, "fetch_forecast", lambda: data):
+            res = self.swpc.space_weather_forecast()
+        self.assertIn("error", res.structuredContent)
+        self.assertEqual(res.structuredContent["source"], "NOAA SWPC")
+
+    def test_fetch_forecast_failure_is_not_leaked(self):
+        with mock.patch.object(self.swpc, "fetch_forecast",
+                               side_effect=RuntimeError("boom")):
+            res = self.swpc.space_weather_forecast()
+        self.assertIn("error", res.structuredContent)
+        self.assertIn("予報を取得できませんでした", res.content[0].text)
+
+    def test_donki_routes_forecast_to_swpc_without_touching_donki(self):
+        """kind="forecast" は DONKI を叩かず SWPC の予報を返す（大文字でも同じ）。"""
+        from space_finder_mcp import donki
+
+        sentinel = {"routed": True}
+        called = []
+
+        def fake_forecast(limit):
+            called.append(limit)
+            return sentinel
+
+        def donki_must_not_be_called(*a, **k):
+            raise AssertionError("DONKI を叩いてはいけない")
+
+        old = self.swpc.space_weather_forecast
+        old_cached = donki._get_cached
+        self.swpc.space_weather_forecast = fake_forecast
+        donki._get_cached = donki_must_not_be_called
+        donki.space_weather.cache_clear()
+        try:
+            self.assertIs(donki.space_weather(kind="forecast", limit=5), sentinel)
+            self.assertIs(donki.space_weather(kind="FORECAST"), sentinel)   # 大文字も受ける
+        finally:
+            self.swpc.space_weather_forecast = old
+            donki._get_cached = old_cached
+            donki.space_weather.cache_clear()
+        self.assertEqual(called, [5, 10])
+
+

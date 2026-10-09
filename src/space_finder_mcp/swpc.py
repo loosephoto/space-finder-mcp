@@ -22,7 +22,7 @@ import time
 import requests
 from mcp.types import CallToolResult, TextContent
 
-from .cache import TTL_SHORT, ttl_cache
+from .cache import TTL_FORECAST, TTL_SHORT, ttl_cache
 
 SWPC = "https://services.swpc.noaa.gov"
 UA = {"User-Agent": "space-finder-mcp/0.30 (MCP; NOAA SWPC space weather)"}
@@ -46,6 +46,13 @@ def _get_json(path: str):
     r = requests.get(SWPC + path, headers=UA, timeout=(30, 30))
     r.raise_for_status()
     return r.json()
+
+
+def _get_text(path: str) -> str:
+    """SWPC のテキストプロダクト（3-day-forecast.txt 等）を取得する（例外はそのまま伝播）。"""
+    r = requests.get(SWPC + path, headers=UA, timeout=(30, 30))
+    r.raise_for_status()
+    return r.text
 
 
 def _xray_class(flux) -> str:
@@ -397,4 +404,282 @@ def space_weather_now(kind: str = "all", nasa_reason: str = "") -> CallToolResul
                            "nasa_reason": nasa_reason,
                            "data": {k: sections[k] for k in keys if k in sections},
                            "failed": data.get("failed") or [], "fetched_utc": data.get("fetched_utc")},
+    )
+
+
+# ---------------------------------------------------------------------------
+# 予報（forecast）: フレア発生確率・活動領域別確率・NOAA 3日予報
+#
+# NASA DONKI は「観測・警報の記録」であり**予報を提供しない**（フレア発生確率・
+# 3日予報・活動領域別確率はいずれも NOAA SWPC のプロダクト）。そのため
+# `kind="forecast"` は DONKI を経由せず、SWPC を**通常経路**として使う
+# （障害時のフォールバックとは別物。donki.space_weather が振り分ける）。
+# 予報プロダクトは 1日1回（3日予報は6時間ごと）の更新なので TTL_FORECAST で保持する。
+# ---------------------------------------------------------------------------
+
+_FORECAST_RAW_MAX = 4000        # structuredContent に入れる 3日予報の原文の上限（文字）
+
+
+def _pct(v):
+    """SWPC の確率値（%・数値/文字列）を int にする。読めない値は None（推測しない）。"""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    if f != f:                      # NaN
+        return None
+    return int(round(f))
+
+
+def _or_q(v) -> str:
+    """欠測（None / 空文字）を "?" にする（表示に "None" と出さない）。"""
+    return "?" if v is None or v == "" else str(v)
+
+
+def _rationale_blocks(text: str) -> list:
+    """3日予報テキストの "Rationale:" ブロックを（折り返しを繋いで）取り出す。
+
+    公式の根拠文は複数行に折り返される（実測: 「...likely on 09 / Oct due to ...」）。
+    行単位で切ると文が途中で終わるので、空行までを1ブロックとして繋ぐ。
+    """
+    out, cur = [], None
+    for line in (text or "").splitlines():
+        if line.startswith("Rationale:"):
+            if cur:
+                out.append(cur)
+            cur = line[len("Rationale:"):].strip()
+        elif cur is not None:
+            if not line.strip():
+                out.append(cur)
+                cur = None
+            else:
+                cur = (cur + " " + line.strip()).strip()
+    if cur:
+        out.append(cur)
+    return out
+
+
+def _parse_forecast_text(raw: str) -> dict:
+    """3-day-forecast.txt から要点を取り出す。
+
+    取り出せなかった項目は None のままにする（推測で埋めない）。原文も保持して、
+    LLM が表示文ではなく公式の文面を引用できるようにする。
+    """
+    t = (raw or "").replace(chr(13), "")     # CRLF to LF
+
+    def first(pat, group=1):
+        m = re.search(pat, t, re.M)
+        return m.group(group).strip() if m else None
+
+    def row(pat):
+        m = re.search(pat, t, re.M)
+        return (m.group(1).split() or None) if m else None
+
+    kp = re.search(r"The greatest expected 3 hr Kp for (.+?) is ([\d.]+)\s*"
+                   r"\(NOAA Scale\s*([A-Z]\d+)\)", t)
+    return {
+        "issued": first(r"^:Issued:\s*(.+)$"),
+        "kp_expected": ({"window": kp.group(1).strip(), "value": float(kp.group(2)),
+                         "scale": kp.group(3)} if kp else None),
+        "s1_or_greater_pct": row(r"^S1 or greater\s+(.+)$"),
+        "r1_r2_pct": row(r"^R1-R2\s+(.+)$"),
+        "r3_or_greater_pct": row(r"^R3 or greater\s+(.+)$"),
+        "rationales": _rationale_blocks(t),
+    }
+
+
+@ttl_cache(TTL_FORECAST, maxsize=4)
+def fetch_forecast() -> dict:
+    """SWPC の予報プロダクト（発生確率・活動領域・3日予報）を取得して1つにまとめる。
+
+    1項目の失敗で全体を落とさず、取れなかった項目名を failed に残す
+    （欠測を「予報なし＝静穏」と誤読させない）。
+    """
+    sections, failed = {}, []
+
+    def add(key, loader):
+        try:
+            sections[key] = loader()
+        except Exception as e:            # noqa: BLE001 — 項目単位の失敗は記録して継続
+            failed.append("{}: {}".format(key, str(e)[:90]))
+
+    def probabilities():
+        rows = _get_json("/json/solar_probabilities.json")
+        rows = [r for r in rows if isinstance(r, dict) and r.get("date")] \
+            if isinstance(rows, list) else []
+        if not rows:
+            raise ValueError("確率の行が空")
+        # サーバの並び順に依存しない（日付で降順ソートして先頭＝最新を使う）
+        rows.sort(key=lambda r: str(r.get("date")), reverse=True)
+        latest = rows[0]
+
+        def days(prefix):
+            return {"1_day": _pct(latest.get(prefix + "_1_day")),
+                    "2_day": _pct(latest.get(prefix + "_2_day")),
+                    "3_day": _pct(latest.get(prefix + "_3_day"))}
+
+        return {"date": latest.get("date"),
+                "probability_pct": {"C": days("c_class"), "M": days("m_class"),
+                                    "X": days("x_class"),
+                                    "10MeV_protons": days("10mev_protons")},
+                "polar_cap_absorption": latest.get("polar_cap_absorption")}
+
+    def regions():
+        rows = _get_json("/json/solar_regions.json")
+        rows = [r for r in rows if isinstance(r, dict) and r.get("observed_date")] \
+            if isinstance(rows, list) else []
+        if not rows:
+            raise ValueError("活動領域の行が空")
+        # この JSON は複数日分を含む。最新の観測日だけを使う（古い日を混ぜない）
+        latest = max(str(r.get("observed_date")) for r in rows)
+        out = [{"region": r.get("region"), "location": r.get("location"),
+                "area_millionths": r.get("area"), "spot_class": r.get("spot_class"),
+                "mag_class": r.get("mag_class"), "number_spots": r.get("number_spots"),
+                "c_flare_probability": _pct(r.get("c_flare_probability")),
+                "m_flare_probability": _pct(r.get("m_flare_probability")),
+                "x_flare_probability": _pct(r.get("x_flare_probability")),
+                "proton_probability": _pct(r.get("proton_probability")),
+                "c_xray_events": r.get("c_xray_events"),
+                "m_xray_events": r.get("m_xray_events")}
+               for r in rows if str(r.get("observed_date")) == latest]
+        out.sort(key=lambda r: (-(r["m_flare_probability"] or 0),
+                                -(r["c_flare_probability"] or 0), str(r["region"])))
+        return {"observed_date": latest, "count": len(out), "regions": out}
+
+    def forecast_text():
+        raw = _get_text("/text/3-day-forecast.txt")
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError("3日予報が空です")
+        return {"parsed": _parse_forecast_text(raw), "raw": raw[:_FORECAST_RAW_MAX]}
+
+    for key, loader in (("probabilities", probabilities), ("regions", regions),
+                        ("forecast_text", forecast_text)):
+        add(key, loader)
+    return {"sections": sections, "failed": failed,
+            "fetched_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+
+
+def _forecast_lines(sections: dict, limit: int) -> list:
+    """予報セクションを日本語の箇条書きにする（値は数値から生成する）。"""
+    out = []
+    prob = sections.get("probabilities")
+    if prob:
+        p = prob.get("probability_pct") or {}
+        out.append("### 太陽フレアの発生確率（{} の予報）".format(
+            str(prob.get("date") or "?").replace("T", " ").rstrip("Z")))
+        for label, key in (("C級", "C"), ("M級", "M"), ("X級", "X"),
+                           ("10MeV以上の陽子", "10MeV_protons")):
+            d = p.get(key) or {}
+            vals = " / ".join(
+                "{}日 {}%".format(i, d.get(k)) if d.get(k) is not None else "{}日 ?".format(i)
+                for i, k in ((1, "1_day"), (2, "2_day"), (3, "3_day")))
+            out.append("- {}: {}".format(label, vals))
+        if prob.get("polar_cap_absorption"):
+            out.append("- 極冠電波吸収(PCA): {}".format(prob["polar_cap_absorption"]))
+    reg = sections.get("regions")
+    if reg:
+        rows = reg.get("regions") or []
+        out.append("### 活動領域（黒点群）別のフレア確率（観測日 {}・{} 領域）".format(
+            reg.get("observed_date"), reg.get("count")))
+        for r in rows[:limit]:
+            out.append("- 領域 {}（{}・面積 {}（太陽半球の百万分率）・黒点 {} 個・"
+                       "黒点型 {}／磁場型 {}）: C {}% / M {}% / X {}% / 陽子 {}%".format(
+                           _or_q(r.get("region")), _or_q(r.get("location")),
+                           _or_q(r.get("area_millionths")), _or_q(r.get("number_spots")),
+                           _or_q(r.get("spot_class")), _or_q(r.get("mag_class")),
+                           _or_q(r.get("c_flare_probability")),
+                           _or_q(r.get("m_flare_probability")),
+                           _or_q(r.get("x_flare_probability")),
+                           _or_q(r.get("proton_probability"))))
+        if len(rows) > limit:
+            out.append("- …ほか {} 領域（M級確率の高い順に表示）".format(len(rows) - limit))
+    ft = sections.get("forecast_text")
+    if ft:
+        q = ft.get("parsed") or {}
+        out.append("### NOAA 3日予報（{}）".format(q.get("issued") or "発行時刻不明"))
+        kpe = q.get("kp_expected") or {}
+        if kpe:
+            out.append("- 予想される最大 Kp: {}（NOAA Scale {}・{}）".format(
+                kpe.get("value"), kpe.get("scale"), kpe.get("window")))
+        if q.get("s1_or_greater_pct"):
+            out.append("- 太陽放射嵐 S1以上: {}".format(" / ".join(q["s1_or_greater_pct"])))
+        if q.get("r1_r2_pct"):
+            out.append("- 無線通信障害 R1-R2: {} ／ R3以上: {}".format(
+                " / ".join(q["r1_r2_pct"]), " / ".join(q.get("r3_or_greater_pct") or [])))
+        for i, r in enumerate(q.get("rationales") or [], 1):
+            out.append("- 根拠{}: {}".format(i, r))
+    return out
+
+
+def _forecast_advice(sections: dict) -> str:
+    """予報値から助言文を組み立てる（手書きの固定文にしない）。"""
+    p = ((sections.get("probabilities") or {}).get("probability_pct") or {})
+    m1 = (p.get("M") or {}).get("1_day")
+    x1 = (p.get("X") or {}).get("1_day")
+    kpe = ((sections.get("forecast_text") or {}).get("parsed") or {}).get("kp_expected") or {}
+    regs = ((sections.get("regions") or {}).get("regions") or [])
+    parts = []
+    if x1 is not None and x1 >= 10:
+        parts.append("X級（大規模）フレアの発生確率が {}% と高めです。".format(x1))
+    elif m1 is not None and m1 >= 30:
+        parts.append("M級（中規模）フレアの発生確率が {}% と高めです。".format(m1))
+    elif m1 is not None:
+        parts.append("フレアは小〜中規模が中心で、発生確率は M級 {}% / X級 {}% です。".format(m1, x1))
+    if regs:
+        top = regs[0]
+        if top.get("m_flare_probability") is not None:
+            parts.append("最も活発な活動領域は {}（M級 {}%・C級 {}%）です。".format(
+                top.get("region"), top.get("m_flare_probability"),
+                top.get("c_flare_probability")))
+    if kpe.get("value"):
+        parts.append("今後3日は最大 Kp {}（{}）の地磁気予報が出ています。".format(
+            kpe.get("value"), kpe.get("scale")))
+    parts.append("予報は確率であり、SWPC が数時間ごとに更新します。")
+    return "".join(parts)
+
+
+def space_weather_forecast(limit: int = 10) -> CallToolResult:
+    """NOAA SWPC（認証不要）による宇宙天気の**予報**を返す。
+
+    NASA DONKI は観測・警報の記録で予報を持たないため、`kind="forecast"` は
+    DONKI を経由せず本関数へ直接振り分けられる（障害時のフォールバックとは別物）。
+    フレアの発生確率（C/M/X 級・1〜3日）・活動領域（黒点群）別の確率・
+    NOAA 3日予報（予想最大 Kp・S/R スケールの確率・公式の根拠文）を返し、
+    **どの項目が取得できなかったか**も示す。出典は SWPC と明記する。
+    """
+    try:
+        limit = max(1, min(20, int(limit)))
+    except (TypeError, ValueError):
+        limit = 10
+    try:
+        data = fetch_forecast()
+    except Exception as e:                       # 例外をツール外へ漏らさない
+        return CallToolResult(
+            content=[TextContent(type="text",
+                                 text="NOAA SWPC から宇宙天気の予報を取得できませんでした: {}".format(str(e)[:150]))],
+            structuredContent={"error": "swpc forecast failed", "source": "NOAA SWPC",
+                               "detail": str(e)[:200]},
+        )
+    sections = data.get("sections") or {}
+    if not sections:
+        # 1項目も取れなかった＝「予報なし」ではなく「取得できていない」。
+        return CallToolResult(
+            content=[TextContent(type="text", text=(
+                "宇宙天気の予報を取得できませんでした。理由: "
+                + "; ".join(data.get("failed") or ["不明"]))[:400])],
+            structuredContent={"error": "no forecast data", "source": "NOAA SWPC",
+                               "failed": data.get("failed") or []},
+        )
+    lines = ["☀️ **宇宙天気の予報（NOAA SWPC）** 出典: services.swpc.noaa.gov（認証不要）",
+             "※ 予報（発生確率・3日予報・活動領域別確率）は NASA DONKI では提供されないため、"
+             "NOAA SWPC から取得しています。"]
+    lines.extend(_forecast_lines(sections, limit))
+    if data.get("failed"):
+        lines.append("⚠️ 取得できなかった項目: " + "; ".join(data["failed"]))
+    lines.append("🤖 【AIからのインテリジェントアドバイス】" + _forecast_advice(sections))
+    return CallToolResult(
+        content=[TextContent(type="text", text="\n".join(lines))],
+        structuredContent={"kind": "forecast", "source": "NOAA SWPC",
+                           "data": sections, "failed": data.get("failed") or [],
+                           "fetched_utc": data.get("fetched_utc")},
     )

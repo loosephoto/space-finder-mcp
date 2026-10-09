@@ -137,6 +137,10 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
     GOES X線・フレアイベント（直近7日）・太陽風・陽子・警報・黒点相対数）に自動で切り替えて返す**（どちらの出典かを
 
     content と structuredContent.source に明記する）。API キーは不要（`NASA_API_KEY` は apod / neo_today のみで使用）。
+
+    **予報（`kind="forecast"`）は DONKI に存在しない**（DONKI は観測・警報の記録）ので、
+    フレア発生確率・活動領域別確率・NOAA 3日予報を返す NOAA SWPC を**通常経路**として使う
+    （障害時のフォールバックとは別物）。
     例:「最近の太陽フレア」「CME(コロナ質量放出)の情報」「地磁気嵐は起きてる?」
     content に表示用サマリ、structuredContent に JSON を返す。
 
@@ -147,12 +151,29 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
             - "cme": コロナ質量放出(CME)
             - "gst": 地磁気嵐(GST)
             - "sep": 太陽高エネルギー粒子現象(SEP)
-        start_date: 開始日（YYYY-MM-DD）。省略時は既定（最近）。
-        end_date: 終了日（YYYY-MM-DD）。省略時は既定。
-        limit: 各カテゴリの返す件数（既定 10、最大 20）。
+            - "forecast": **予報**（フレアの発生確率 C/M/X 級・活動領域（黒点群）別の確率・
+              NOAA 3日予報の予想最大 Kp と S/R スケール確率・公式の根拠文）。
+              **DONKI は予報を提供しないため NOAA SWPC から取得**する（出典を明記）
+        start_date: 開始日（YYYY-MM-DD）。省略時は既定（最近）。**forecast では使わない**。
+        end_date: 終了日（YYYY-MM-DD）。省略時は既定。**forecast では使わない**。
+        limit: 各カテゴリの返す件数（既定 10、最大 20）。forecast では活動領域の表示数。
     """
     limit = as_int(limit, 10, 1, 20)
     kind = (kind or "all").strip().lower()
+    if kind == "forecast":
+        # 予報は DONKI に存在しない（DONKI は観測・警報の記録で、フレア発生確率・
+        # 3日予報・活動領域別確率は NOAA SWPC のプロダクト）。よって障害時の
+        # フォールバックではなく、SWPC を**通常経路**として使う。
+        from . import swpc
+        try:
+            return swpc.space_weather_forecast(limit)
+        except Exception as e:                  # 例外をツール外へ漏らさない
+            return CallToolResult(
+                content=[TextContent(type="text",
+                                     text="宇宙天気の予報を取得できませんでした: {}".format(str(e)[:150]))],
+                structuredContent={"error": "forecast failed", "kind": kind,
+                                   "detail": str(e)[:200]},
+            )
     params = {}
     if start_date:
         params["startDate"] = start_date
@@ -254,10 +275,10 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
         _handle("SEP", "太陽粒子現象", _parse_sep)
 
     if not result_map:
-        valid = {"flare", "cme", "gst", "sep", "all"}
+        valid = {"flare", "cme", "gst", "sep", "all", "forecast"}
         if kind not in valid:
             return CallToolResult(
-                content=[TextContent(type="text", text="kind は flare/cme/gst/sep/all のいずれかを指定してください。")],
+                content=[TextContent(type="text", text="kind は flare/cme/gst/sep/forecast/all のいずれかを指定してください。")],
                 structuredContent={"error": "bad kind", "kind": kind, "valid": sorted(valid)},
             )
         # kind は正しいが取得失敗（DONKI 側の障害・URL 移転・JSON でない応答など）。

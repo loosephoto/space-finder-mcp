@@ -97,21 +97,20 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 - **リンクの文言は `img_common.media_link_line(対象, kind=…)` が生成します** — 動詞は kind から決まる（`画像を開く` / `生成した画像を開く` / `音声を開く` / `動画を開く` / `ファイルを開く`）ので、ツール側で動詞を書かない限り表記は必ず揃います（手書きすると「サムネイル画像を開く: 」「動画を再生: 」のようにばらつく。ゲートの `img_common.canonical_media_label()` が検出）。
 - **複数のメディアを返すときは、リンクをまとめて先に出し、各リンク行を空行で区切ります** — Markdown は同一段落内の単一改行をスペースに畳み込むため、単一改行で組むと隣り合うリンクや caption が **1行に融合**します（1枚だけ返すときは段落が分かれるので気付きにくい。実測: `astronomy_weather` の気象庁画像2枚、複数画像を並べた回答）。配信時に `server._delivered` が `img_common.layout_media_links()` で空行を補うので、ツール側で入れ忘れても融合はしません（ゲートの融合検査は**配信される形＝整形後**で行い、整形そのものが働いているかは `delivery_issues()` が確かめます）。
 
-### 🆕 直近の更新内容（v0.38.3）
+### 🆕 直近の更新内容（v0.38.4）
 
-**「NASA DONKI の URL 移転（2026-09-30）に追従し、宇宙天気の取得を復旧」**（v0.38.3）。
+**「宇宙天気に予報（フレア発生確率・活動領域別確率・NOAA 3日予報）を追加」**（v0.38.4）。
 
-- **🛰️ 移転先へ切り替え** — NASA が 2026-09-30 に DONKI の URL を移転し、旧 `api.nasa.gov/DONKI` は **301 で CCMC のお知らせページ（HTML）へ転送**されるようになっていました。追跡先の HTML を JSON として読むため `Expecting value: line 1 column 1 (char 0)` になり、`space_weather` は常に NOAA SWPC へフォールバックしていました（実際は恒久的な移転）。取得先を **`ccmc.gsfc.nasa.gov/DONKI-API/get`**（認証不要・実測 `X-Rate-Limit-Remaining: 9999`）へ切り替え、**API キーを送らず `nasa_budget` も通しません**（旧枠でゲートすると、無関係な `DEMO_KEY` の枠切れで**呼び出し前に**止まり、生きている API まで返せなくなるため。キーを持たないホストへ利用者のキーも渡しません）。
-- **🧭 原因が分かる失敗** — 301 転送と「JSON でない応答」を**明示的に検知**し、転送先 URL・HTTP コード・Content-Type・バイト数を添えて失敗させます（原因不明の `Expecting value` と「NASA API の一時的障害」という誤った理由を廃止。恒久移転を障害と誤診させない）。
-- **🗓️ CME は日付が必須** — 移転先の CME は `startDate`/`endDate` を省くと **400 Bad Request**。無指定の側だけ直近30日で自動補完します（旧 URL は 301 で到達していなかったため気付かなかった潜在バグ）。
-- **⏱️ 最新のイベントを返す** — DONKI は**昇順**（古い順）で返すため、`data[:lim]` は「最近の N 件」ではなく**最古の N 件**を返していました（実測: 30日窓の CME は95件あり、09-07〜09-09 の最古10件を表示。FLR は30日で10件だったため気付きにくかった）。時刻で降順ソートし、FLR／CME／GST／SEP の4カテゴリとも**新しい順**に返します。
-- **🧪 検証** — 回帰テスト **248件**（新規2件＝最新順の取得と並び順非依存。`RegressionTests` は 24件 OK。**`NewCraterSiteTests` の4件は変更前から失敗しており本変更とは無関係**）／`--offline`・`--fuzz`（例外漏れ 0）／`--stdio`（6/6 応答）／`--dead-code`（0件）／全62ツール exit 0（`space_weather` ok 3.77s）。実 API で `kind="all"` が `errors=[]`・CME の先頭が 10-06 06:23 の 570 km/s。
+- **🔮 `space_weather(kind="forecast")` を新設** — これまで `space_weather` は NASA DONKI の**観測・警報の記録**しか返せず、**予報（フレアの発生確率・3日予報・活動領域別確率）は取得できませんでした**（実測: 「今後の太陽フレアは？」に M/X 級の確率で答えるには SWPC を直接叩く必要がありました）。**DONKI は予報を提供しない**（予報は NOAA SWPC のプロダクト）ため、`kind="forecast"` は DONKI を経由せず **NOAA SWPC を通常経路**として使います（障害時のフォールバックとは別物）。
+- **📈 3つの予報プロダクトを1回で返す** — `solar_probabilities.json`（C/M/X 級と 10MeV 陽子の**1〜3日確率**）／`solar_regions.json`（**活動領域ごと**の C/M/X・陽子確率、面積（太陽半球の百万分率）・黒点型・磁場型。**最新の観測日のみ**）／`3-day-forecast.txt`（予想最大 Kp と NOAA スケール、S1以上・R1-R2・R3以上の確率、**公式の根拠文**）。予報プロダクトは1日1回の更新なので **30分キャッシュ**（`TTL_FORECAST`）です。
+- **🧭 誤読させない** — 並び順に依存せず日付で最新を選び、複数日分を含む活動領域は**最新の観測日だけ**を使います。予報テキストは**折り返された行を繋いで**1文にします（実測: 「...likely on 09 / Oct due to ...」「...is 5.67 (NOAA Scale / G2).」）。欠測は `failed` に残し、**1項目も取れなければエラー**を返します（空を「予報なし＝静穏」と誤読させない）。
+- **🧪 検証** — 回帰テスト **256件**（新規8件＝確率の最新日選択・活動領域の最新日フィルタ・折り返しの連結・欠測を `?` で表示・項目単位の欠測・全滅時のエラー・例外を漏らさない・**DONKI を叩かず SWPC へ振り分ける**こと）／`--stdio` に forecast 経路を追加／`--dead-code` 0件／全62ツール exit 0。実 API で `kind="forecast"` が `failed=[]`・M級 40%（1日）・領域 4549 の M 35%・予想最大 Kp 5.67（G2）・根拠3文を返すことを確認。
 
 登録ツールは **62本**。
 
 ### 以前の更新
 
-- **v0.38.2** — **全球等角図ベースマップの取得経路を拡張し、経度原点の違いで別の場所を指す問題を修正**（気体惑星を Hubble OPAL の全球等角図へ、冥王星・ベンヌの全球図を追加。`left_edge_lon` で 180° 半周回してから描画。対応 **18天体**）。
+- **v0.38.3** — **NASA DONKI の URL 移転（2026-09-30）に追従し、宇宙天気の取得を復旧**（取得先を `ccmc.gsfc.nasa.gov/DONKI-API/get` へ変更。301 転送・非 JSON 応答を明示検知、CME は日付必須、イベントは新しい順）。
 
 ## 📦 インストール
 
@@ -314,7 +313,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `moon_phase_map` | **月齢マップ**（月の満ち欠け）。`layout="calendar"`（既定）で1か月の日別格子（日月火水木金土・月齢・照度・月相）、`layout="lunation"` で1朔望月（朔→朔）の時系列パネル。輝面の向きは太陽の位置角から計算（月齢からの決め打ちをしない）。朔・望・上弦・下弦の時刻を現地時間で併記 | JPL DE421+Skyfield | 不要 |
 | `eodashboard_collections` | EO Dashboard（NASA×ESA×JAXA共同）の173データセットをテーマ・機関・キーワードで検索 | EO Dashboard (GitHub catalog) | 不要 |
 | `eodashboard_detail` | EO Dashboardの1データセットの詳細（衛星・センサー・説明・画像・参照リンク） | EO Dashboard (GitHub catalog) | 不要 |
-| `space_weather` | 宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象）。**DONKI が障害・URL 変更のときは認証不要の NOAA SWPC（Kp・NOAAスケール・GOES X線・フレアイベント（直近7日）・太陽風・陽子・警報・黒点）へ自動切替**（出典を明記） | NASA DONKI（CCMC）→ **NOAA SWPC（フォールバック）** | 不要 |
+| `space_weather` | 宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象）と**予報**（`kind="forecast"`: フレア発生確率 C/M/X・活動領域別確率・NOAA 3日予報）。**DONKI が障害・URL 変更のときは認証不要の NOAA SWPC（Kp・NOAAスケール・GOES X線・フレアイベント（直近7日）・太陽風・陽子・警報・黒点）へ自動切替**（出典を明記）。予報は DONKI に無いため**常に SWPC から取得** | NASA DONKI（CCMC）→ **NOAA SWPC（フォールバック）**／予報は **NOAA SWPC** | 不要 |
 | `fireball_reports` | **火球（大気圏突入）の観測記録**（直近1〜1825日・衝突エネルギーの下限指定可）。緯度経度・突入高度・**衝突エネルギー(kt)**・放射エネルギー(J)・突入速度（成分から算出）。広島型原爆（約15kt）との比を併記。⚠️ 隕石の回収情報ではなく**大気圏突入の観測**。**呼ぶと結果がカレンダーの蓄積ストアに入り、後日 `space_calendar` / `calendar_events` に出ます**（`calendar_stored` に件数） | NASA/JPL CNEOS Fireball Data | 不要 |
 | `neo_close_approach` | **小惑星・彗星の地球接近**（1〜365日先・距離上限 au）。地心距離を **au / km / 月距離**で併記し、既知の直径（無ければ絶対等級 H から**推定**・アルベド0.14 仮定）と接近時刻の不確かさを返す。`hazardous_only` で PHA のみ。⚠️ 接近は衝突ではない。**呼ぶと結果がカレンダーに蓄積され、後日 `space_calendar` / `calendar_events` に反映されます**（接近時刻は TDB・UTC とは最大約1分差） | NASA/JPL CNEOS SBDB CAD | 不要 |
 | `impact_risk` | **将来の衝突リスク**（JPL Sentry）。累積衝突確率を**確率＋「何回に1回」**で表示し、パレルモスケール・想定時期・想定衝突数を返す。`designation`（**仮符号/番号のみ・和名不可**）を指定すると仮想衝突(VI)の一覧まで。⚠️ 確率は特定の日付ではなく**数十年〜百年の幅**に対する値なので**カレンダーには置きません** | NASA/JPL CNEOS Sentry | 不要 |
@@ -562,16 +561,17 @@ A: eodashboard_detail("N1_NO2") → 詳細+サムネイル画像
 
 出典: github.com/ESA-eodashboards/eodashboard-catalog ／ github.com/eurodatacube/eodash-assets
 
-### ☀️ `space_weather` — NASA 宇宙天気（DONKI）
+### ☀️ `space_weather` — 宇宙天気（NASA DONKI／予報は NOAA SWPC）
 
 [NASA DONKI](https://ccmc.gsfc.nasa.gov/DONKI/)（Database Of Notifications, Knowledge, Information）から、太陽活動に伴う宇宙環境の乱れを取得します。天体観測（オーロラ・電波）や通信・衛星運用への影響評価に使えます。
 
-- `kind` で取得対象を選択: `all`（既定）/ `flare`（太陽フレア）/ `cme`（コロナ質量放出）/ `gst`（地磁気嵐）/ `sep`（太陽粒子現象）
+- `kind` で取得対象を選択: `all`（既定）/ `flare`（太陽フレア）/ `cme`（コロナ質量放出）/ `gst`（地磁気嵐）/ `sep`（太陽粒子現象）/ `forecast`（**予報**: フレア発生確率 C/M/X・活動領域別確率・NOAA 3日予報）
 - 期間は `start_date` / `end_date`（YYYY-MM-DD）で指定。**CME はこの2つが必須**で、省略時は直近30日を自動補完します（実測: 移転先で無指定は 400 Bad Request。FLR/GST/SEP は省略可）
 - 認証: **不要**。2026-09-30 に DONKI の URL が移転し（旧 `api.nasa.gov/DONKI` は 301 で CCMC のお知らせページへ転送される）、新エンドポイント `ccmc.gsfc.nasa.gov/DONKI-API/get` は API キーを受け付けません（実測 `X-Rate-Limit-Remaining: 9999`）。`NASA_API_KEY` は `apod` / `neo_today` のみで使用し、DONKI は `nasa_budget` を通しません（**キーを持たないホストへキーを渡さない**）
 - **フォールバック**: DONKI が障害・URL 変更・JSON でない応答のときは、**認証不要の NOAA SWPC**（`services.swpc.noaa.gov`）へ自動で切り替えます。Kp・NOAAスケール（R/S/G の現在値と1〜3日予測）・GOES X線クラス・**フレアイベント（直近7日・発生時刻と級の内訳）**・太陽風（速度／密度／Bt／Bz）・陽子フラックス・警報・黒点相対数を返し、**どちらの出典で答えたか**を `content` と `structuredContent.source`（`NOAA SWPC` ＋ `fallback: true` ＋ DONKI 側の理由 `nasa_reason`）に明記します。SWPC 側でも取得できなかった項目は `failed` に残します
 - **転送・非 JSON の検知**: 301/302 を追跡した場合と JSON でない応答は**明示的に検知**し、「URL が転送されました（転送先）」／「JSON を返しませんでした（HTTP コード・バイト数・Content-Type）」と分かる文言で失敗させます。追跡先の HTML を `r.json()` に渡すと `Expecting value: line 1 column 1 (char 0)` という原因不明の文言になり、実測で「NASA API の一時的障害」と誤診しました
 - **キャッシュ**: **カテゴリ単位**なので、`kind` を変えた呼び出しで同じカテゴリを取り直しません（実測: `all` の直後の `flare` は HTTP 0回）。`DEMO_KEY` の共有枠は消費しません
+- **予報（`kind="forecast"`）**: DONKI は予報を持たない（予報は SWPC のプロダクト）ため、**SWPC を通常経路**として使います（障害時のフォールバックとは別物）。C/M/X 級と 10MeV 陽子の**1〜3日の発生確率**、**活動領域（黒点群）ごと**の確率（面積＝太陽半球の百万分率・黒点型・磁場型つき。**最新の観測日のみ**）、NOAA 3日予報（予想最大 Kp と NOAA スケール、S1以上・R1-R2・R3以上の確率、**公式の根拠文**）を返します。`limit` は活動領域の表示数（既定 10・最大 20）、**30分キャッシュ**（`TTL_FORECAST`）。予報テキストは**折り返しを繋いで**1文にし、欠測は `failed` に残します（1項目も取れなければエラー。空を「静穏」と誤読させない）
 
 ```text
 Q: 最近の太陽フレアは?
@@ -580,9 +580,11 @@ Q: 地磁気嵐が起きているか確認
 A: space_weather(kind="gst", start_date="2026-08-01")
 Q: 宇宙天気の全体状況
 A: space_weather() → フレア・CME・地磁気嵐・粒子現象をまとめて表示
+Q: 今後の太陽フレアは?
+A: space_weather(kind="forecast") → 発生確率（C/M/X・1〜3日）・活動領域別確率・NOAA 3日予報
 ```
 
-出典: ccmc.gsfc.nasa.gov/DONKI-API（NASA CCMC / M2M-SWAO）
+出典: ccmc.gsfc.nasa.gov/DONKI-API（NASA CCMC / M2M-SWAO）／予報（`kind="forecast"`）: services.swpc.noaa.gov（NOAA SWPC）
 
 ### ☄️ `fireball_reports` / `neo_close_approach` / `impact_risk` — 天体異常系（JPL CNEOS）
 

@@ -648,6 +648,8 @@ def stdio_report(timeout: float = 90.0) -> list:
          "matplotlib の描画経路（pyplot）"),
         ("solar_system_now", {"engine": "accurate"}, "matplotlib の描画経路（pyplot）"),
         ("sat_ground_track", {"name": "iss"}, "sgp4 + Pillow の描画経路"),
+        ("space_weather", {"kind": "forecast"},
+         "SWPC 予報の取得経路（DONKI を経由しない forecast 分岐）"),
     ]
     env = dict(os.environ)
     env["PYTHONPATH"] = SRC + os.pathsep + env.get("PYTHONPATH", "")

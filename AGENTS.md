@@ -59,7 +59,7 @@ uv run python scripts/check-tools.py                  # 全62ツール実呼び�
 4. キャッシュは `cache.py` の `ttl_cache` / `disk_get` を使う。**エラー応答はキャッシュしない**。キャッシュ値を書き換えるなら `deepcopy`。
 5. 共通処理は `img_common.py` / `surface_map.py`（天体面地図のタイル合成・等角投影・地点マーカー・画素検証） / `stac_common.py` / `name_common.py` / `cache.py` に集約し、重複実装しない。
 6. 現在位置系（`iss_now`・`tiangong_now`・位置計算）は**キャッシュしない**（リアルタイム性優先）。ただし高コストな外部呼び出し（Horizons の状態ベクトル）は**分単位に丸めたキー**でキャッシュしてよい（探査機は1分で数kmしか動かない）。
-7. api.nasa.gov へ投げる前に `nasa_budget.check()` を通す（枠を使い切っていたら HTTP を出さない）。429 は `nasa_budget.note_429()` で `Retry-After` を記録する。ただし **`space_weather`(DONKI) は 2026-09-30 に `ccmc.gsfc.nasa.gov/DONKI-API` へ移転して認証不要になった**ので、`nasa_budget` を通さず `api_key` も送らない（移転前の URL は 301 で CCMC のお知らせページへ転送され、追跡先の HTML を `r.json()` に渡すと原因不明の `Expecting value` になる。キーを持たないホストへ利用者のキーを渡さない）。CME は `startDate`/`endDate` が必須（無指定は 400）。
+7. api.nasa.gov へ投げる前に `nasa_budget.check()` を通す（枠を使い切っていたら HTTP を出さない）。429 は `nasa_budget.note_429()` で `Retry-After` を記録する。ただし **`space_weather`(DONKI) は 2026-09-30 に `ccmc.gsfc.nasa.gov/DONKI-API` へ移転して認証不要になった**ので、`nasa_budget` を通さず `api_key` も送らない（移転前の URL は 301 で CCMC のお知らせページへ転送され、追跡先の HTML を `r.json()` に渡すと原因不明の `Expecting value` になる。キーを持たないホストへ利用者のキーを渡さない）。CME は `startDate`/`endDate` が必須（無指定は 400）。**予報（`kind="forecast"`）は DONKI に無い**（DONKI は観測・警報の記録で、フレア発生確率・3日予報・活動領域別確率は NOAA SWPC のプロダクト）ので、SWPC を**通常経路**として使う（`donki.space_weather` が `swpc.space_weather_forecast` へ振り分ける。障害時のフォールバックとは別物）。
 8. 曖昧な入力（複数候補の衛星名など）は推測せず**候補を提示して停止**する。
 9. 過去ミッション（かぐや等）は正確に「表示できない」と返す（誤った天体を出さない）。
 10. 依存追加は最小限。Pillow / sgp4 / requests は遅延 import（起動を速く保つ）。**numpy / matplotlib / skyfield は起動時に import**（遅延 import すると stdio でツールが無応答になる。規約14参照）。ドキュメント・コメントは日本語。
