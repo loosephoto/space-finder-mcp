@@ -38,6 +38,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 from PIL import Image, ImageDraw
 
 from . import calendar_store as store
+from . import http_retry
 from .img_common import (figure_notes, figure_payload, figure_text_block, load_font,
                          media_link_line, save_output)
 from .input_utils import as_int
@@ -120,7 +121,7 @@ def _ll2_fetch(first: dt.date, nxt: dt.date):
     rows, pages = [], 0
     while pages < 2:
         try:
-            r = requests.get("{}/launches/".format(LL2), params=params, timeout=(10, 40))
+            r = http_retry.get("{}/launches/".format(LL2), params=params, timeout=(10, 40))
         except requests.RequestException as ex:
             return [], "Launch Library 2 への接続に失敗しました: {}".format(ex)
         if r.status_code == 429:
@@ -197,9 +198,9 @@ def _nasa_launch_list():
     if cached is not None:
         return cached, None
     try:
-        r = requests.get(NASA_EVENT_API, params={"event-type": NASA_LAUNCH_TERM, "per_page": 100,
-                                                "_fields": "id,slug,link,title"},
-                         timeout=(10, 30), headers=UA)
+        r = http_retry.get(NASA_EVENT_API, params={"event-type": NASA_LAUNCH_TERM, "per_page": 100,
+                                                   "_fields": "id,slug,link,title"},
+                           timeout=(10, 30), headers=UA)
         r.raise_for_status()
         rows = r.json()
     except (requests.RequestException, ValueError) as ex:
@@ -846,7 +847,7 @@ def _public_events(year: int, month: int):
     if store.source_is_fresh(src, store.TTL_PUBLIC, window=str(year)):
         return [], None
     try:
-        r = requests.get(NINS_EVENTS, timeout=(10, 25), headers=UA)
+        r = http_retry.get(NINS_EVENTS, timeout=(10, 25), headers=UA)
         r.encoding = "utf-8"
         r.raise_for_status()
     except requests.RequestException as ex:
@@ -935,7 +936,7 @@ def _jaxa_fanfun_visit() -> list:
     「お知らせ」「休館案内」の行にはカテゴリの `<span>` が付く。大きな正規表現は使わない
     （大きな HTML では壊滅的バックトラックでハングする実測がある: NINS の一覧参照）。
     """
-    r = requests.get(FANFUN_VISIT, timeout=(10, 25), headers=UA)
+    r = http_retry.get(FANFUN_VISIT, timeout=(10, 25), headers=UA)
     r.encoding = "utf-8"
     r.raise_for_status()
     out = []
@@ -965,7 +966,7 @@ def _jaxa_isas_events() -> list:
     fanfun の一覧が「近日開催」しか持たないのに対し、こちらは月ごとの表で過去分も並ぶので、
     過去月の補完に使う。表は `<th>月</th>` ＋ `<time>` ＋ `<a>` の素直な構造。
     """
-    r = requests.get(ISAS_EVENTS, timeout=(10, 25), headers=UA)
+    r = http_retry.get(ISAS_EVENTS, timeout=(10, 25), headers=UA)
     r.encoding = "utf-8"
     r.raise_for_status()
     out = []
