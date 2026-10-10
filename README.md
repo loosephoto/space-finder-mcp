@@ -97,18 +97,28 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 - **リンクの文言は `img_common.media_link_line(対象, kind=…)` が生成します** — 動詞は kind から決まる（`画像を開く` / `生成した画像を開く` / `音声を開く` / `動画を開く` / `ファイルを開く`）ので、ツール側で動詞を書かない限り表記は必ず揃います（手書きすると「サムネイル画像を開く: 」「動画を再生: 」のようにばらつく。ゲートの `img_common.canonical_media_label()` が検出）。
 - **複数のメディアを返すときは、リンクをまとめて先に出し、各リンク行を空行で区切ります** — Markdown は同一段落内の単一改行をスペースに畳み込むため、単一改行で組むと隣り合うリンクや caption が **1行に融合**します（1枚だけ返すときは段落が分かれるので気付きにくい。実測: `astronomy_weather` の気象庁画像2枚、複数画像を並べた回答）。配信時に `server._delivered` が `img_common.layout_media_links()` で空行を補うので、ツール側で入れ忘れても融合はしません（ゲートの融合検査は**配信される形＝整形後**で行い、整形そのものが働いているかは `delivery_issues()` が確かめます）。
 
-### 🆕 直近の更新内容（v0.38.4）
+### 🆕 直近の更新内容（v0.38.5）
 
-**「宇宙天気に予報（フレア発生確率・活動領域別確率・NOAA 3日予報）を追加」**（v0.38.4）。
+**「星空マップを地上から見上げたパノラマに一新（実星表・天の川・時間帯で変わる空・依頼表示）」**（v0.38.5）。
+
+- **🌌 `sky_map_with_satellites` の既定を `engine="ground"` に変更** — 天頂中心の円形図から、**地平線が下・方位が横軸の正距円筒パノラマ**（地上から見上げた見え方）に一新しました。従来の図は `engine="simple"`（Pillow）/ `"accurate"`（matplotlib）で選べます。
+- **⭐ 恒星を実星表に** — 16個の固定リストをやめ、**Hipparcos 実星表（Vmag<8.5・約6.1万星）**を Skyfield で計算。等級・色（B-V）・大気減光を反映し、淡い星ほど減光して注目天体を埋もれさせません。星表は初回だけ VizieR（CDS）から取得してキャッシュします（取得できない環境では名のある明るい恒星のみで描画を続け、`star_catalog.source` に**実際の出典**を出します）。
+- **🕐 太陽高度で空の色と見える限界等級が変わる** — 昼／朝焼け／夕方／薄明（市民・航海・天文）／夜を太陽高度から自動判定し、天頂色・焼けの色（太陽の方位に出る）・限界等級・天の川の見え方を補間します（昼は星0個、夜は約3,000星）。
+- **🌙 月は位相と距離を反映** — Lambert 球の位相で欠けを描き、**明るい側が太陽の方向**（方位差と高度差の両方）を向きます。新月前後は○で位置だけ表示します。
+- **👁 今は見えない天体は○で位置を示す** — 惑星・主要恒星・代表的な銀河（M31/M33/M42/M45/M8/M13/M27）は、空が明るくて見えない時間帯でも輪郭マーカー＋名札で位置が分かります（見えている天体は●）。
+- **🎛 `span` / `az0` / `lp` / `show` を追加** — 視野（30〜360°）、左端の方位、光害の程度（都心／郊外／山間）、依頼表示する天体（`"木星,ベガ,M31"`）を指定できます。画面下部は手続き生成の街並み＋方位目盛り（左右端にその端の方位）。
+- **🧪 検証** — 回帰テスト **278件**（新規18件＝太陽高度補間の連続性・月の位相と明るい側の向き・銀経銀緯の変換・星の色・依頼表示の一致・出力契約）／`--dead-code` 0件／`--figures`・`--media-links`・`--offline`・`--fuzz`・`--stdio` すべて exit 0。
+
+登録ツールは **62本**。
+
+### 以前の更新（v0.38.4）
+
+**宇宙天気に予報（フレア発生確率・活動領域別確率・NOAA 3日予報）を追加**。
 
 - **🔮 `space_weather(kind="forecast")` を新設** — これまで `space_weather` は NASA DONKI の**観測・警報の記録**しか返せず、**予報（フレアの発生確率・3日予報・活動領域別確率）は取得できませんでした**（実測: 「今後の太陽フレアは？」に M/X 級の確率で答えるには SWPC を直接叩く必要がありました）。**DONKI は予報を提供しない**（予報は NOAA SWPC のプロダクト）ため、`kind="forecast"` は DONKI を経由せず **NOAA SWPC を通常経路**として使います（障害時のフォールバックとは別物）。
 - **📈 3つの予報プロダクトを1回で返す** — `solar_probabilities.json`（C/M/X 級と 10MeV 陽子の**1〜3日確率**）／`solar_regions.json`（**活動領域ごと**の C/M/X・陽子確率、面積（太陽半球の百万分率）・黒点型・磁場型。**最新の観測日のみ**）／`3-day-forecast.txt`（予想最大 Kp と NOAA スケール、S1以上・R1-R2・R3以上の確率、**公式の根拠文**）。予報プロダクトは1日1回の更新なので **30分キャッシュ**（`TTL_FORECAST`）です。
 - **🧭 誤読させない** — 並び順に依存せず日付で最新を選び、複数日分を含む活動領域は**最新の観測日だけ**を使います。予報テキストは**折り返された行を繋いで**1文にします（実測: 「...likely on 09 / Oct due to ...」「...is 5.67 (NOAA Scale / G2).」）。欠測は `failed` に残し、**1項目も取れなければエラー**を返します（空を「予報なし＝静穏」と誤読させない）。
 - **🧪 検証** — 回帰テスト **256件**（新規8件＝確率の最新日選択・活動領域の最新日フィルタ・折り返しの連結・欠測を `?` で表示・項目単位の欠測・全滅時のエラー・例外を漏らさない・**DONKI を叩かず SWPC へ振り分ける**こと）／`--stdio` に forecast 経路を追加／`--dead-code` 0件／全62ツール exit 0。実 API で `kind="forecast"` が `failed=[]`・M級 40%（1日）・領域 4549 の M 35%・予想最大 Kp 5.67（G2）・根拠3文を返すことを確認。
-
-登録ツールは **62本**。
-
-### 以前の更新
 
 - **v0.38.3** — **NASA DONKI の URL 移転（2026-09-30）に追従し、宇宙天気の取得を復旧**（取得先を `ccmc.gsfc.nasa.gov/DONKI-API/get` へ変更。301 転送・非 JSON 応答を明示検知、CME は日付必須、イベントは新しい順）。
 
@@ -307,7 +317,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `space_literature_search` | **惑星科学・宇宙の一次文献（論文・技術報告）を横断検索**して根拠（DOI付き）を返す。OpenAlex（要旨・被引用数・OAリンク）・Crossref・NASA NTRS（技術報告＋PDF）・JAXAリポジトリ・J-STAGE・CiNii Research・Zenodo・DataCite を1回で横断し、DOI/タイトルの重複を統合。**日本語クエリは語彙辞書＋和名テーブルで英語語へ置換してから英語圏ソースへ投げる**（実測: OpenAlex/Crossref は日本語クエリだと無関係な文献を返すため）。`sort`（関連度/被引用数/年）・`year_from`/`year_to`・`min_citations`・`open_access_only`・`planetary_only`（惑星科学概念に限定）・`sources` で絞り込み。⚠️ 返すのは**文献（書誌）**で観測データではない（観測は `mast_observations` / `alma_search` / `cadc_observations`） | OpenAlex / Crossref / NASA NTRS / JAXAリポジトリ / J-STAGE / CiNii / Zenodo / DataCite | 不要（`ADS_API_KEY`・`S2_API_KEY`・`WOS_API_KEY` を設定すると ADS・Semantic Scholar・WoS も使う） |
 | `planetary_evidence` | **天体（惑星・衛星・小天体・探査機）の文献的な裏づけをまとめて返す**。①名前解決（Sesame/CDS で和名→英語名→座標）と、②その天体の文献を**英語圏＋日本語の両方**から集めて提示（既定は被引用数順。**惑星科学概念で絞った OpenAlex を上位に置く**＝実測「火星」で MOLA / OMEGA-Mars Express / ALH84001 が上位に来る）。⚠️ 太陽系天体は時刻で位置が変わるため固定座標を持たない旨を `caveats` に明記 | OpenAlex / Crossref / NASA NTRS / JAXAリポジトリ / J-STAGE / CiNii ＋ Sesame/CDS | 不要 |
 | `radio_sources_now` | TART オープン電波望遠鏡が「いま観測できる電波源」（GNSS・静止衛星等）を仰角順に表示 | TART source catalog (NZ) | 不要 |
-| `sky_map_with_satellites` | 指定地の空に太陽系の惑星と人工衛星を重ねた画像（matplotlib正確版=PNG/Pillow簡易版=JPEGを選択） | JPL de421+Skyfield / CelesTrak+SGP4 | 不要 |
+| `sky_map_with_satellites` | 指定地の空を**地上から見上げた**画像（既定=地上視点パノラマ: Hipparcos実星表の恒星・天の川・街並み・方位目盛り・惑星・人工衛星。太陽高度で昼/夕方/朝焼け/薄明/夜の空色が変わり、**今は見えない天体は○で位置を示す**。`span`/`az0` で視野、`lp` で光害、`show` で依頼表示を指定。従来の天頂中心図は `engine="simple"`(Pillow) / `"accurate"`(matplotlib)） | JPL de421+Skyfield / Hipparcos(VizieR) / CelesTrak+SGP4 | 不要 |
 | `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示）。`view="comet_orbit"` で彗星の軌道面ビュー（太陽＝焦点の楕円／e≥1 は双曲線の枝）、`view="asteroid_orbit"` で指定した小惑星（`asteroid`）の楕円全体と現在位置を表示（SBDB要素のケプラー二体伝播・1天体ずつ）。**`comet` にカンマ区切りで複数（または `comet2`、最大4天体）指定すると 1彗星=1パネルで1枚に並べる**（パネルごとに軌道面と縮尺が違う旨は `figure.notes` に自動生成）。`view="apparition"` で彗星の**見え方チャート**（地心距離・日心距離・予想光度・太陽離角の時系列、`days` で期間指定。1天体ずつ）。`route=True` で**彗星の通過経路（軌道）を俯瞰図に破線で重ねる**（近日点・遠日点は◇＋日付。**近日点の日付は SBDB の2体近似と JPL Horizons の n 体解を併記**し、差を日数で注記。対数縮尺では線の形は実際の楕円と一致しない旨を注記に自動生成し、線形版は形が本当の軌道）。**`range_au` で表示範囲（太陽からの距離の上限 AU）を指定でき、`range_au=10` なら土星(9.5 AU)より内側だけを表示して内惑星を大きく見せられる**（`2`=火星まで／`5.2`=木星まで／`30`=海王星まで。**範囲外の天体・目印・軌道の円は描かず**、`figure.notes` と `structuredContent.out_of_range` に数値付きで列挙。0.5 AU 未満はエラー）。**`probe` 指定時は「1光日」（173.1446 AU＝25,902,068,371 km）を破線の円で描き、1光日に達していない探査機**ごとに**投影での1光日リング・到達時の方向（◇）・到達予測日（日心距離ベースの線形外挿＝`probes[].light_day_eta_date`）を出す（`light_day.projected_rings` と `figure.verify.light_day.rings` に各リングを列挙）**） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
 | `solar_eclipse_series` | 日食（太陽が月に欠ける過程）の時系列パネル画像（7枚・食分と太陽高度・次回日食の自動検索=約4年(1400日)先まで・max_magnitude対応。**地平線下で見えない食は返さない**） | JPL DE421+Skyfield | 不要 |
 | `moon_phase_map` | **月齢マップ**（月の満ち欠け）。`layout="calendar"`（既定）で1か月の日別格子（日月火水木金土・月齢・照度・月相）、`layout="lunation"` で1朔望月（朔→朔）の時系列パネル。輝面の向きは太陽の位置角から計算（月齢からの決め打ちをしない）。朔・望・上弦・下弦の時刻を現地時間で併記 | JPL DE421+Skyfield | 不要 |
@@ -697,22 +707,27 @@ ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカ�
 ```
 
 
-### 🗺️ `sky_map_with_satellites` — 星空マップ＋人工衛星（描画エンジン選択式）
+### 🗺️ `sky_map_with_satellites` — 地上から見上げた星空＋人工衛星（描画エンジン選択式）
 
-指定した観測地・時刻の空に、太陽系の惑星・月と人工衛星の現在位置を重ねた**画像**を返す。天体位置は JPL de421 + Skyfield、衛星位置は CelesTrak TLE + SGP4 で実測計算（全てローカル/認証不要）。
+指定した観測地・時刻の空を**地上から見上げた画像**で返す。天体位置は JPL de421 + Skyfield、恒星は **Hipparcos 実星表（Vmag<8.5・約6.1万星）**、衛星位置は CelesTrak TLE + SGP4 で実測計算（全てローカル/認証不要）。
 
 `engine` で描画を選択:
-- `"simple"`（既定）: **Pillow** による実写背景の簡易合成。惑星を種類別アイコン（岩石惑星=各色、木星=縞、土星=環）、衛星を赤い発光マーカー＋軌道予測線で描く。**学生・観賞用途で視認性重視**。
-- `"accurate"`: **matplotlib** による正確な星図。方位・仰角グリッド、軌道予測線を精確表示（科学・詳細用途）。**マーカーの配色・光背・土星の環・木星の縞・火星の極冠・名札・凡例は `simple` と同一の指定色**で、色は天体・記号の共通パレット `img_common.BODY_COLORS` / `SYMBOL_COLORS` の 1 か所から生成します（凡例も実際に描いたものだけを色コード付きで表示）。
+- `"ground"`（**既定**）: **地上視点の正距円筒パノラマ**。地平線が下・方位が横軸で、下部に街並み（手続き生成）と方位目盛り、左右端にその端の方位を表示。恒星は実星表の位置・等級・色（B-V）・大気減光を反映し、天の川は銀経・銀緯から面輝度を描きます。**太陽高度で空の色と見える限界等級が変わる**（昼/朝焼け/夕方/薄明/夜）ので、同じ呼び出しでも時刻で見え方が変わります。**今は見えない惑星・主要恒星・銀河は○の輪郭で位置だけ**を示し（昼でも位置が分かる）、見えている天体は ● で実物に近い色＋リング、月は位相（照度）と距離を反映して明るい側が太陽を向きます。人工衛星は赤いマーカー＋名札、低軌道は前後60分・1分刻みの可視区間を破線で表示。JPEG。
+  - `span`（横方向の視野 30〜360°, 既定 360）/ `az0`（左端の方位, 既定 0）で切り出しを指定（例: `span=180, az0=225` で南西→北東）。
+  - `lp`（`"city"` 都心 / `"suburb"` 郊外=既定 / `"dark"` 山間・離島）で光害の程度＝限界等級・天の川の見え方・空の明るさを切り替え。
+  - `show`（カンマ区切り, 例 `"木星,ベガ,M31"`）で**依頼表示**する天体を指定。指定した天体だけが ●/○ のマーカーと名札を持ち、他は通常の星として描かれます。
+- `"simple"` / `"accurate"`: 従来の**天頂中心の円形図**（`simple`=Pillow による実写背景の簡易合成・JPEG / `accurate`=matplotlib 極座標の正確な星図・PNG）。マーカーの配色・光背・土星の環・木星の縞・火星の極冠・名札・凡例は共通パレット `img_common.BODY_COLORS` / `SYMBOL_COLORS` の 1 か所から生成します（凡例も実際に描いたものだけを色コード付きで表示）。
 
-画像は content に base64 でインライン表示（`simple`=**JPEG** / `accurate`=PNG）、座標一覧は structuredContent に JSON。
-`simple` は実写合成のため JPEG が適切で、PNG 比で約1/5の転送量になります（1400×1400 で 992KB → 188KB）。
+画像は content に base64 でインライン表示（`ground`/`simple`=**JPEG** / `accurate`=PNG）、座標一覧は structuredContent に JSON。JPEG は PNG 比で約1/5の転送量です。
 
 ```json
-{"time_utc": "...", "engine": "simple (Pillow)",
- "planets": {"月": {"az":..,"alt":..}, ...},
+{"time_utc": "...", "engine": "ground (Pillow, 地上視点パノラマ)", "phase": "夜",
+ "star_catalog": {"source": "Hipparcos 実星表（Vmag<8.5）", "stars": 61221, "drawn": 2952},
+ "planets": {"月": {"az":..,"alt":..,"visible":true,"illum":0.58}, ...},
  "satellites": {"ISS (国際宇宙ステーション)": {"az":..,"alt":..,"trail":[...]}, ...}}
 ```
+
+実星表は初回だけ VizieR（CDS）から取得して `%LOCALAPPDATA%\Temp\space_finder_mcp\stars_hip85.csv` にキャッシュします（de421.bsp と同じ扱い）。取得できない環境では名のある明るい恒星のみで描画を続け、`structuredContent.star_catalog.source` に**実際に使った出典**を出します（偽らない）。
 
 ### ☀️ `solar_system_now` — 太陽系俯瞰図（太陽中心の惑星・小惑星・探査機・彗星位置）
 
@@ -976,7 +991,8 @@ src/space_finder_mcp/
 ├── tart.py              # radio_sources_now（TART オープン電波望遠鏡 可視電波源）
 ├── skyfield_pos.py      # constellation_now（天体位置・星座, Skyfield）
 ├── news.py               # astronomy_news（Sky & Telescope 天文ニュース）
-├── sky_overlay.py        # sky_map_with_satellites（星図+人工衛星, matplotlib/Pillow）
+├── sky_overlay.py        # sky_map_with_satellites（星図+人工衛星, 天頂中心の円形図 / matplotlib+Pillow）
+├── ground_view.py        # sky_map_with_satellites(engine="ground") 地上視点パノラマ（実星表・天の川・街並み・方位目盛り）
 ├── solar_system.py        # solar_system_now（太陽系俯瞰図, JPL DE421+SBDB / matplotlib+Pillow）
 ├── solar_eclipse.py       # solar_eclipse_series（日食の時系列パネル, JPL DE421+Skyfield）
 ├── moon_phase.py          # moon_phase_map（月齢マップ: 月齢カレンダー/朔望月パネル, JPL DE421+Skyfield）

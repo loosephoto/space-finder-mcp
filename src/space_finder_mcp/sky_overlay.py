@@ -526,8 +526,9 @@ def _sky_verify(img_bytes, sats):
 
 
 def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
-                            engine="simple") -> CallToolResult:
-    """東京（または指定地）の空に太陽系の惑星と人工衛星を重ねた図を返す（認証不要）。
+                            engine="ground", span: float = 360.0, az0: float = 0.0,
+                            lp="suburb", show=None) -> CallToolResult:
+    """東京（または指定地）の空を地上から見上げた図（恒星・惑星・天の川・人工衛星）を返す。
 
     例:「東京の空に惑星と人工衛星を重ねた図」「今見えるISSを星空マップで」「木星はどこに見える？」
     天体位置は JPL de421 + Skyfield、衛星位置は CelesTrak TLE + SGP4 で実測計算。
@@ -536,11 +537,14 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
     matplotlib 版も選択できる。
 
     engine で描画方法を選択:
-      - "simple"(既定):   Pillow による実写背景の簡易合成。惑星を種類別の色アイコンで
-        大きく・明瞭に描き、学生が見やすい見た目重視の画像。
-      - "accurate":       matplotlib による正確な星図。座標グリッド・軌道予測線を精確表示
-        （科学・教育の詳細用途向け）。マーカーの色・光背・土星の環・木星の縞・火星の極冠・
-        名札・凡例は simple 版と同じ指定色（_PLANET_VISUAL / _C_*）から作る。
+      - "ground"(既定):   地上から見上げた空（正距円筒・方位-高度）。地平線が下・方位が横軸で、
+        下部に街並みと方位目盛り、恒星は Hipparcos 実星表（Vmag<8.5）、天の川は銀経・銀緯から
+        描く。太陽高度で昼/夕方/朝焼け/薄明/夜の空色と見える限界等級が変わる。今は見えない
+        惑星・主要恒星・銀河は○の輪郭で位置だけを示す（昼でも位置が分かる）。
+        span / az0 / lp / show はこのエンジンで使う。
+      - "simple":         従来の天頂中心の円形図（Pillow・実写背景の簡易合成）。
+      - "accurate":       従来の正確な星図（matplotlib 極座標）。座標グリッド・軌道予測線を
+        精確表示（科学・教育の詳細用途向け）。
     画像は content に base64 インライン表示、座標は structuredContent に JSON。
 
     Args:
@@ -548,7 +552,11 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
         lat: 観測地の緯度。lon と併用時は place より優先。
         lon: 観測地の経度。
         when: 観測時刻 ISO8601（例 "2026-09-09T11:00:00Z"）。省略時は現在時刻。
-        engine: "simple"(既定/Pillow) / "accurate"(matplotlib)。
+        engine: "ground"(既定/地上視点パノラマ) / "simple" / "accurate"。
+        span: 横方向の視野（度, 30〜360）。360 で全天。engine="ground" のみ。
+        az0: 左端の方位（度）。span=180, az0=225 なら南西→北東。engine="ground" のみ。
+        lp: 光害の程度 "city"（都心）/ "suburb"（郊外, 既定）/ "dark"（山間・離島）。ground のみ。
+        show: 依頼表示する天体名（カンマ区切り。例 "木星,ベガ,M31"）。省略時は主要天体すべて。ground のみ。
 
     インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
     content の先頭へ「🖼️ [生成した画像を開く: …](file:///…) ｜ 保存先: `…`」という
@@ -556,6 +564,11 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
     保存し、同じパスを structuredContent.image_path にも入れます）。
     回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
     """
+    eng = str(engine or "ground").strip().lower()
+    if eng not in ("simple", "accurate"):                        # 既定は地上視点パノラマ
+        from . import ground_view
+        return ground_view.sky_ground(place=place, lat=lat, lon=lon, when=when,
+                                      span=span, az0=az0, lp=lp, show=show)
     ll = _resolve_place(place, lat, lon)
     if ll is None and (lat is not None or lon is not None):
         return CallToolResult(
