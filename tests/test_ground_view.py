@@ -186,5 +186,44 @@ class ToolContractTests(unittest.TestCase):
         self.assertIn("image", [getattr(c, "type", "?") for c in r.content])
 
 
+class VerifyFrameTests(unittest.TestCase):
+    """狭い視野で「視野外」を欠落に数えない（verify が偽にならない）ことを固定する。"""
+
+    def _img(self, w=200, h=200):
+        from PIL import Image
+        b = io.BytesIO()
+        Image.new("RGB", (w, h), (0, 0, 0)).save(b, "JPEG")
+        return b.getvalue()
+
+    def _verify(self, sats, occl=None):
+        return gv._ground_verify(self._img(), sats, 180.0, 0.0, 100, 0,
+                                 np.full(200, 200.0) if occl is None else occl)
+
+    def test_out_of_frame_is_not_a_failure(self):
+        v = self._verify({"A": {"az": 200.0, "alt": 45.0}})     # 視野 0..180° の外
+        self.assertTrue(v["ok"], v)
+        self.assertEqual(v["out_of_frame"], ["A"])
+        self.assertEqual(v["missing"], [])
+
+    def test_below_horizon_is_not_a_failure(self):
+        v = self._verify({"A": {"az": 90.0, "alt": -5.0}})
+        self.assertTrue(v["ok"], v)
+        self.assertEqual(v["below_horizon"], ["A"])
+
+    def test_occluded_is_not_a_failure(self):
+        v = self._verify({"A": {"az": 90.0, "alt": 5.0}}, occl=np.full(200, 0.0))
+        self.assertTrue(v["ok"], v)
+        self.assertEqual(v["occluded"], ["A"])
+
+    def test_in_frame_without_marker_is_a_failure(self):
+        v = self._verify({"A": {"az": 90.0, "alt": 45.0}})
+        self.assertFalse(v["ok"])
+        self.assertEqual(len(v["missing"]), 1)
+
+    def test_frame_x_maps_azimuth(self):
+        self.assertAlmostEqual(gv._frame_x(90.0, 180.0, 0.0, 200), 100.0)
+        self.assertAlmostEqual(gv._frame_x(350.0, 180.0, 270.0, 200), 88.888, places=2)
+
+
 if __name__ == "__main__":
     unittest.main()

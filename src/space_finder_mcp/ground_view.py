@@ -765,25 +765,34 @@ def draw_satellites(img, sats, span, az0, sky_h, header, font):
     return pts
 
 
+def _frame_x(az, span, az0, W):
+    """方位を図の画素 x に変換する（視野外なら 0..W の外の値になる）。"""
+    return ((az - az0) % 360.0) / span * W
+
+
 def _ground_verify(img_bytes, sats, span, az0, sky_h, header, occl):
     """報告した人工衛星が、報告した方位・高度の画素に実際に描かれているかを検証する。
 
     描画側と同じ投影（x=方位, y=高度）で画素位置を再計算し、マーカー色（赤）が
-    そこにあるかを確かめる。建物に隠れている衛星は対象から外す（隠れて見えないのが
-    正しい姿なので、欠落として数えない）。
+    そこにあるかを確かめる。次の3つは「描かれないのが正しい」ので欠落に数えない:
+    建物に隠れている（occluded）／この視野の方位に入らない（out_of_frame）／
+    地平線下（below_horizon）。欠落（missing）は「視野内なのに描かれていない」場合だけ。
     """
     from PIL import Image
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
     W, H = img.size
     out = {"ok": True, "satellites_reported": len(sats), "markers_at_expected_position": 0,
-           "occluded": [], "missing": [],
+           "occluded": [], "out_of_frame": [], "below_horizon": [], "missing": [],
            "projection": {"kind": "equirectangular", "span_deg": span, "az0_deg": az0,
                           "sky_height_px": sky_h}}
     for nm, s in sats.items():
-        x = ((s["az"] - az0) % 360.0) / span * W
+        if float(s["alt"]) <= 0.0:
+            out["below_horizon"].append(nm)            # 地平線下
+            continue
+        x = _frame_x(s["az"], span, az0, W)
         y = header + (90.0 - s["alt"]) / 90.0 * sky_h
-        if not (0 <= x < W and 0 <= y < H):
-            out["missing"].append([nm, round(x), round(y), -1])
+        if not (0 <= x < W):
+            out["out_of_frame"].append(nm)             # この視野の方位に入らない
             continue
         if y > float(occl[min(int(x), W - 1)]) - 4.0:
             out["occluded"].append(nm)                 # 街並みの後ろ（描かれていないのが正しい）
@@ -1063,9 +1072,16 @@ def sky_ground(place=None, lat=None, lon=None, when=None, span=360.0, az0=0.0,
     if pos_pl or info["focus"]["position_only"]:
         lines.append("**今は見えないが見える位置（○）**: "
                      + ", ".join(pos_pl + info["focus"]["position_only"]))
-    lines.append("**見えている人工衛星**: " + (", ".join(sats) if sats else "なし(地平線下)"))
-    for nm, s in sats.items():
-        lines.append("- {}: 方位 {:.0f}° 仰角 {:.0f}°".format(nm, s["az"], s["alt"]))
+    W_img = len(info["occl"])
+    in_frame = [nm for nm, s in sats.items() if 0 <= _frame_x(s["az"], span, az0, W_img) < W_img]
+    off_frame = [nm for nm in sats if nm not in in_frame]
+    lines.append("**見えている人工衛星**: " + (", ".join(in_frame) if in_frame
+                                             else ("なし（視野外のみ）" if sats else "なし(地平線下)")))
+    for nm in in_frame:
+        lines.append("- {}: 方位 {:.0f}° 仰角 {:.0f}°".format(nm, sats[nm]["az"], sats[nm]["alt"]))
+    for nm in off_frame:
+        lines.append("- {}: 方位 {:.0f}° 仰角 {:.0f}°（この視野の方位に入らないため図には描かれない）"
+                     .format(nm, sats[nm]["az"], sats[nm]["alt"]))
     for nm, msg in sat_errors.items():
         lines.append("- ⚠️ {}: 位置を計算できませんでした（{}）".format(nm, msg))
     if info["milky_way"]:
@@ -1089,7 +1105,8 @@ def sky_ground(place=None, lat=None, lon=None, when=None, span=360.0, az0=0.0,
             "az_deg": round(v["az"], 1), "alt_deg": round(v["alt"], 1), "visible": v["visible"]}
             for nm, v in info["planets"].items()]
             + [{"id": nm, "label": nm, "kind": "satellite", "color": "#ff3b30",
-                "az_deg": round(v["az"], 1), "alt_deg": round(v["alt"], 1)}
+                "az_deg": round(v["az"], 1), "alt_deg": round(v["alt"], 1),
+                "in_frame": nm in in_frame}
                for nm, v in list(sats.items())[:8]]),
         notes=figure_notes(extra=[
             "この図は観測地の空（方位・高度）の見かけの位置。地平線より下の天体は描かれない",
@@ -1117,7 +1134,9 @@ def sky_ground(place=None, lat=None, lon=None, when=None, span=360.0, az0=0.0,
         ]),
         caption="{:.2f}°N {:.2f}°E の {}（{}）の空。惑星: {} ／ 人工衛星: {}".format(
             lat_v, lon_v, tstr, phase,
-            ", ".join(info["planets"]) or "なし", ", ".join(sats) or "なし"),
+            ", ".join(info["planets"]) or "なし",
+            ", ".join("{}（視野外）".format(nm) if nm in off_frame else nm
+                      for nm in sats) or "なし"),
         verify=verify,
     )
     lines.append("")
