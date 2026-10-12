@@ -130,7 +130,7 @@ uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールの�
 ## リリース手順
 
 1. `README.md` のツール表と `SKILL.md` を**同一変更内で**更新（ツール追加/削除/仕様変更時）
-2. **変更内容（直近の更新内容）は README に書かず、GitHub Releases に記載する** — README は履歴を持たず、最新リリースへのリンク（`## 📝 更新履歴` 節）だけを置きます。同じ内容を2か所に書くと必ず片方が古くなります
+2. **変更内容（直近の更新内容）は README に書かず、GitHub Releases に記載する** — README は履歴を持たず、最新リリースへのリンク（`## 📝 更新履歴` 節）だけを置きます。**`SKILL.md` の `## 更新履歴` は LLM 向けの要約として残します**（エージェントが読む履歴なので Releases へは飛ばさない）
 3. `pyproject.toml` の `version` を更新（`uv build` が `uv.lock` の版表記も書き換えるので、同じコミットに含める）
 4. `uv run python scripts/check-tools.py` で全66ツールが正常なことを確認
 5. `uv build` でパッケージ作成を確認 → `dist/` `build/` を削除
