@@ -13,7 +13,7 @@
 - **画像・動画・音声をそのまま返せる** — 画像はチャット内にインライン表示、音声・動画は再生URLを返却
 - **tokyo-transit方式のJSON応答** — 人間向け表示（`content`）とLLM向け純粋JSON（`structuredContent`）を分離し、情報を失わずに構造化データを渡せる
 - **認証不要のツールが大半** — APIキーの管理なしですぐ動く（NASA の一部ツールのみ任意キー。ESA/Copernicus は検索・プレビューのみで、認証付きダウンロードは非対応）
-- **他国の宇宙機関データに対応** — インド ISRO・欧州 ESA/Copernicus・日本 JAXA・カナダ CSA・ブラジル INPE・英国 EO DataHub・フランス CNES・中国 CNSA 系ポータル・全衛星軌道(CelesTrak)・EO Dashboard(NASA/ESA/JAXA共同) を横断検索
+- **他国の宇宙機関データに対応** — インド ISRO・欧州 ESA/Copernicus・日本 JAXA・カナダ CSA・ブラジル INPE・英国 EO DataHub・フランス CNES・**ドイツ DLR EOC**・**ロシア Roscosmos オープンデータ**・中国 CNSA 系ポータル・全衛星軌道(CelesTrak)・EO Dashboard(NASA/ESA/JAXA共同) を横断検索
 - **天体カタログと系外惑星、準天頂衛星に対応** — 天体の素性は SIMBAD、観測星表は VizieR（いずれも CDS・認証不要）、系外惑星は NASA Exoplanet Archive、**みちびき（QZSS）**の精密軌道は内閣府の公開アーカイブ API から取得します（QZSS は提供元明記の**非商用利用のみ**）
 - **引用元を明示** — 科学的な内容には必ずデータソースへのリンクを併記
 - **図の注記を機械可読で返す（figure/1）** — 描画系ツールは「どの面を・どの縮尺で・主天体を焦点に置いたか」と注記・自己検証を JSON で返し、LLM が図を誤読しないようにする
@@ -97,7 +97,24 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 - **リンクの文言は `img_common.media_link_line(対象, kind=…)` が生成します** — 動詞は kind から決まる（`画像を開く` / `生成した画像を開く` / `音声を開く` / `動画を開く` / `ファイルを開く`）ので、ツール側で動詞を書かない限り表記は必ず揃います（手書きすると「サムネイル画像を開く: 」「動画を再生: 」のようにばらつく。ゲートの `img_common.canonical_media_label()` が検出）。
 - **複数のメディアを返すときは、リンクをまとめて先に出し、各リンク行を空行で区切ります** — Markdown は同一段落内の単一改行をスペースに畳み込むため、単一改行で組むと隣り合うリンクや caption が **1行に融合**します（1枚だけ返すときは段落が分かれるので気付きにくい。実測: `astronomy_weather` の気象庁画像2枚、複数画像を並べた回答）。配信時に `server._delivered` が `img_common.layout_media_links()` で空行を補うので、ツール側で入れ忘れても融合はしません（ゲートの融合検査は**配信される形＝整形後**で行い、整形そのものが働いているかは `delivery_issues()` が確かめます）。
 
-### 🆕 直近の更新内容（v0.38.5）
+### 🆕 直近の更新内容（v0.39.0）
+
+**「ドイツ DLR（EOC）とロシア Roscosmos の地球観測データを追加（認証不要・STAC）」**（v0.39.0）。衛星・地球観測 API の候補を調査し、**公開 API があり・認証不要で・既存ツールと重複しない**と一次情報（実際に HTTP を叩いた結果）で確認できた 2 件を追加しました。見送った候補: Google Earth Engine / Sentinel Hub（資格情報が必要）、KASA・CASC・EU SST・GESTRA・ALCE・AEB・BDS・CONAE（公開 API が無い／未文書化）。
+
+- **🇩🇪 `dlr_collections` / `dlr_search` を新設** — ドイツ航空宇宙センター（DLR）の地球観測センター（EOC / DFD）が公開する **STAC 1.0.0 カタログ**（`geoservice.dlr.de/eoc/ogc/stac/v1`・**69 コレクション**・認証不要）から、Sentinel-2（MAJA 大気補正・WASP 合成）・EnMAP／DESIS ハイパースペクトル・Sentinel-5P/TROPOMI（NO2・O3・AOD・地上 NO2）・MetOp/GOME-2・世界居住域（WSF 2019 / Evolution）・全球 DEM（TanDEM-X 90m）・ドイツ国内プロダクトを検索します。サムネイルとメタデータ（ISO19139）のリンク付き。
+  - **雲量フィルタはクライアント側** — DLR の API は `filter`（CQL2）を受け付けない（実測 **400**）ため、`max_cloud_cover` は**取得後に絞り込み**、`excluded_by_cloud`（雲量超過）と `without_cloud_info`（雲量情報なし）を分けて返します（サーバー側フィルタを装いません）。
+  - **並び順は日時順とは限らない** — DLR の STAC は `sortby` を無視します（実測: `sortby=-datetime` を送っても並びが変わらない）。期間で絞るには `datetime` を指定します（本文にも注記を出します）。
+  - **ライセンスは混在** — コレクションごとの DLR 申告値（CC-BY-4.0 が最多、CC-BY-NC-4.0 / proprietary もある）を `license` として返し、注意書きを本文に出します。
+- **🇷🇺 `roscosmos_collections` / `roscosmos_search` を新設** — Roscosmos の**オープンデータ STAC**（`s3.gptl.ru/stac-web-free`・**200TB 超**・認証不要）から、**Elektro-L**（静止・15〜30 分ごとの全球ディスク）・**Arktika-M**（高楕円）・**Meteor-M**（極軌道の日次全球モザイク）と、そこから作られた全球モザイク（EL_ARCM / MM）を検索します。
+  - **静的カタログなので木を辿る** — このカタログは `/search` も `/collections` も持たない（実測 404）。`catalog.json → コレクション → 年 → 月 → 日` を辿り、日ノードの `rel=item` から列挙します（日ノードは親を辿らず**1 リクエストで直接**引けることを実測で確認）。日付を省略すると、今日から最大 `lookback` 日さかのぼって**データがある最新日**を使います。
+  - **ホストは 2 つ** — `s3.gptl.ru` と `s3ext.gptl.ru` が同じ内容を返すため、到達できない側は**遮断として記憶**して他方へ切り替えます（両方だめならエラー結果＝例外を漏らしません）。
+  - **クイックルックと GeoTIFF** — 各アイテムのクイックルック（PNG）と GeoTIFF（EPSG:4326 / 3857・サイズ付き）のリンクを返します。EPSG は `proj:epsg` が無い場合アセットのキー（`image.tif.ms.4326._`）から読みます。
+  - **未知のコレクションは推測しない** — 存在しないパスは候補（`roscosmos_collections` の一覧）を提示して停止します。
+- **🧪 検証** — 回帰テスト **294件**（新規 11 件 `tests/test_dlr_roscosmos.py`＝雲量のクライアント側絞り込みと除外内訳・不正 bbox で HTTP を出さない・接続失敗がエラー結果になる・カタログ木の走査・日付解決と EPSG の読み取り・未知コレクションの候補提示・不正日付・ホスト切替と全滅時）／`--dead-code` 0件／`--offline`・`--fuzz`（444 組）・`--media-links`（問題 0）・`--only`（新規 4 ツール）すべて exit 0。
+
+登録ツールは **66本**。
+
+### 以前の更新（v0.38.5）
 
 **「星空マップを地上から見上げたパノラマに一新（実星表・天の川・時間帯で変わる空・依頼表示）」**（v0.38.5）。
 
@@ -109,7 +126,7 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 - **🎛 `span` / `az0` / `lp` / `show` を追加** — 視野（30〜360°）、左端の方位、光害の程度（都心／郊外／山間）、依頼表示する天体（`"木星,ベガ,M31"`）を指定できます。画面下部は手続き生成の街並み＋方位目盛り（左右端にその端の方位）。
 - **🧪 検証** — 回帰テスト **278件**（新規18件＝太陽高度補間の連続性・月の位相と明るい側の向き・銀経銀緯の変換・星の色・依頼表示の一致・出力契約）／`--dead-code` 0件／`--figures`・`--media-links`・`--offline`・`--fuzz`・`--stdio` すべて exit 0。
 
-登録ツールは **62本**。
+登録ツールは **66本**。
 
 ### 以前の更新（v0.38.4）
 
@@ -261,7 +278,7 @@ codex mcp list
 |:--|:--|
 | [`CLAUDE.md`](CLAUDE.md) | Claude Code 用プロジェクトガイド（セットアップ・規約・検証・リリース手順） |
 | [`AGENTS.md`](AGENTS.md) | Codex など `AGENTS.md` を読むエージェント向けガイド |
-| [`SKILL.md`](SKILL.md) | エージェント向けスキル定義（62ツールの仕様・使用例・キャッシュ・注意事項） |
+| [`SKILL.md`](SKILL.md) | エージェント向けスキル定義（66ツールの仕様・使用例・キャッシュ・注意事項） |
 | [`.claude/rules/`](.claude/rules/) | 開発規約（コーディング・検証ゲート・データ出典） |
 
 ### Hermes Agent
@@ -276,7 +293,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 
 ## 🛠️ ツール一覧
 
-登録ツールは **62本**（宇宙・天文イベントカレンダー 4本（`space_calendar` / `calendar_events` / `calendar_event_add` / `calendar_event_remove`）＋ロケット打ち上げ・逆引き 4本＋NASA日次・宇宙天気 3本＋メディア 3本＋各国宇宙機関・地球観測 16本＋衛星・軌道 6本＋天体位置・画像合成 7本＋観測支援・天文データ 13本（うち**天体カタログ 2本**（`object_lookup` / `catalog_search`）・**系外惑星 1本**（`exoplanet_search`））＋気象衛星リアルタイム画像 1本＋天体異常系 3本＋**学術文献 2本**）。全62ツールを実呼び出しで検証済みです（外部APIの障害・レート制限時は、例外ではなく CallToolResult のエラーとして返します）。
+登録ツールは **66本**（宇宙・天文イベントカレンダー 4本（`space_calendar` / `calendar_events` / `calendar_event_add` / `calendar_event_remove`）＋ロケット打ち上げ・逆引き 4本＋NASA日次・宇宙天気 3本＋メディア 3本＋各国宇宙機関・地球観測 18本＋衛星・軌道 6本＋天体位置・画像合成 7本＋観測支援・天文データ 13本（うち**天体カタログ 2本**（`object_lookup` / `catalog_search`）・**系外惑星 1本**（`exoplanet_search`））＋気象衛星リアルタイム画像 1本＋天体異常系 3本＋**学術文献 2本**）。全66ツールを実呼び出しで検証済みです（外部APIの障害・レート制限時は、例外ではなく CallToolResult のエラーとして返します）。
 
 | ツール | できること | データ源 | 認証 |
 |--------|-----------|---------|------|
@@ -297,6 +314,10 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `csa_dataset_search` | カナダCSAオープンデータ（RADARSAT等）を検索 | CSA Open Data Portal (CKAN) | 不要 |
 | `inpe_collections` | ブラジルINPEの衛星データコレクション一覧 | INPE BDC STAC | 不要 |
 | `inpe_search` | ブラジルINPEの衛星画像（CBERS・Amazonia-1等）をSTAC検索 | INPE BDC STAC | 不要 |
+| `dlr_collections` | ドイツDLRの地球観測コレクション一覧（Sentinel-2 MAJA・EnMAP・TROPOMI等） | DLR EOC STAC | 不要 |
+| `dlr_search` | ドイツDLRの地球観測データをSTAC検索（領域・日時・雲量） | DLR EOC STAC | 不要（検索・プレビューのみ） |
+| `roscosmos_collections` | ロシアRoscosmosオープンデータのコレクション一覧（Elektro-L・Arktika-M・Meteor-M） | Roscosmos open data STAC | 不要 |
+| `roscosmos_search` | ロシアの気象衛星の全球画像（Elektro-L・Meteor-Mモザイク等）を検索 | Roscosmos open data STAC | 不要 |
 | `sat_tle` | 全世界の衛星の軌道要素(TLE)を取得（ISS・ハッブル・気象衛星等） | CelesTrak (NORAD) | 不要 |
 | `uk_stac_collections` | 英国EO DataHubのコレクション一覧 | UK EO DataHub STAC | 不要 |
 | `uk_stac_search` | 英国EO DataHubの衛星・気候データをSTAC検索 | UK EO DataHub STAC | 不要 |
@@ -501,6 +522,34 @@ A: csa_dataset_search("radarsat") → RADARSAT-1 Archive ほか10件が返る
 Q: ブラジル周辺のCBERS衛星画像
 A: inpe_search("CB4-WFI-L4-SR-1", bbox="-46.6,-23.6,-46.5,-23.5")
 ```
+
+### 🇩🇪 `dlr_collections` / `dlr_search` — ドイツ DLR（EOC 地球観測センター）
+
+[DLR EOC](https://geoservice.dlr.de/eoc/ogc/stac/v1)（ドイツ航空宇宙センターの地球観測センター）の **STAC 1.0.0 カタログ**（69コレクション・認証不要）で、Sentinel-2（MAJA 大気補正・WASP 合成）・EnMAP／DESIS ハイパースペクトル・Sentinel-5P/TROPOMI（NO2・O3・AOD）・MetOp/GOME-2・世界居住域（WSF）・全球DEM（TanDEM-X 90m）・ドイツ国内プロダクトを検索します。
+
+- `dlr_collections`: コレクション一覧（ライセンス付き）
+- `dlr_search`: コレクション・領域(`bbox`)・日時・雲量上限で検索（サムネイル／メタデータのリンク付き）
+
+```text
+Q: ベルリン周辺のドイツのSentinel-2画像
+A: dlr_search("S2_L2A_MAJA", bbox="13.0,52.3,13.8,52.7", datetime="2026-01-01/2026-01-31", max_cloud_cover=20)
+```
+
+> ⚠️ DLR の STAC は `filter`（CQL2）も `sortby` も受け付けません（実測: 前者は 400、後者は無視）。雲量の絞り込みは**取得後にクライアント側**で行い、`excluded_by_cloud` / `without_cloud_info` に分けて返します。並び順は日時順とは限らないため、期間で絞るには `datetime` を指定してください。ライセンスはコレクションごとの DLR 申告値（CC-BY-4.0 / CC-BY-NC-4.0 / proprietary が混在）です。
+
+### 🇷🇺 `roscosmos_collections` / `roscosmos_search` — ロシア Roscosmos オープンデータ
+
+[Roscosmos オープンデータ STAC](https://s3.gptl.ru/stac-web-free/catalog.json)（200TB 超・認証不要）から、**Elektro-L**（静止・15〜30分ごとの全球ディスク）・**Arktika-M**（高楕円）・**Meteor-M**（極軌道の日次全球モザイク）と全球モザイク（EL_ARCM / MM）を検索します。
+
+- `roscosmos_collections`: カタログ木を辿ったコレクション一覧（`level` 1〜3）
+- `roscosmos_search`: コレクションのパス＋日付（UTC）で検索。日付省略時は**データがある最新日**
+
+```text
+Q: ロシアの静止気象衛星エレクトロLの最新の全球画像
+A: roscosmos_search("Electro-L/MSU-GS/L2_RGB_VIS_IR", limit=2)
+```
+
+> ⚠️ このカタログは**静的 STAC**（`/search`・`/collections` は 404）のため、`catalog.json → コレクション → 年 → 月 → 日` を辿って列挙します。ホストは `s3.gptl.ru` / `s3ext.gptl.ru` の2つで、到達できない側は記憶して他方へ切り替えます。各アイテムにはクイックルック（PNG）と GeoTIFF（EPSG:4326 / 3857）のリンクが付きます。
 
 ### 🛰️ `sat_tle` — CelesTrak（全世界の衛星軌道）
 
@@ -902,7 +951,7 @@ ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカ�
 # 1. 構文チェック
 uv run python -m compileall -q src/space_finder_mcp
 
-# 2. 全62ツールを実呼び出し（例外漏れ・structuredContent欠落・タイムアウトを検出。数分）
+# 2. 全66ツールを実呼び出し（例外漏れ・structuredContent欠落・タイムアウトを検出。数分）
 uv run python scripts/check-tools.py
 
 # 3. ネットワーク全断を注入して「例外が外へ漏れないか」を検査
@@ -948,7 +997,7 @@ hermes mcp test space-finder-mcp
 src/space_finder_mcp/
 ├── __init__.py          # main() → mcp.run()
 ├── __main__.py          # python -m space_finder_mcp 用の入口
-├── server.py            # FastMCP サーバー定義・62ツール登録
+├── server.py            # FastMCP サーバー定義・66ツール登録
 ├── stac_common.py       # STAC系共通の入力検証ヘルパー（bbox/雲量。ツール定義なし）
 ├── input_utils.py       # 引数の防御的数値変換 as_int/as_float（不正値でも例外を漏らさない）
 ├── img_common.py        # 画像合成の共通ヘルパー（フォント探索/JPEG化/アンチメリジアン分割。ツール定義なし）
@@ -966,6 +1015,8 @@ src/space_finder_mcp/
 ├── jaxa.py              # jaxa_datasets / jaxa_dataset_search（日本 JAXA）
 ├── csa.py               # csa_dataset_search（カナダ CSA, システムCA検証アダプタ）
 ├── inpe.py              # inpe_collections / inpe_search（ブラジル INPE STAC）
+├── dlr.py               # dlr_collections / dlr_search（ドイツ DLR EOC STAC）
+├── roscosmos.py         # roscosmos_collections / roscosmos_search（ロシア Roscosmos 静的STAC）
 ├── celestrak.py         # sat_tle（CelesTrak 全衛星軌道TLE）
 ├── uk_datahub.py        # uk_stac_collections / uk_stac_search（英国 EO DataHub）
 ├── cnes.py              # cnes_status（フランス CNES THEIA/GEODES）
@@ -1010,7 +1061,7 @@ src/space_finder_mcp/
 space-finder-mcp/
 ├── CLAUDE.md                # Claude Code 用プロジェクトガイド
 ├── AGENTS.md                # Codex など AGENTS.md を読むエージェント向け
-├── SKILL.md                 # エージェント向けスキル定義（62ツール仕様）
+├── SKILL.md                 # エージェント向けスキル定義（66ツール仕様）
 ├── mcp.json                 # MCPクライアント設定の例
 ├── .env.example             # 環境変数の例（NASA_API_KEY は任意）
 ├── .claude/rules/           # 開発規約（coding-conventions / testing-and-verification / data-and-sources）

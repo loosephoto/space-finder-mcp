@@ -23,6 +23,8 @@ from . import copernicus as _copernicus
 from . import jaxa as _jaxa
 from . import csa as _csa
 from . import inpe as _inpe
+from . import dlr as _dlr
+from . import roscosmos as _roscosmos
 from . import celestrak as _celestrak
 from . import uk_datahub as _uk
 from . import cnes as _cnes
@@ -234,6 +236,12 @@ _reg(_csa.csa_dataset_search)
 # ブラジル INPE (BDC STAC, 認証不要)
 _reg(_inpe.inpe_collections)
 _reg(_inpe.inpe_search)
+# ドイツ DLR EOC (STAC, 認証不要)
+_reg(_dlr.dlr_collections)
+_reg(_dlr.dlr_search)
+# ロシア Roscosmos オープンデータ (静的 STAC, 認証不要)
+_reg(_roscosmos.roscosmos_collections)
+_reg(_roscosmos.roscosmos_search)
 # CelesTrak (全世界の衛星軌道要素TLE, 認証不要)
 _reg(_celestrak.sat_tle)
 # 英国 EO DataHub (STAC, 公開カタログは認証不要)

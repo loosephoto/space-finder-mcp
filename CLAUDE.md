@@ -1,6 +1,6 @@
 # Space Finder MCP Server — Claude Code 用プロジェクトガイド
 
-宇宙・天文・地球観測の公開データを **62ツール**で横断検索する MCP サーバー（Python / uv 管理）です。NASA・ESA Copernicus・JAXA・ISRO・CSA・INPE・UK EO DataHub・CNSA・CelesTrak・JPL（DE421/SBDB/Horizons）・Wikidata・Open-Meteo などを統合し、衛星画像・軌道マップ・日食パネル・月齢マップを**画像で返しつつ**、LLM向けに構造化JSONも同時に返します。
+宇宙・天文・地球観測の公開データを **66ツール**で横断検索する MCP サーバー（Python / uv 管理）です。NASA・ESA Copernicus・JAXA・ISRO・CSA・INPE・UK EO DataHub・DLR EOC・Roscosmos・CNSA・CelesTrak・JPL（DE421/SBDB/Horizons）・Wikidata・Open-Meteo などを統合し、衛星画像・軌道マップ・日食パネル・月齢マップを**画像で返しつつ**、LLM向けに構造化JSONも同時に返します。
 
 **開発規約は分割ルールにあります**: `.claude/rules/`（コーディング規約・検証ゲート・データ出典）を参照してください。
 
@@ -39,7 +39,7 @@ claude mcp list   # 確認
 
 - `-s project` はリポジトリ直下に `.mcp.json` を作ります（チーム共有向け）。個人利用だけで済ませるなら `-s user`（全プロジェクトで有効）を使います。
 
-検証済みの代替コマンド（いずれも 62ツールを返して起動します）:
+検証済みの代替コマンド（いずれも 66ツールを返して起動します）:
 
 ```bash
 uv --directory /abs/path/to/space-finder-mcp run space-finder-mcp
@@ -72,7 +72,7 @@ ISSの現在位置を地球地図で →  mcp__space-finder__sat_ground_track
 | ロケット打ち上げ・逆引き | 4 |
 | NASA 日次・宇宙天気 | 3 |
 | メディア（画像/音声/動画） | 3 |
-| 各国宇宙機関・地球観測 | 16 |
+| 各国宇宙機関・地球観測 | 18 |
 | 衛星・軌道 | 6 |
 | 天体位置・画像合成 | 7 |
 | 観測支援・天文データ | 13 |
@@ -80,7 +80,7 @@ ISSの現在位置を地球地図で →  mcp__space-finder__sat_ground_track
 | 天体異常系 | 3 |
 | 学術文献 | 2 |
 
-合計 62 ツール。エージェント向け仕様は `SKILL.md` を参照。
+合計 66 ツール。エージェント向け仕様は `SKILL.md` を参照。
 
 ## 利用パターン（ハマりどころ）
 
@@ -106,7 +106,7 @@ uv run python scripts/check-tools.py --fonts          # 日本語フォントの
 uv run python scripts/check-tools.py --concurrency    # 並列実行（single-flight・スレッド逃がし・例外漏れ）
 uv run python scripts/check-tools.py --stdio          # 実クライアント経路(stdio)で代表ツールが応答するか
 uv run python -m unittest discover -s tests          # 回帰テスト（対応済みの実バグの再発防止）
-uv run python scripts/check-tools.py                  # 全62ツール実呼び出し（数分）
+uv run python scripts/check-tools.py                  # 全66ツール実呼び出し（数分）
 uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールのみ
 ```
 
@@ -131,13 +131,13 @@ uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールの�
 
 1. `README.md` のツール表・「直近の更新内容」と `SKILL.md` を**同一変更内で**更新（ツール追加/削除/仕様変更時）
 2. `pyproject.toml` の `version` を更新
-3. `uv run python scripts/check-tools.py` で全62ツールが正常なことを確認
+3. `uv run python scripts/check-tools.py` で全66ツールが正常なことを確認
 4. `uv build` でパッケージ作成を確認 → `dist/` `build/` を削除
 
 ## ライセンス・データ出典
 
 - MIT License（`LICENSE`）
-- データは各提供元の利用条件に従います（NASA / ESA / JAXA / ISRO / CSA / INPE / UK EO DataHub / CNSA / CelesTrak / JPL / Wikidata / Open-Meteo(CC BY 4.0) / WMO OSCAR など）。**回答には出典を必ず表示**してください。
+- データは各提供元の利用条件に従います（NASA / ESA / JAXA / ISRO / CSA / INPE / UK EO DataHub / DLR / Roscosmos / CNSA / CelesTrak / JPL / Wikidata / Open-Meteo(CC BY 4.0) / WMO OSCAR など）。**回答には出典を必ず表示**してください。
 
 ## 補足
 

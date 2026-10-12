@@ -1,6 +1,6 @@
 ---
 name: space-finder-mcp
-description: 宇宙・天文・地球観測データを横断検索するMCPサーバー。NASA/ESA/JAXA/ISRO/CSA/INPE/UK/CNSA/CelesTrak/JPL/Wikidata/Open-Meteo と MAST（JWST・ハッブル等の観測アーカイブ）・NASA GCN（過渡天体速報）・JPL CNEOS（火球・小惑星接近・衝突リスク）および学術文献（OpenAlex/Crossref/NTRS/JAXAリポジトリ/J-STAGE/CiNii）および SIMBAD / VizieR（CDS の天体カタログ）・NASA Exoplanet Archive（系外惑星）・みちびき（QZSS の精密軌道）を統合した62ツール。衛星画像・軌道マップ・日食パネル・月齢マップを画像で返し、構造化JSONも同時に提供。
+description: 宇宙・天文・地球観測データを横断検索するMCPサーバー。NASA/ESA/JAXA/ISRO/CSA/INPE/UK/CNSA/CelesTrak/JPL/Wikidata/Open-Meteo と MAST（JWST・ハッブル等の観測アーカイブ）・NASA GCN（過渡天体速報）・JPL CNEOS（火球・小惑星接近・衝突リスク）および学術文献（OpenAlex/Crossref/NTRS/JAXAリポジトリ/J-STAGE/CiNii）および SIMBAD / VizieR（CDS の天体カタログ）・NASA Exoplanet Archive（系外惑星）・みちびき（QZSS の精密軌道）を統合した66ツール。衛星画像・軌道マップ・日食パネル・月齢マップを画像で返し、構造化JSONも同時に提供。
 category: space
 ---
 
@@ -20,12 +20,12 @@ category: space
 
 ## 対応データソース
 
-- 宇宙機関: NASA（APOD/NEO/DONKI/POWER/Image&Video Library）、ESA Copernicus、JAXA Earth、ISRO、CSA、INPE、UK EO DataHub、CNES、CNSA（NSMC/CNSA-GEO/CRESDA）、EO Dashboard（NASA×ESA×JAXA）
+- 宇宙機関: NASA（APOD/NEO/DONKI/POWER/Image&Video Library）、ESA Copernicus、JAXA Earth、ISRO、CSA、INPE、UK EO DataHub、CNES、DLR EOC（ドイツ EOC/DFD STAC）、Roscosmos（ロシア オープンデータ STAC）、CNSA（NSMC/CNSA-GEO/CRESDA）、EO Dashboard（NASA×ESA×JAXA）
 - 天文・軌道: JPL（DE421暦/SBDB/Horizons）、JPL CNEOS（火球・小惑星接近・Sentry 衝突リスク / ssd-api.jpl.nasa.gov）、CelesTrak（NORAD TLE。遮断時は公開ミラー tle.ivanstanojevic.me / db.satnogs.org へ自動フォールバック）、WMO OSCAR、ESO ASM、ALMA Science Archive、CADC、TART、Wikidata（SPARQL）、Open-Meteo、NASA MMGIS / NASA Trek（天体地図）
 - 打ち上げ: Launch Library 2
 - 図法・画像素材: NASA Blue Marble、NASA Trek WMTS（月・火星・水星・タイタン・ベスタ・ケレス）
 
-## ツール一覧（62種）
+## ツール一覧（66種）
 
 | ツール | できること | データ源 | 認証 |
 |:--|:--|:--|:--|
@@ -46,6 +46,10 @@ category: space
 | `csa_dataset_search` | カナダCSAオープンデータ（RADARSAT等）を検索 | CSA Open Data Portal (CKAN) | 不要 |
 | `inpe_collections` | ブラジルINPEの衛星データコレクション一覧 | INPE BDC STAC | 不要 |
 | `inpe_search` | ブラジルINPEの衛星画像（CBERS・Amazonia-1等）をSTAC検索 | INPE BDC STAC | 不要 |
+| `dlr_collections` | ドイツDLRの地球観測コレクション一覧（Sentinel-2 MAJA・EnMAP・TROPOMI等） | DLR EOC STAC | 不要 |
+| `dlr_search` | ドイツDLRの地球観測データをSTAC検索（領域・日時・雲量） | DLR EOC STAC | 不要（検索・プレビューのみ） |
+| `roscosmos_collections` | ロシアRoscosmosオープンデータのコレクション一覧（Elektro-L・Arktika-M・Meteor-M） | Roscosmos open data STAC | 不要 |
+| `roscosmos_search` | ロシアの気象衛星の全球画像（Elektro-L・Meteor-Mモザイク等）を検索 | Roscosmos open data STAC | 不要 |
 | `sat_tle` | 全世界の衛星の軌道要素(TLE)を取得（ISS・ハッブル・気象衛星等） | CelesTrak (NORAD) | 不要 |
 | `uk_stac_collections` | 英国EO DataHubのコレクション一覧 | UK EO DataHub STAC | 不要 |
 | `uk_stac_search` | 英国EO DataHubの衛星・気候データをSTAC検索 | UK EO DataHub STAC | 不要 |
@@ -279,7 +283,7 @@ uv run python scripts/check-tools.py                  # 全56ツール実呼び�
 
 ## 注意事項
 
-1. **出典表示**: 結果には出典URLが含まれます。回答時は必ず引用元を表示してください（NASA / ESA / JAXA / ISRO / CSA / INPE / UK / CNSA / Wikidata など）。
+1. **出典表示**: 結果には出典URLが含まれます。回答時は必ず引用元を表示してください（NASA / ESA / JAXA / ISRO / CSA / INPE / UK / DLR / Roscosmos / CNSA / Wikidata など）。
 2. **レート制限**: `DEMO_KEY` は 30リクエスト/時/IP の共有枠（`apod`・`neo_today` で共有）。`space_weather`(DONKI) は 2026-09-30 の URL 移転で**認証不要の別ホスト**（`ccmc.gsfc.nasa.gov/DONKI-API`）になり、この枠を消費しません（`nasa_budget` を通しません。**キーを持たないホストへ `api_key` を渡さない**）。DONKI が障害のときは**認証不要の NOAA SWPC へ自動切替**するので、宇宙天気だけは止まりません（`space_weather` 以外の NASA 系は待機が必要）。**予報（`kind="forecast"`）も SWPC（認証不要）**なのでこの枠を消費しません。サーバー側で使用数を数えており、枠を使い切ると HTTP を出さずに回復目安を返し、429 を受けた場合は `Retry-After` を尊重します（`structuredContent.budget` に上限・使用数・残りを添付）。**CelesTrak** も短時間の連続リクエストで IP 単位に遮断され（403、または TCP が返らない blackhole）、その間は 1 回の呼び出しが分単位で固まります。接続は (connect 10 秒, read 25 秒) で打ち切り、遮断を受けたら**セッション内で記憶して以降は HTTP を出さずに即座に案内**を返します（`sat_tle` / `sat_ground_track` / `tiangong_now` / `sky_map_with_satellites` が該当）。 さらに **TLE は代替源へ自動フォールバック**します — CelesTrak 遮断中は認証不要の公開ミラー（tle.ivanstanojevic.me → db.satnogs.org）から同じ衛星の TLE を取得し、**content / structuredContent にどちらから取ったかを明示**します（`tle_source`）。グループ検索（`group=`）は代替源に無いので、遮断中はその旨を案内します。
 3. **曖昧入力**: 衛星名などで候補が複数ある場合は推測せず、NORAD ID 付きの候補を提示して停止します。
 4. **過去ミッション**: かぐや（SELENE）・あかつき等は「現在位置を表示できない」と正直に返します。落点が公表されている機体（かぐや＝南緯65.5°／東経80.4° Gill クレータ付近、2009-06-10 18:25 UTC）は落点を `structuredContent.impact_site` に出典つきで返します（「落点は判明しているか」に MCP だけで答えられます）。和名（かぐや/あかつき）も英語キーへ展開してから判定します。
@@ -298,8 +302,11 @@ uv run python scripts/check-tools.py                  # 全56ツール実呼び�
 - CelesTrak: https://celestrak.org/
 - ESA Copernicus Data Space: https://dataspace.copernicus.eu/
 - JAXA Earth API: https://data.earth.jaxa.jp/
+- DLR EOC STAC: https://geoservice.dlr.de/eoc/ogc/stac/v1
+- Roscosmos オープンデータ STAC: https://s3.gptl.ru/stac-web-free/catalog.json
 - リポジトリ: https://github.com/loosephoto/space-finder-mcp
 
 ## 更新履歴
 
+- v0.39.0 — **ドイツ DLR（EOC）とロシア Roscosmos の地球観測データを追加（`dlr_collections` / `dlr_search` / `roscosmos_collections` / `roscosmos_search`）**: どちらも**認証不要の STAC** です。DLR EOC（`geoservice.dlr.de/eoc/ogc/stac/v1`・69 コレクション）は Sentinel-2 MAJA/WASP・EnMAP・DESIS・TROPOMI・GOME-2・WSF・TanDEM-X DEM 等を `POST /search` で検索します（`filter`(CQL2) は 400・`sortby` は無視されるので、雲量は**取得後にクライアント側で絞り**、`excluded_by_cloud` / `without_cloud_info` を分けて返す。ライセンスはコレクションごとの申告値＝CC-BY-4.0 / CC-BY-NC-4.0 / proprietary 混在）。Roscosmos（`s3.gptl.ru/stac-web-free`・200TB 超）は **`/search` を持たない静的 STAC** なので、`catalog.json → コレクション → 年 → 月 → 日` の木を辿って `rel=item` を列挙します（日ノードは親を辿らず直接 GET 可＝1 リクエスト。日付省略時はデータがある最新日まで `lookback` 日さかのぼる）。ホストは `s3.gptl.ru` / `s3ext.gptl.ru` の 2 つで、到達不可の側は記憶して切替（両方だめならエラー結果）。クイックルック（PNG）と GeoTIFF（EPSG は `proj:epsg` が無ければアセットキー `image.tif.ms.4326._` から読む）のリンクを返します。回帰テスト **294件**（新規 11 件 `tests/test_dlr_roscosmos.py`）、`--dead-code` 0件、`--offline`・`--fuzz`（444 組）・`--media-links`（問題 0）・`--only` 4 ツール exit 0。
 - v0.38.4 — **宇宙天気に予報を追加（`space_weather(kind="forecast")`）**: DONKI は観測・警報の記録で**予報を持たない**（フレア発生確率・3日予報・活動領域別確率は NOAA SWPC のプロダクト）ため、`kind="forecast"` は DONKI を経由せず **SWPC を通常経路**として使う（障害時のフォールバックとは別物。`donki.space_weather` が `swpc.space_weather_forecast` へ振り分ける）。`solar_probabilities.json`（C/M/X 級と 10MeV 陽子の1〜3日確率）／`solar_regions.json`（活動領域ごとの確率・面積（太陽半球の百万分率）・黒点型・磁場型。**最新の観測日のみ**）／`3-day-forecast.txt`（予想最大 Kp と NOAA スケール、S1以上・R1-R2・R3以上の確率、**公式の根拠文**）を1回で返し、**30分キャッシュ**（`TTL_FORECAST`）。予報テキストは**折り返された行を繋いで**1文にする（実測: 「...likely on 09 / Oct due to ...」「...is 5.67 (NOAA Scale / G2).」）。欠測は `failed` に残し、1項目も取れなければエラー（空を「予報なし＝静穏」と誤読させない）。回帰テスト **256件**（新規8件 `tests/test_ssd.py::SwpcForecastTests`。`NewCraterSiteTests` 4件は変更前からの失敗で本変更と無関係）、`--stdio` に forecast 経路を追加、`--dead-code` 0件、全62ツール exit 0。実 API で `failed=[]`・M級 40%（1日）・領域 4549 の M 35%・予想最大 Kp 5.67（G2）・根拠3文を確認。

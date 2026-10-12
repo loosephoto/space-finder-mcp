@@ -18,6 +18,8 @@
 | Open-Meteo / Nominatim | Open-Meteo は都市名（英語強め・ja→enエイリアス付き）。Nominatim は識別可能なUA必須（403 になるUAあり）。結果は 24時間キャッシュ |
 | Wikidata SPARQL | 「初・記録」の回答は SPARQL の結果に基づく（記憶から捏造しない）。必ず Wikipedia 記事を引用する |
 | WMO OSCAR | 衛星カタログは約1000件・取得が重い（実測50秒）→ 24時間キャッシュ |
+| DLR EOC STAC | `POST /search` は `numberMatched` を返す。**`filter`（CQL2）は 400・`sortby` は無視**（実測）＝雲量の絞り込みは取得後にクライアント側で行い、`excluded_by_cloud` / `without_cloud_info` を分けて返す。ライセンスはコレクションごとの申告値（CC-BY-4.0 / CC-BY-NC-4.0 / proprietary 混在）なので利用条件を明示する |
+| Roscosmos オープンデータ STAC | **静的 STAC**（`/search`・`/collections` は 404）。`catalog.json → コレクション → 年 → 月 → 日` を辿り日ノードの `rel=item` を列挙する（日ノードは親を辿らず直接 GET 可）。ホストは `s3.gptl.ru` / `s3ext.gptl.ru` の 2 つで、接続不可の側は記憶して切替。GeoTIFF の EPSG は `proj:epsg` が無ければアセットキー `image.tif.ms.4326._` から読む |
 | ESO / ALMA / CADC / TART | 観測データ・大気コンディション。ESO/TART は短め（10分）、ALMA/CADC は30分のTTL |
 
 ## 画像の扱い
