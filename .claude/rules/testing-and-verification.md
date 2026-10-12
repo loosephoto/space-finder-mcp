@@ -32,7 +32,7 @@ uv run python scripts/check-tools.py --only sat_tle,apod   # 変更したツー�
 | 遅延 import の追加 | **ネイティブ拡張（numpy 等）は起動前に import** する（stdio 起動後の import は無応答）。`server.py` 冒頭に追加し `--stdio` で確認 |
 | 外部APIの遮断 | 遮断（403・接続不可）を記憶して以降 fail fast する（`celestrak` 参照）。connect タイムアウト必須（blackhole で分単位に固まる） |
 | 外部API仕様の変更 | 実際に叩いて確認（例: CelesTrak の `FORMAT=JSON` は TLE行を返さない → `FORMAT=TLE`） |
-| リリース | `pyproject.toml` の version、`uv build`、`dist/`・`build/` の削除 |
+| リリース | `pyproject.toml` の version、`uv build`、`dist/`・`build/` の削除、`vX.Y.Z` タグと **GitHub Release の作成**（変更点は README ではなくリリース本文に書く） |
 
 ## 実測スナップショット（ベースライン）
 

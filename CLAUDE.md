@@ -129,10 +129,12 @@ uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールの�
 - **LLM は1ターンで複数ツールを並行に呼ぶ前提で書く**。全ツールは `server.py` の `_reg()` で登録し、同期関数の本体は `anyio.to_thread` のワーカースレッドで実行する（FastMCP は同期関数をイベントループ上でそのまま呼ぶので、逃がさないと1つの API 待ちが他を全部止める。実測: 4並列で wall = 合計 → 逃がした後 4.0×）。`ttl_cache` は single-flight（同一引数の並行呼び出しを1回に集約）、matplotlib の経路は `img_common.RENDER_LOCK` で直列化、モジュール可変状態は `threading.Lock`、キャッシュされた戻り値は書き換えない。検査は `scripts/check-tools.py --concurrency`。CPU 律速は GIL で並列化しない（効くのは I/O 待ち）。加えて、**遅延 import するネイティブ拡張は起動前にまとめて import する**（`server.py` 冒頭の `import numpy`）。stdio サーバーが起動した後に numpy / matplotlib / skyfield を import すると、この環境では import が完了せず**ツール呼び出しが無応答になる**（実測: numpy・matplotlib.pyplot・skyfield.api が HANG。PIL.Image・sgp4・requests は問題なし）。numpy を起動時に1回 import しておけば、その後の matplotlib/skyfield も通る（起動 +0.1 秒）。新しい遅延 import を足すときは事前 import 側にも加え、`scripts/check-tools.py --stdio` で確認する。外部 API を叩くときは **(connect, read) のタイムアウトを必ず指定**し、遮断（403・接続不可）は**記憶して以降は fail fast** する（`celestrak.blocked_status` / `nasa_budget` 参照）。**TLE のように代替源があるものは遮断時に代替源へ切り替える**（`celestrak.fetch_tle_ex`。出典を返し、代替源のデータを一次源の名前で書かない）。TCP が blackhole したホストへ素の呼び出しを投げると1回の呼び出しが分単位で固まり、並列で走っている他のツール呼び出しまで待たされる（実測: CelesTrak 遮断中に120秒以上無応答 → connect タイムアウト＋遮断記憶で 10 秒→0 秒）。
 ## リリース手順
 
-1. `README.md` のツール表・「直近の更新内容」と `SKILL.md` を**同一変更内で**更新（ツール追加/削除/仕様変更時）
-2. `pyproject.toml` の `version` を更新
-3. `uv run python scripts/check-tools.py` で全66ツールが正常なことを確認
-4. `uv build` でパッケージ作成を確認 → `dist/` `build/` を削除
+1. `README.md` のツール表と `SKILL.md` を**同一変更内で**更新（ツール追加/削除/仕様変更時）
+2. **変更内容（直近の更新内容）は README に書かず、GitHub Releases に記載する** — README は履歴を持たず、最新リリースへのリンク（`## 📝 更新履歴` 節）だけを置きます。同じ内容を2か所に書くと必ず片方が古くなります
+3. `pyproject.toml` の `version` を更新（`uv build` が `uv.lock` の版表記も書き換えるので、同じコミットに含める）
+4. `uv run python scripts/check-tools.py` で全66ツールが正常なことを確認
+5. `uv build` でパッケージ作成を確認 → `dist/` `build/` を削除
+6. コミット → `git push origin main` → `vX.Y.Z` タグを打ち、**同じ本文で GitHub Release を作成**する（本文＝要約・変更点の箇条書き・検証行・`**Full Changelog**` リンク。例: `gh release create vX.Y.Z --title "vX.Y.Z — <要約>" --notes-file <notes.md>`）
 
 ## ライセンス・データ出典
 
