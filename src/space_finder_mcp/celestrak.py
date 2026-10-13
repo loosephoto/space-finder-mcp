@@ -127,6 +127,8 @@ TLE_SOURCE_ORDER = (CELESTRAK_SOURCE,) + FALLBACK_HOSTS
 FALLBACK_CACHE_MAXSIZE = 256
 FALLBACK_TIMEOUT = (6, 20)            # (connect, read) 秒。connect を短くして固まりを防ぐ
 FALLBACK_COOLDOWN_NET = 60.0          # 接続不可・タイムアウト: 短めに再試行
+FALLBACK_ATTEMPTS = 2                 # 5xx（断続的な障害）は同一ホストへ 1 回だけ再試行する
+FALLBACK_RETRY_WAIT = 0.4             # 再試行前の待ち（秒）
 FALLBACK_COOLDOWN_BLOCKED = 300.0     # 403/429（IP 単位の遮断）: 数分待つ
 FALLBACK_UA = {"User-Agent": "space-finder-mcp/0.37 (MCP; TLE fallback)"}
 FALLBACK_STALE_DAYS = 30   # これより古いエポックは「古い TLE」として注記する
@@ -255,6 +257,17 @@ def tle_elements(line1: str, line2: str) -> dict:
     }
 
 
+def _is_transient_error(err: Exception) -> bool:
+    """再試行する価値のある一時エラーか（5xx だけ）。
+
+    遮断（403/429）と接続不可はホスト単位で記憶済みなので即座に諦める。5xx は
+    断続的で（実測: tle.ivanstanojevic.me が 508 を約半数返す）、1 回の再試行で
+    成功率が大きく変わる。
+    """
+    status = getattr(getattr(err, "response", None), "status_code", None)
+    return isinstance(status, int) and status >= 500
+
+
 def _fallback_catnr_one(host: str, norad_id: int) -> Optional[tuple]:
     """1つの代替源から (name, line1, line2, host) を取る（該当なしは None）。"""
     if host == "tle.ivanstanojevic.me":
@@ -280,7 +293,10 @@ def _fallback_catnr_one(host: str, norad_id: int) -> Optional[tuple]:
 def _fallback_catnr(norad_id: int) -> Optional[tuple]:
     """NORAD ID で代替源から (name, line1, line2, host)。該当なしは None。
 
-    全源が接続不可なら最後の接続例外を送出する（呼び出し側のエラー文言に残す）。
+    例外を送出するのは**全源が例外だった**ときだけ。1 つのホストが一時的な 5xx を返し、
+    別のホストが「該当なし」を返しただけで送出すると、TLE が実在するのに取得失敗になる
+    （実測: tle.ivanstanojevic.me の断続的な 508 で、ひまわり9号の TLE が消えて
+    図から衛星が無言で落ちた）。5xx は同一ホストへ 1 回だけ再試行する。
     """
     nid = as_int(norad_id)
     if nid is None:
@@ -289,17 +305,24 @@ def _fallback_catnr(norad_id: int) -> Optional[tuple]:
     with _FALLBACK_LOCK:
         if key in _FALLBACK_CACHE:
             return _FALLBACK_CACHE[key] or None
-    found, last_err = None, None
+    found, last_err, answered = None, None, False
     for host in FALLBACK_HOSTS:
-        try:
-            got = _fallback_catnr_one(host, nid)
-        except requests.RequestException as e:
-            last_err = e
-            continue
-        if got:
-            found = got
+        for attempt in range(FALLBACK_ATTEMPTS):
+            try:
+                got = _fallback_catnr_one(host, nid)
+            except requests.RequestException as e:
+                last_err = e
+                if attempt + 1 < FALLBACK_ATTEMPTS and _is_transient_error(e):
+                    time.sleep(FALLBACK_RETRY_WAIT)
+                    continue
+                break
+            answered = True                    # このホストは応答した（該当なしを含む）
+            if got:
+                found = got
             break
-    if found is None and last_err is not None:
+        if found:
+            break
+    if found is None and not answered and last_err is not None:
         raise last_err
     if found is not None:
         _store_fallback(key, found)

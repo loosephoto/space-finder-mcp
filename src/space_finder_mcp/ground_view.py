@@ -47,15 +47,11 @@ CATALOG_URL = ("https://vizier.cds.unistra.fr/viz-bin/asu-tsv?-source=I/239/hip_
 CATALOG_LABEL = "Hipparcos 実星表（Vmag<8.5）"
 
 # ---------- 見た目の指定（描画と説明が食い違わないよう1か所にまとめる） ----------
-CITY = (7, 8, 13)                 # 夜の建物のシルエット（draw_ground が昼色へ混ぜる）
-CITY_FAR = (22, 19, 23)
-CITY_TOP = (26, 28, 38)
+CITY_NIGHT = {"body": (7, 8, 13), "far": (22, 19, 23), "top": (26, 28, 38)}
+CITY_DAY = {"body": (54, 58, 66), "far": (86, 92, 102), "top": (108, 114, 124)}
 POLLUTION = np.array([62, 42, 26], np.float32) / 255.0   # 街あかり（暖色）
 AIRGLOW = np.array([10, 20, 18], np.float32) / 255.0     # 大気光（淡い緑）
 AZ_CITY = 170.0                                          # 街あかりが最も強い方位（南＝都心方向）
-CITY_DAY = (54, 58, 66)           # 昼の建物（明るい空に対するシルエット）
-CITY_FAR_DAY = (86, 92, 102)
-CITY_TOP_DAY = (108, 114, 124)
 WINDOW = (255, 214, 138)                                 # 窓あかり
 LAMP = (255, 196, 120)                                   # 街灯
 SIGN = ((220, 70, 70), (90, 170, 255), (110, 220, 150), (255, 190, 90))
@@ -78,6 +74,8 @@ SAT_MAG = 1.10         # これより明るい星は芯を大きく＋スパイ�
 BLOOM = (2, 2, 0.55)   # 光背: ぼかし半径2px×2回、元画像へ 0.55 倍で加算
 TRAIL_MINUTES = 60     # 低軌道衛星の軌道予測（前後この分数・1分刻み）
 TRAIL_STEP_MIN = 1
+HORIZON_MIN_ALT = 0.6  # 「地平線より上」とみなす高度。恒星・惑星・銀河・衛星で同じ値を使う
+HEADER_H = 116         # 広い図のヘッダ高さ（左に題名・右に恒星の出典を2段）
 
 # 光害の程度。限界等級・天の川の見え方・空の明るさをまとめて切り替える。
 LP_MODES = {
@@ -85,13 +83,15 @@ LP_MODES = {
     "suburb": dict(lim_z=7.2, lim_h=4.8, mw=0.065, poll=0.95, name="郊外（光害 中）"),
     "dark":   dict(lim_z=8.6, lim_h=5.4, mw=0.105, poll=0.45, name="山間・離島（光害 弱）"),
 }
-LP = dict(LP_MODES["suburb"])
-
-
 def _set_lp(mode):
-    global LP
-    LP = dict(LP_MODES.get(str(mode or "").lower(), LP_MODES["suburb"]))
-    return LP
+    """光害モードを解決して返す。グローバル状態を持たない（並行呼び出しで混ざらない）。"""
+    key = str(mode).strip().lower() if mode is not None else ""
+    return dict(LP_MODES.get(key, LP_MODES["suburb"]))
+
+
+def _lp_is_known(mode):
+    """指定された光害モードが対応表にあるか（未対応を黙って既定に落とさないための判定）。"""
+    return mode is None or str(mode).strip().lower() in LP_MODES
 
 
 # 太陽高度ごとの空の色（昼→夕焼け→薄明→夜）。太陽高度で線形補間する。
@@ -254,16 +254,32 @@ def box_blur(a, r):
 
 
 def _parse_when(when):
-    """when（ISO8601, UTC）→ (y, mo, d, h, mi, s)。不正・省略なら現在時刻。"""
-    if when:
-        m = re.match(r"([0-9]{4})-([0-9]{2})-([0-9]{2})[T ]([0-9]{2}):([0-9]{2})(?::([0-9]{2}))?",
-                     str(when).strip().replace("Z", "+00:00"))
-        if m:
-            g = [int(x) if x else 0 for x in m.groups()]
-            return (g[0], g[1], g[2], g[3], g[4], g[5])
-        return None if str(when).strip() == "" else "bad"
-    now = _dt.datetime.now(_dt.timezone.utc)
-    return (now.year, now.month, now.day, now.hour, now.minute, now.second)
+    """when（ISO8601）→ UTC の (y, mo, d, h, mi, s)。不正なら "bad"、省略なら現在時刻。
+
+    タイムゾーンは `Z` / `+hh:mm` / `-hh:mm` を解釈して UTC に直す。数値オフセットを
+    黙って UTC として読むと 9 時間ずれた図が無警告で出る（実測の不具合）。
+    オフセット省略時は UTC とみなす。空白のみも "bad" にする（None を返すと
+    `ts.utc(*None)` で TypeError がツール外へ漏れる）。
+    """
+    txt = "" if when is None else str(when).strip()
+    if not txt:
+        now = _dt.datetime.now(_dt.timezone.utc)
+        return (now.year, now.month, now.day, now.hour, now.minute, now.second)
+    m = re.match(r"([0-9]{4})-([0-9]{2})-([0-9]{2})[T ]([0-9]{2}):([0-9]{2})(?::([0-9]{2}))?"
+                 r"(?:\.[0-9]+)?\s*(Z|z|[+-][0-9]{2}:?[0-9]{2})?\s*$", txt)
+    if not m:
+        return "bad"
+    try:
+        g = [int(x) if x else 0 for x in m.groups()[:6]]
+        base = _dt.datetime(g[0], g[1], g[2], g[3], g[4], g[5], tzinfo=_dt.timezone.utc)
+    except ValueError:
+        return "bad"                                   # 2026-02-30 のような日付は暦で弾く
+    off = m.group(7)
+    if off and off not in ("Z", "z"):
+        body = off[1:].replace(":", "")
+        shift = _dt.timedelta(hours=int(body[:2]), minutes=int(body[2:4]))
+        base = base - shift if off[0] == "+" else base + shift
+    return (base.year, base.month, base.day, base.hour, base.minute, base.second)
 
 
 def _sky_state(sun_alt):
@@ -306,7 +322,7 @@ def _sun_state(eph, ts, t, lat, lon):
                 rising=bool(alt1.degrees > alt0.degrees))
 
 
-def _sky_background(sky_h, W, span, az0, sun_alt, sun_az):
+def _sky_background(sky_h, W, span, az0, sun_alt, sun_az, lp):
     """太陽高度で変わる空の地色。焼けは太陽の方位に出る。夜は街あかり（光害）を重ねる。"""
     st = _sky_state(sun_alt)
     rows = np.arange(sky_h, dtype=np.float32)
@@ -323,7 +339,7 @@ def _sky_background(sky_h, W, span, az0, sun_alt, sun_az):
     night = float(np.clip(-(sun_alt + 6.0) / 6.0, 0.0, 1.0))     # 太陽が低いほど街あかりが効く
     if night > 0.0:
         daz_city = np.abs(((az_cols - AZ_CITY + 180.0) % 360.0) - 180.0)
-        sky = sky + POLLUTION[None, None, :] * night * LP["poll"] * (
+        sky = sky + POLLUTION[None, None, :] * night * lp["poll"] * (
             0.34 * np.exp(-alt / 11.0)[:, None, None]
             + 0.78 * np.exp(-(daz_city / 78.0) ** 2)[None, :, None] * np.exp(-alt / 9.0)[:, None, None])
         sky = sky + AIRGLOW[None, None, :] * night * np.exp(-alt / 26.0)[:, None, None]
@@ -377,6 +393,16 @@ def milky_way_layer(l, b, alt):
     return mw, col, grain * 0.014
 
 
+def _mean_where(arr, sel):
+    """arr の sel 部分の平均。該当が 1 つも無いときは 0.0。
+
+    空スライスの平均は NaN になり（RuntimeWarning）、`structuredContent` に
+    NaN が載ると JSON として不正になる（span を狭めて銀河面が視野に入らないときに発生）。
+    """
+    v = arr[sel]
+    return round(float(v.mean()), 4) if v.size else 0.0
+
+
 def mw_guide_points(b, alt_g, sky_h, header, band=7.0):
     """銀河面（銀緯 0）と帯の縁（±band）の画面上の点列。昼でも天の川の位置が分かるように。"""
     rows = []
@@ -394,6 +420,92 @@ def mw_guide_points(b, alt_g, sky_h, header, band=7.0):
 
 
 # ---------- 描画の部品 ----------
+def _fit_font(dr, text, size, bold, max_w, min_size=12):
+    """max_w に収まる最大サイズのフォントを返す（下限 min_size）。"""
+    for s in range(int(size), int(min_size) - 1, -1):
+        f = load_font(s, bold)
+        if dr.textlength(text, font=f) <= max_w:
+            return f
+    return load_font(int(min_size), bold)
+
+
+def _wrap_to_width(dr, text, font, max_w):
+    """max_w に収まるよう「／」で折り返す。それでも入らない部分は文字単位で折る。"""
+    def _hard(s):
+        out, cur = [], ""
+        for ch in s:
+            if cur and dr.textlength(cur + ch, font=font) > max_w:
+                out.append(cur)
+                cur = ch
+            else:
+                cur += ch
+        if cur:
+            out.append(cur)
+        return out
+
+    lines = []
+    for part in re.split(r"\s*／\s*", text):
+        if lines and dr.textlength(lines[-1] + " ／ " + part, font=font) <= max_w:
+            lines[-1] = lines[-1] + " ／ " + part
+        elif dr.textlength(part, font=font) <= max_w:
+            lines.append(part)
+        else:
+            lines.extend(_hard(part))
+    return lines or [text]
+
+
+def _header_plan(W, cat, scene, phase, jst, span, label, lp, st):
+    """ヘッダの行を画像幅に合わせて組む。戻り値は (ヘッダ高さ, [(x, y, 文, フォント, 色, anchor)])。
+
+    固定座標で描くと、span を狭めて W が小さくなった図で題名と右寄せの行が重なり、端が
+    切れる（実測: W=333 でタイトル 400px＋右寄せ 435px＋凡例 1062px が全幅 0..332 に載り、
+    タイトル色と右寄せ色が同じ帯に同居）。幅を測ってから左右 2 段か縦積みかを決める。
+    """
+    from PIL import Image, ImageDraw
+    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    title = "地上から見上げた星空"
+    sub_txt = "{} JST ／ 緯度{:.2f}° 経度{:.2f}° ／ 視野 {:.0f}°×90° ／ {}".format(
+        jst.strftime("%Y-%m-%d %H:%M"), scene["lat"], scene["lon"], span, phase)
+    src = "恒星: {}".format(cat["source"])
+    cal = "暦: JPL de421 + Skyfield ／ 投影: 正距円筒" + (
+        " ／ 光害: " + lp["name"] if st["mw"] > 0.3 else "")
+    legend = ("● 見えている天体 ／ ○ 今は見えないが見える位置（惑星・主要恒星・銀河）"
+              " ／ 背景の星は実際の見え方（淡い星は減光）")
+    pad, gap = 18, 36
+    avail = max(80, W - 2 * pad)
+    f_t = _fit_font(probe, title, 40, True, avail)
+    f_2 = load_font(24)
+    right = [src, cal] + ([label] if label else [])
+    right_w = max(probe.textlength(t, font=f_2) for t in right)
+    items = []
+    if probe.textlength(title, font=f_t) + right_w + gap <= avail:
+        items.append((pad, 8, title, f_t, HDR_FG, "la"))
+        items.append((pad, 58, sub_txt, f_2, HDR_DIM, "la"))
+        items.append((W - pad, 10, src, f_2, HDR_DIM, "ra"))
+        items.append((W - pad, 40, cal, f_2, HDR_DIM, "ra"))
+        if label:
+            items.append((W - pad, 70, label, f_2, (120, 210, 165), "ra"))
+        f_lg = _fit_font(probe, legend, 19, False, avail)
+        if probe.textlength(legend, font=f_lg) <= avail:
+            items.append((pad, 88, legend, f_lg, (128, 140, 166), "la"))
+        return HEADER_H, items
+    y = 8                                                   # 狭い図: 左寄せで縦に積む
+    for text, size, bold, color in ((title, 32, True, HDR_FG), (sub_txt, 20, False, HDR_DIM),
+                                    (src, 19, False, HDR_DIM), (cal, 19, False, HDR_DIM),
+                                    (legend, 16, False, (128, 140, 166))):
+        f = _fit_font(probe, text, size, bold, avail, min_size=13)
+        for ln in _wrap_to_width(probe, text, f, avail):
+            items.append((pad, y, ln, f, color, "la"))
+            y += int(size * 1.15) + 1
+        y += 2
+    if label:
+        f = _fit_font(probe, label, 24, False, avail, min_size=13)
+        for ln in _wrap_to_width(probe, label, f, avail):
+            items.append((pad, y, ln, f, (120, 210, 165), "la"))
+            y += 32
+    return y + 8, items
+
+
 def _gauss(r):
     """中心が最大のガウス（マーカー用）。"""
     rad = int(math.ceil(3.2 * r))
@@ -442,22 +554,22 @@ def _moon_shade(size, illum, angle):
 def draw_stars(lin, cat, alt, az, span, az0, sky_h, W, header, lim_z, lim_h):
     """恒星を「加算光」として lin（線形RGB）に積む。等級・色・減光を反映。"""
     alt = np.asarray(alt, np.float64); az = np.asarray(az, np.float64)
-    up = alt > 0.4
+    up = alt > HORIZON_MIN_ALT
     x_all = ((az - az0) % 360.0) / span * W
-    keep = up & (x_all >= -20) & (x_all <= W + 20)
+    keep = up & (x_all >= 0.0) & (x_all < W)                     # 視野内外は本文・検証と同じ判定
     idx = np.nonzero(keep)[0]
     x, alt, m0, bv = x_all[idx], alt[idx], cat["vmag"][idx].astype(np.float64), cat["bv"][idx]
 
     m = m0 + EXT_K * (airmass(alt) - 1.0)                        # 大気減光
     lim = lim_h + (lim_z - lim_h) * (alt / 90.0) ** 0.5
     vis = m < lim
-    x, alt, m, bv = x[vis], alt[vis], m[vis], bv[vis]
+    x, alt, m, m0, bv = x[vis], alt[vis], m[vis], m0[vis], bv[vis]
 
     y = header + (90.0 - alt) / 90.0 * sky_h
     amp = (10.0 ** (-0.4 * (m - 6.5)) * GAIN).astype(np.float32)
     rc = (0.45 + 0.62 * np.maximum(0.0, 6.5 - m) ** 0.80).astype(np.float32)
     rgb = bv_to_rgb(bv)
-    deep = m > 6.1                                               # 淡い星＝天の川の粒
+    deep = m0 > 6.1                                              # 淡い星＝天の川の粒（減光前の等級で判定）
     amp[deep] *= 1.6
     rc[deep] = np.maximum(rc[deep], 0.9)
     bgdim = np.clip((m - 2.5) / 3.5, 0.0, 1.0)                   # 背景の星は淡いものほど落とす
@@ -499,15 +611,20 @@ def draw_planets(lin, pl, span, az0, sky_h, W, header, lim_fn, sun_az, sun_alt, 
     drawn, labels = {}, []
     for nm in _PLANET_ORDER:
         v = pl.get(nm)
-        if not v or v["alt"] <= (-1.5 if nm == "太陽" else 0.6):
+        if not v or v["alt"] <= (-1.5 if nm == "太陽" else HORIZON_MIN_ALT):
             continue
-        x = ((v["az"] - az0) % 360.0) / span * W
-        if x < -30 or x > W + 30:
+        x = _frame_x(v["az"], span, az0, W)
+        if not _in_frame(x, W):                  # 視野の方位外（描画・本文・検証で同じ判定）
             continue
         y = header + (90.0 - v["alt"]) / 90.0 * sky_h
         rgb = np.array(_PLANET_COLOR.get(nm, (1, 1, 1)), np.float32)
         vis = PLANET_MAG.get(nm, 5.0) < lim_fn(float(v["alt"]))
-        inf = True if in_focus is None else in_focus(nm)
+        if in_focus is not None and not in_focus(nm):
+            # 依頼表示の対象外は小さな点だけ。月・太陽も同じ扱いにする
+            # （実装漏れで show を絞っても月が常に描かれ・ラベルされていた）
+            if vis:
+                _add_patch(lin, _gauss(3.4)[:, :, None] * 0.9 * rgb[None, None, :], x, y)
+            continue
         label_txt = nm
         if nm == "月":
             illum = float(v.get("illum", 1.0))
@@ -531,10 +648,6 @@ def draw_planets(lin, pl, span, az0, sky_h, W, header, lim_fn, sun_az, sun_alt, 
             o = (g.shape[0] - c.shape[0]) // 2
             g[o:o + c.shape[0], o:o + c.shape[1]] += c
             _add_patch(lin, np.clip(g, 0.0, 1.0)[:, :, None] * 0.95 * rgb[None, None, :], x, y)
-        elif not inf:
-            if vis:
-                _add_patch(lin, _gauss(3.4)[:, :, None] * 0.9 * rgb[None, None, :], x, y)
-            continue
         elif vis:                                         # 見えている: 実物に近い点＋細いリング
             _add_patch(lin, (_gauss(5.0) * FOCUS_BOOST)[:, :, None] * rgb[None, None, :], x, y)
             _add_patch(lin, (_ring_patch(10.0, 1.0) * 0.40)[:, :, None] * np.ones(3, np.float32), x, y)
@@ -564,10 +677,10 @@ def draw_focus_points(lin, items, span, az0, sky_h, W, header, lim_fn, in_focus=
     """
     out = []
     for nm, alt_d, az_d, mag, rgb, kind in items:
-        if alt_d <= 0.8 or (in_focus is not None and not in_focus(nm)):
+        if alt_d <= HORIZON_MIN_ALT or (in_focus is not None and not in_focus(nm)):
             continue
-        x = ((az_d - az0) % 360.0) / span * W
-        if x < -30 or x > W + 30:
+        x = _frame_x(az_d, span, az0, W)
+        if not _in_frame(x, W):                           # 視野の方位外
             continue
         y = header + (90.0 - alt_d) / 90.0 * sky_h
         col = np.array(rgb, np.float32)
@@ -581,8 +694,13 @@ def draw_focus_points(lin, items, span, az0, sky_h, W, header, lim_fn, in_focus=
     return out
 
 
-def _skyline_row(dr, W, H, y_horizon, ground_h, rng, near=True, lit=True):
-    """建物を1列描く（near=手前の列: 窓あかり・看板あり / 奥の列: 一段暗い）。"""
+def _skyline_row(dr, W, H, y_horizon, ground_h, rng, near=True, lit=True, pal=None):
+    """建物を1列描く（near=手前の列: 窓あかり・看板あり / 奥の列: 一段暗い）。
+
+    色は pal（`_city_palette`）で受け取る。モジュールグローバルを書き換えると、
+    並行に走った別の呼び出しの色が混ざる。
+    """
+    pal = pal or CITY_NIGHT
     out, x = [], -30
     pxdeg = ground_h / 14.0
     while x < W + 30:
@@ -592,19 +710,19 @@ def _skyline_row(dr, W, H, y_horizon, ground_h, rng, near=True, lit=True):
             deg = rng.uniform(4.5, 9.5) * BLDG_H
         h = max(8, min(int(deg * pxdeg), int(ground_h * (0.92 if near else 0.62) * BLDG_H)))
         top = y_horizon - h
-        body = CITY if near else CITY_FAR
+        body = pal["body"] if near else pal["far"]
         dr.rectangle([x, top, x + w, H], fill=body + (255,))
         if near:
-            dr.line([x, top, x + w, top], fill=CITY_TOP + (255,), width=2)
+            dr.line([x, top, x + w, top], fill=pal["top"] + (255,), width=2)
             if rng.random() < 0.30:                                   # 段状の上層部
                 w2 = int(w * rng.uniform(0.35, 0.65))
                 x2 = x + (w - w2) // 2
                 dr.rectangle([x2, top - int(h * 0.35), x2 + w2, top + 2], fill=body + (255,))
                 dr.line([x2, top - int(h * 0.35), x2 + w2, top - int(h * 0.35)],
-                        fill=CITY_TOP + (255,), width=2)
+                        fill=pal["top"] + (255,), width=2)
             if rng.random() < 0.18:                                   # 屋上のアンテナ
                 ax = x + w // 2
-                dr.line([ax, top, ax, top - rng.randint(5, 17)], fill=CITY_TOP + (255,), width=2)
+                dr.line([ax, top, ax, top - rng.randint(5, 17)], fill=pal["top"] + (255,), width=2)
             dens = rng.uniform(0.04, 0.14) if lit else 0.0            # 建物ごとに灯り密度を変える
             for wy in range(top + 10, min(H - 4, y_horizon + ground_h - 8), 11):   # 窓あかり
                 for wx in range(x + 5, x + w - 5, 9):
@@ -621,25 +739,37 @@ def _skyline_row(dr, W, H, y_horizon, ground_h, rng, near=True, lit=True):
     return out
 
 
+def _city_palette(day_mix):
+    """昼（0.0）〜夜（1.0）の街の色。戻り値は辞書（グローバルを書き換えない）。"""
+    m = float(np.clip(day_mix, 0.0, 1.0))
+    return {k: tuple(int(round(CITY_NIGHT[k][i] + (CITY_DAY[k][i] - CITY_NIGHT[k][i]) * m))
+                     for i in range(3)) for k in CITY_NIGHT}
+
+
 def draw_ground(img, y_horizon, ground_h, W, seed=20261010, day_mix=0.0):
-    """画面下部の街並み（手続き生成）。建物が低空の星を隠す。昼は明るいシルエットで灯りなし。"""
+    """画面下部の街並み（手続き生成）。建物が低空の星を隠す。昼は明るいシルエットで灯りなし。
+
+    戻り値は (layer, skyline, occl)。occl は**描いた層の不透明画素から測った**列ごとの
+    遮蔽上端で、塔・段状上層部・アンテナも含む。建物矩形の top だけから作ると、正しい図でも
+    `_ground_verify` が「視野内なのに描かれていない」と誤判定して ok=False になる（実測:
+    実シルエットは最大 70px＝6.3° 上、span=30 では 37% の列で上回っていた）。
+    """
     from PIL import Image, ImageDraw, ImageFilter
     rng = random.Random(seed)
     H = img.size[1]
     day_mix = float(np.clip(day_mix, 0.0, 1.0))
+    pal = _city_palette(day_mix)
 
     def _mix(a, b):
         return tuple(int(round(a[i] + (b[i] - a[i]) * day_mix)) for i in range(3))
 
-    global CITY, CITY_FAR, CITY_TOP
-    CITY, CITY_FAR, CITY_TOP = _mix((7, 8, 13), CITY_DAY), _mix((22, 19, 23), CITY_FAR_DAY), \
-        _mix((26, 28, 38), CITY_TOP_DAY)
     lit = day_mix < 0.55
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     dr = ImageDraw.Draw(layer)
     dr.rectangle([0, y_horizon, W, H], fill=_mix((4, 5, 8), (46, 50, 56)) + (255,))   # 地面
     far_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))              # 奥の列（霞ませる）
-    far = _skyline_row(ImageDraw.Draw(far_layer), W, H, y_horizon, ground_h, rng, near=False, lit=lit)
+    far = _skyline_row(ImageDraw.Draw(far_layer), W, H, y_horizon, ground_h, rng,
+                       near=False, lit=lit, pal=pal)
     layer.alpha_composite(far_layer.filter(ImageFilter.GaussianBlur(1.6)))
     if lit:
         haze = Image.new("L", (W, 150), 0)                           # 奥の列と手前の列の間の街あかり
@@ -648,13 +778,14 @@ def draw_ground(img, y_horizon, ground_h, W, seed=20261010, day_mix=0.0):
             hd.line([x, 150, x, 150 - int(rng.uniform(24, 62))], fill=76)
         layer.paste(Image.new("RGBA", (W, 150), (132, 86, 44, 255)),
                     (0, y_horizon - 150), haze.filter(ImageFilter.GaussianBlur(26)))
-    near = _skyline_row(dr, W, H, y_horizon, ground_h, rng, near=True, lit=lit)   # 手前の列
+    near = _skyline_row(dr, W, H, y_horizon, ground_h, rng, near=True, lit=lit,
+                        pal=pal)                                                # 手前の列
 
     tx, th = int(W * 0.62), int(ground_h * 1.02 * BLDG_H)            # 塔（東京タワー風）
     dr.polygon([(tx - 16, y_horizon), (tx + 16, y_horizon), (tx + 5, y_horizon - th),
-                (tx - 5, y_horizon - th)], fill=CITY + (255,))
+                (tx - 5, y_horizon - th)], fill=pal["body"] + (255,))
     dr.line([tx - 20, y_horizon - th + 12, tx + 20, y_horizon - th + 12],
-            fill=CITY_TOP + (255,), width=2)
+            fill=pal["top"] + (255,), width=2)
     dr.ellipse([tx - 4, y_horizon - th - 8, tx + 4, y_horizon - th], fill=(255, 90, 70, 235))
     for _ in range(max(6, W // 220) if lit else 0):                  # 街灯
         lx = rng.randint(10, W - 10)
@@ -663,7 +794,14 @@ def draw_ground(img, y_horizon, ground_h, W, seed=20261010, day_mix=0.0):
         ImageDraw.Draw(g).ellipse([52, 52, 88, 88], fill=LAMP + (150,))
         layer.alpha_composite(g.filter(ImageFilter.GaussianBlur(18)), (lx - 70, ly - 70))
         dr.ellipse([lx - 2, ly - 2, lx + 2, ly + 2], fill=LAMP + (255,))
-    return layer, near + far
+    skyline = near + far
+    alpha = np.asarray(layer)[:, :, 3]                          # 実際に描かれた層から遮蔽を測る
+    above = alpha[:y_horizon] > 40                              # 霞んだ奥の列の薄い裾は含めない
+    occl = np.full(W, float(y_horizon), np.float32)
+    hit = above.any(axis=0)
+    if hit.any():
+        occl[hit] = above.argmax(axis=0)[hit].astype(np.float32)
+    return layer, skyline, occl
 
 
 def draw_scale(dr, W, H, top, span, az0, font_s, font_m, font_b):
@@ -705,6 +843,8 @@ def _satellites(ts, eph, t, lat, lon):
         try:
             tle, src = _fetch_tle(catnr)
             if not tle:
+                # 黙って落とすと本文が「なし(地平線下)」と嘘の理由を書く（実測: ひまわり9号）。
+                errors[nm] = "TLE を取得できませんでした（CelesTrak と代替源のいずれも返しませんでした）"
                 continue
             sources[nm] = src
             sat = EarthSatellite(tle[0], tle[1], ts=ts)
@@ -718,9 +858,10 @@ def _satellites(ts, eph, t, lat, lon):
             if kind == "leo":
                 for i in range(-TRAIL_MINUTES, TRAIL_MINUTES + 1, TRAIL_STEP_MIN):
                     a, h = _aa(ts.tt_jd(t.tt + i * TRAIL_STEP_MIN * 60.0 / 86400.0))
-                    if h > 0:
-                        trail.append({"az": a, "alt": h})
-            if alt0_ > 0:
+                    if h > HORIZON_MIN_ALT:
+                        # min（観測時刻からの分）を持たせ、可視区間が飛んだら破線を分けて描く
+                        trail.append({"az": a, "alt": h, "min": i})
+            if alt0_ > HORIZON_MIN_ALT:
                 sats[nm] = {"catnr": catnr, "kind": kind, "az": az0_, "alt": alt0_, "trail": trail}
         except Exception as e:
             errors[nm] = "{}: {}".format(type(e).__name__, str(e)[:100])
@@ -736,30 +877,39 @@ def _tle_source_summary(sources):
 
 
 def draw_satellites(img, sats, span, az0, sky_h, header, font):
-    """人工衛星を赤いマーカー＋名札＋軌道予測の破線で描く（色は検証で探すので固定）。"""
+    """人工衛星を赤いマーカー＋名札＋軌道予測の破線で描く（色は検証で探すので固定）。
+
+    視野の方位外（`_in_frame` が偽）の衛星は描かない。本文も同じ判定で「視野外」と書くので、
+    「図には無いのに本文では見えている」という食い違いが起きない。
+    """
     from PIL import ImageDraw
     dr = ImageDraw.Draw(img)
     W = img.size[0]
     pts = {}
+
+    def _trail_run(run):
+        """連続した可視区間だけを破線で結ぶ（1 周回内なので方位の跳びは目盛りの継ぎ目だけ）。"""
+        prev = None
+        for p in run:
+            px = _frame_x(p["az"], span, az0, W)
+            py = header + (90.0 - p["alt"]) / 90.0 * sky_h
+            if prev is not None and abs(px - prev[0]) < W / 2.0:   # 0°/360° の継ぎ目は結ばない
+                dr.line([prev[0], prev[1], prev[0] + (px - prev[0]) * 0.6,
+                         prev[1] + (py - prev[1]) * 0.6], fill=SAT_TRAIL, width=3)
+            prev = (px, py)
+
     for nm, s in sats.items():
-        x = ((s["az"] - az0) % 360.0) / span * W
+        x = _frame_x(s["az"], span, az0, W)
+        if not _in_frame(x, W):
+            continue
         y = header + (90.0 - s["alt"]) / 90.0 * sky_h
         pts[nm] = (x, y)
-        if s.get("trail"):                                        # 軌道予測（破線＝各区間の6割だけ描く）
-            prev = None
-            for p in s["trail"]:
-                px = ((p["az"] - az0) % 360.0) / span * W
-                py = header + (90.0 - p["alt"]) / 90.0 * sky_h
-                if prev is not None and abs(px - prev[0]) < W / 4:
-                    dr.line([prev[0], prev[1], prev[0] + (px - prev[0]) * 0.6,
-                             prev[1] + (py - prev[1]) * 0.6], fill=SAT_TRAIL, width=3)
-                prev = (px, py)
-    for nm, s in sats.items():
-        x, y = pts[nm]
+        for run in _trail_runs(s.get("trail")):      # 軌道予測（破線＝各区間の6割だけ描く）
+            _trail_run(run)
+    for nm, (x, y) in pts.items():
         dr.ellipse([x - 14, y - 14, x + 14, y + 14], fill=(120, 20, 18))
         dr.ellipse([x - 9, y - 9, x + 9, y + 9], fill=SAT_RGB, outline=(255, 255, 255), width=3)
-    for nm, s in sats.items():
-        x, y = pts[nm]
+    for nm, (x, y) in pts.items():
         dr.text((x + 14, y - 30), nm, font=font, fill=SAT_LABEL,
                 stroke_width=3, stroke_fill=(0, 0, 0))
     return pts
@@ -768,6 +918,26 @@ def draw_satellites(img, sats, span, az0, sky_h, header, font):
 def _frame_x(az, span, az0, W):
     """方位を図の画素 x に変換する（視野外なら 0..W の外の値になる）。"""
     return ((az - az0) % 360.0) / span * W
+
+
+def _in_frame(x, W):
+    """画素 x が図の中か。描画・本文・検証で同じ述語を使う（食い違いを作らない）。"""
+    return 0.0 <= float(x) < float(W)
+
+
+def _trail_runs(trail):
+    """軌道予測の点列を、時間が連続した可視区間ごとに分ける。
+
+    ±60 分の中に可視区間が 2 つ入ることがあり（実測: ISS）、地平線下を捨てた点列を
+    そのまま結ぶと別々のパスが 1 本の破線で繋がってしまう。
+    """
+    runs, cur = [], []
+    for p in trail or []:
+        if cur and p.get("min", 0) - cur[-1].get("min", 0) != TRAIL_STEP_MIN:
+            runs.append(cur)
+            cur = []
+        cur.append(p)
+    return runs + ([cur] if cur else [])
 
 
 def _ground_verify(img_bytes, sats, span, az0, sky_h, header, occl):
@@ -809,22 +979,25 @@ def _ground_verify(img_bytes, sats, span, az0, sky_h, header, occl):
 
 
 # ---------- 本体 ----------
-def render(scene, *, span, az0, sky_h, seed=20261010, label="", focus=None):
+def render(scene, *, span, az0, sky_h, seed=20261010, label="", focus=None, lp=None):
     """地上視点の星空パノラマを描いて (JPEG bytes, 描画情報) を返す。"""
     from PIL import Image, ImageDraw
     cat = scene["catalog"]
     alt, az = scene["star_alt"], scene["star_az"]
     pl, sun = scene["planets"], scene["sun"]
+    lp = lp or _set_lp(None)
 
     pxdeg = sky_h / 90.0
     W = int(round(pxdeg * span))
-    header, ground_h, ruler = 116, int(pxdeg * 14.0), 100
+    jst = _dt.datetime(*[int(v) for v in scene["when_utc"][:5]]) + _dt.timedelta(hours=9)
+    phase = phase_name(sun["alt"], sun["rising"])
+    sky, st = _sky_background(sky_h, W, span, az0, sun["alt"], sun["az"], lp)
+    header, hdr_items = _header_plan(W, cat, scene, phase, jst, span, label, lp, st)
+    ground_h, ruler = int(pxdeg * 14.0), 100
     H = header + sky_h + ground_h + ruler
     y_horizon = header + sky_h
 
-    sky, st = _sky_background(sky_h, W, span, az0, sun["alt"], sun["az"])
-    phase = phase_name(sun["alt"], sun["rising"])
-    lz, lh = min(LP["lim_z"], st["lim_z"]), min(LP["lim_h"], st["lim_h"])
+    lz, lh = min(lp["lim_z"], st["lim_z"]), min(lp["lim_h"], st["lim_h"])
     lim_fn = lambda a: lh + (lz - lh) * (a / 90.0) ** 0.5          # その高度で見える限界等級
 
     lin = np.zeros((H, W, 3), np.float32)                        # 天体の光（線形・加算）
@@ -832,13 +1005,13 @@ def render(scene, *, span, az0, sky_h, seed=20261010, label="", focus=None):
     mw_stats, mw_guide = {}, None
     l, b, alt_g = galactic_lb(sky_h, W, span, az0, scene["lat"], scene["lon"],
                               float(scene["t"].gmst) + scene["lon"] / 15.0)
-    k = LP["mw"] * st["mw"]
+    k = lp["mw"] * st["mw"]
     if k > 0.001:
         mw, col, grain = milky_way_layer(l, b, alt_g)
         lin[header:y_horizon] += mw[:, :, None] * col * k + grain[:, :, None] * k
         mw_stats = dict(peak=round(float(mw.max()), 4),
-                        b_center_mean=round(float(mw[np.abs(b) < 8].mean()), 4),
-                        b_high_mean=round(float(mw[np.abs(b) > 45].mean()), 4))
+                        b_center_mean=_mean_where(mw, np.abs(b) < 8),
+                        b_high_mean=_mean_where(mw, np.abs(b) > 45))
     if st["mw"] < 0.85:                                          # 昼・薄明は銀河面を破線で示す
         mw_guide = mw_guide_points(b, alt_g, sky_h, header)
     planets, labels = draw_planets(lin, pl, span, az0, sky_h, W, header, lim_fn,
@@ -847,7 +1020,7 @@ def render(scene, *, span, az0, sky_h, seed=20261010, label="", focus=None):
     focus_items = []                                             # 主要恒星（名のある星）
     for nm, rah, decd in _named_stars():
         i = _nearest(cat, rah, decd)
-        if i is None or cat["vmag"][i] > 2.5 or alt[i] <= 0.8:
+        if i is None or cat["vmag"][i] > 2.5 or alt[i] <= HORIZON_MIN_ALT:
             continue
         c = np.atleast_1d(bv_to_rgb(cat["bv"][i]))
         focus_items.append((nm, float(alt[i]), float(az[i]), float(cat["vmag"][i]),
@@ -857,6 +1030,32 @@ def render(scene, *, span, az0, sky_h, seed=20261010, label="", focus=None):
         focus_items.append((nm, float(a_d), float(z_d), float(mag), _DSO_COLOR[kind], kind))
     focus_labels = draw_focus_points(lin, focus_items, span, az0, sky_h, W, header, lim_fn,
                                      (lambda n: _in_focus(n, focus)) if focus else None)
+
+    def _pl_out(nm):                                             # 地平線上だが視野外の惑星
+        v = pl.get(nm)
+        if not v or v["alt"] <= (-1.5 if nm == "太陽" else HORIZON_MIN_ALT):
+            return False
+        if focus and not _in_focus(nm, focus):
+            return False                                         # 依頼表示の対象外は視野外ではない
+        return not _in_frame(_frame_x(v["az"], span, az0, W), W)
+
+    out_of_view = [nm for nm in _PLANET_ORDER if _pl_out(nm)]
+    out_of_view += [nm for nm, a_d, z_d, _m, _c, _k in focus_items
+                    if a_d > HORIZON_MIN_ALT and (not focus or _in_focus(nm, focus))
+                    and not _in_frame(_frame_x(z_d, span, az0, W), W)]
+
+    def _marker(nm, az_d, alt_d, vis, in_frame):
+        return {"id": nm, "label": nm, "kind": "planet",
+                "color": "#{:02x}{:02x}{:02x}".format(
+                    *[int(round(c * 255)) for c in _PLANET_COLOR.get(nm, (1, 1, 1))]),
+                "az_deg": round(float(az_d), 1), "alt_deg": round(float(alt_d), 1),
+                "visible": bool(vis), "in_frame": bool(in_frame)}
+
+    planet_markers = [_marker(nm, v["az"], v["alt"], v["visible"], True)
+                      for nm, v in planets.items()]
+    planet_markers += [_marker(nm, pl[nm]["az"], pl[nm]["alt"],
+                               PLANET_MAG.get(nm, 5.0) < lim_fn(float(pl[nm]["alt"])), False)
+                       for nm in out_of_view if nm in pl]
     if BLOOM[0] > 0:                                             # 光背（にじみ）
         bl = lin
         for _ in range(BLOOM[1]):
@@ -869,20 +1068,14 @@ def render(scene, *, span, az0, sky_h, seed=20261010, label="", focus=None):
     bg[header:y_horizon] = sky
     img = Image.fromarray((np.clip(1.0 - (1.0 - bg) * (1.0 - disp), 0.0, 1.0) * 255.0
                            + 0.5).astype(np.uint8), "RGB")
-    f_h1, f_h2, f_s, f_m, f_b = (load_font(40, True), load_font(24), load_font(19),
-                                 load_font(26, True), load_font(24, True))
+    f_s, f_m, f_b = load_font(19), load_font(26, True), load_font(24, True)
     sat_pts = {}
     if scene["satellites"]:                                      # 街並みの下に描く（建物が隠す）
         sat_pts = draw_satellites(img, scene["satellites"], span, az0, sky_h, header, f_m)
 
     day_mix = float(np.clip((sun["alt"] + 4.0) / 10.0, 0.0, 1.0))
-    ground, skyline = draw_ground(img, y_horizon, ground_h, W, seed, day_mix)
+    ground, skyline, occl = draw_ground(img, y_horizon, ground_h, W, seed, day_mix)
     img = Image.alpha_composite(img.convert("RGBA"), ground).convert("RGB")
-    occl = np.full(W, float(y_horizon), np.float32)              # 列ごとの建物の高さ
-    for x0, x1, top in skyline:
-        xa, xb = max(0, int(x0)), min(W, int(x1))
-        if xb > xa:
-            occl[xa:xb] = np.minimum(occl[xa:xb], float(top))
 
     def _hidden(x, y):
         return y > float(occl[min(max(int(x), 0), W - 1)]) - 4.0
@@ -923,21 +1116,9 @@ def render(scene, *, span, az0, sky_h, seed=20261010, label="", focus=None):
         dr.text((x + 11, y + 8), nm, font=f_s, fill=col,
                 stroke_width=3, stroke_fill=(0, 0, 0))
 
-    jst = _dt.datetime(*[int(v) for v in scene["when_utc"][:5]]) + _dt.timedelta(hours=9)
     dr.rectangle([0, 0, W, header], fill=HDR_BG)
-    dr.text((18, 8), "地上から見上げた星空", font=f_h1, fill=HDR_FG)
-    dr.text((18, 58),
-            "{} JST ／ 緯度{:.2f}° 経度{:.2f}° ／ 視野 {:.0f}°×90° ／ {}".format(
-                jst.strftime("%Y-%m-%d %H:%M"), scene["lat"], scene["lon"], span, phase),
-            font=f_h2, fill=HDR_DIM)
-    dr.text((W - 18, 10), "恒星: {}".format(cat["source"]), font=f_h2, fill=HDR_DIM, anchor="ra")
-    dr.text((W - 18, 40), "暦: JPL de421 + Skyfield ／ 投影: 正距円筒{}".format(
-        " ／ 光害: " + LP["name"] if st["mw"] > 0.3 else ""), font=f_h2, fill=HDR_DIM, anchor="ra")
-    if label:
-        dr.text((W - 18, 70), label, font=f_h2, fill=(120, 210, 165), anchor="ra")
-    dr.text((18, 88), "● 見えている天体 ／ ○ 今は見えないが見える位置（惑星・主要恒星・銀河）"
-                      " ／ 背景の星は実際の見え方（淡い星は減光）",
-            font=f_s, fill=(128, 140, 166))
+    for hx, hy, htext, hfont, hcol, hanchor in hdr_items:
+        dr.text((hx, hy), htext, font=hfont, fill=hcol, anchor=hanchor)
     draw_scale(dr, W, H, H - ruler, span, az0, f_s, f_m, f_b)
 
     buf = io.BytesIO()
@@ -945,6 +1126,8 @@ def render(scene, *, span, az0, sky_h, seed=20261010, label="", focus=None):
     info = dict(size=[W, H], sky_h=sky_h, header=header, ground_h=ground_h, ruler=ruler,
                 y_horizon=y_horizon, phase=phase, sun=scene["sun"], planets=planets,
                 star_stats=stats, milky_way=mw_stats, buildings=len(skyline), sky_state=st,
+                limit_mag=dict(z=lz, h=lh), out_of_view=out_of_view,
+                planet_markers=planet_markers,
                 focus=dict(visible=[n for n, _x, _y, v, _k in focus_labels if v],
                            position_only=[n for n, _x, _y, v, _k in focus_labels if not v]),
                 occl=occl, focus_labels=focus_labels, labels=labels, satellite_px=sat_pts)
@@ -962,8 +1145,13 @@ def _named_stars():
 
 
 def _nearest(cat, rah, decd):
-    d = ((cat["ra_deg"] / 15.0 - rah) * 15.0 * math.cos(math.radians(decd))) ** 2 \
-        + (cat["dec_deg"] - decd) ** 2
+    """星表から (rah, decd) に最も近い星の添字（0.5° 以内に無ければ None）。
+
+    RA は 0h/24h をまたぐので、差を [-12h, 12h) に畳んでから測る（畳まないと
+    0h 付近の星が 24h 側の候補と一致せず、黙って図から消える）。
+    """
+    dra = ((cat["ra_deg"] / 15.0 - rah + 12.0) % 24.0) - 12.0
+    d = (dra * 15.0 * math.cos(math.radians(decd))) ** 2 + (cat["dec_deg"] - decd) ** 2
     i = int(np.argmin(d))
     return i if d[i] < 0.5 ** 2 else None
 
@@ -984,13 +1172,19 @@ def sky_ground(place=None, lat=None, lon=None, when=None, span=360.0, az0=0.0,
         span: 横方向の視野（度, 30〜360）。360 で全天。
         az0: 左端の方位（度）。span=180, az0=225 なら南西→北東。
         lp: 光害の程度 "city"（都心）/ "suburb"（郊外, 既定）/ "dark"（山間・離島）。
+            未対応の値は既定（郊外）に落とし、その旨を本文に明示する。
         show: 依頼表示する天体名（カンマ区切り。例 "木星,ベガ,M31"）。省略時は全部。
+            指定した天体だけをマーカー＋名札で強調し、指定外の天体（月・太陽を含む）は
+            小さな点だけを描く。地平線上でも視野（span/az0）の外にある天体は描かず、
+            本文に「この視野の外」として列挙する（図に無いものを「見えている」と
+            書かないため）。
     """
-    from .sky_overlay import _resolve_place
+    from .sky_overlay import _resolve_place, _SAT_CATALOG as _sat_catalog
     span = as_float(span, 360.0, 30.0, 360.0) or 360.0
     az0 = as_float(az0, 0.0, -360.0, 360.0) or 0.0
     focus = [f.strip() for f in str(show).split(",") if f.strip()] if show else None
     lpinfo = _set_lp(lp)
+    lp_unknown = not _lp_is_known(lp)
 
     ll = _resolve_place(place, lat, lon)
     if ll is None and (lat is not None or lon is not None):
@@ -1045,7 +1239,8 @@ def sky_ground(place=None, lat=None, lon=None, when=None, span=360.0, az0=0.0,
                  satellites=sats, dso_alt=dso_a, dso_az=dso_z, lat=lat_v, lon=lon_v,
                  t=t, when_utc=when_utc)
     try:
-        img_bytes, info = render(scene, span=span, az0=az0, sky_h=sky_h, focus=focus)
+        img_bytes, info = render(scene, span=span, az0=az0, sky_h=sky_h, focus=focus,
+                                 lp=lpinfo)
     except Exception as e:
         return CallToolResult(
             content=[TextContent(type="text", text="画像生成に失敗しました: {}".format(str(e)[:150]))],
@@ -1072,11 +1267,32 @@ def sky_ground(place=None, lat=None, lon=None, when=None, span=360.0, az0=0.0,
     if pos_pl or info["focus"]["position_only"]:
         lines.append("**今は見えないが見える位置（○）**: "
                      + ", ".join(pos_pl + info["focus"]["position_only"]))
+    if info["out_of_view"]:
+        lines.append("**地平線上だがこの視野の外（図には描かれない）**: "
+                     + ", ".join(info["out_of_view"]))
+    if focus:
+        cand = ([nm for nm in _PLANET_ORDER if nm in pl]
+                + [nm for nm, _rah, _decd in _named_stars()] + [d[0] for d in _DSO])
+        if not any(_in_focus(nm, focus) for nm in cand):
+            lines.append("⚠️ show={} に一致する天体がありません（名前を確認してください）".format(show))
+    if lp_unknown:
+        lines.append("⚠️ lp={} は未対応の値です（city / suburb / dark のいずれか）。"
+                     "「{}」で描画しました".format(lp, lpinfo["name"]))
     W_img = len(info["occl"])
-    in_frame = [nm for nm, s in sats.items() if 0 <= _frame_x(s["az"], span, az0, W_img) < W_img]
+    in_frame = [nm for nm, s in sats.items()
+                if _in_frame(_frame_x(s["az"], span, az0, W_img), W_img)]
     off_frame = [nm for nm in sats if nm not in in_frame]
-    lines.append("**見えている人工衛星**: " + (", ".join(in_frame) if in_frame
-                                             else ("なし（視野外のみ）" if sats else "なし(地平線下)")))
+    if in_frame:
+        sat_line = ", ".join(in_frame)
+    elif sats:
+        sat_line = "なし（視野外のみ）"
+    elif len(sat_errors) >= len(_sat_catalog):
+        # 全機 TLE 未取得。「地平線下」と書くと嘘になる（実測: ひまわり9号 が仰角48°でも
+        # 代替源の一時的な 508 で取得できず、本文が地平線下と言い切っていた）
+        sat_line = "なし（TLE を取得できなかったため位置を計算できません）"
+    else:
+        sat_line = "なし(地平線下)"
+    lines.append("**見えている人工衛星**: " + sat_line)
     for nm in in_frame:
         lines.append("- {}: 方位 {:.0f}° 仰角 {:.0f}°".format(nm, sats[nm]["az"], sats[nm]["alt"]))
     for nm in off_frame:
@@ -1084,8 +1300,11 @@ def sky_ground(place=None, lat=None, lon=None, when=None, span=360.0, az0=0.0,
                      .format(nm, sats[nm]["az"], sats[nm]["alt"]))
     for nm, msg in sat_errors.items():
         lines.append("- ⚠️ {}: 位置を計算できませんでした（{}）".format(nm, msg))
-    if info["milky_way"]:
+    mw_info = info["milky_way"]
+    if mw_info and mw_info.get("b_center_mean", 0.0) > 0.002:
         lines.append("- 天の川: 銀河面の帯を描画（{:.0f}°×90° の視野内）".format(span))
+    elif mw_info:
+        lines.append("- 天の川: 銀河面（銀緯 0°）はこの視野の外にあるため帯は描かれていない")
     elif info["star_stats"]["stars_drawn"]:
         lines.append("- 天の川: この時間帯は太陽が高く、銀河面の位置のみ破線で表示")
 
@@ -1100,25 +1319,27 @@ def sky_ground(place=None, lat=None, lon=None, when=None, span=360.0, az0=0.0,
         scale=scale_spec("linear", to_scale=True, unit="deg",
                          exaggerated=["惑星・人工衛星のマーカー（実寸ではない）",
                                       "月の円盤（実際の視直径より大きい）"]),
-        markers=([{"id": nm, "label": nm, "kind": "planet", "color": "#{:02x}{:02x}{:02x}".format(
-            *[int(round(c * 255)) for c in _PLANET_COLOR.get(nm, (1, 1, 1))]),
-            "az_deg": round(v["az"], 1), "alt_deg": round(v["alt"], 1), "visible": v["visible"]}
-            for nm, v in info["planets"].items()]
-            + [{"id": nm, "label": nm, "kind": "satellite", "color": "#ff3b30",
-                "az_deg": round(v["az"], 1), "alt_deg": round(v["alt"], 1),
-                "in_frame": nm in in_frame}
-               for nm, v in list(sats.items())[:8]]),
+        markers=(info["planet_markers"]
+                 + [{"id": nm, "label": nm, "kind": "satellite", "color": "#ff3b30",
+                     "az_deg": round(v["az"], 1), "alt_deg": round(v["alt"], 1),
+                     "in_frame": nm in in_frame}
+                    for nm, v in list(sats.items())[:8]]),
         notes=figure_notes(extra=[
-            "この図は観測地の空（方位・高度）の見かけの位置。地平線より下の天体は描かれない",
+            "この図は観測地の空（方位・高度）の見かけの位置。地平線より下の天体は描かれない。"
+            "視野は方位 {:.0f}°〜{:.0f}° で、地平線上でもこの範囲外の天体は描かれていない{}".format(
+                az0 % 360, (az0 + span) % 360,
+                "（{}）".format("、".join(info["out_of_view"])) if info["out_of_view"] else ""),
             "恒星は{}の実測位置。等級・色（B-V）・大気減光を反映し、淡い星ほど減光している".format(
                 cat["source"]),
             "時間帯は太陽高度で決まる（現在 {}・高度 {:.1f}°）。昼や薄明は空が明るく、見えない天体は"
             "○の輪郭で位置だけを示す".format(phase, sun["alt"]),
             "天の川は銀経・銀緯から面輝度を近似した描画（実写ではない）。"
             "昼・薄明は銀河面を破線で示す",
-            "月は位相（照度 {:.0f}%）と距離を反映し、明るい側が太陽の方向を向く。"
-            "円盤は実際の視直径より大きい（マーカーとしての誇張）".format(
-                float(pl["月"].get("illum", 0.0)) * 100),
+            ("月は位相（照度 {:.0f}%）と距離を反映し、明るい側が太陽の方向を向く。"
+             "円盤は実際の視直径より大きい（マーカーとしての誇張）".format(
+                 float(pl["月"].get("illum", 0.0)) * 100)
+             if "月" in info["planets"] else
+             "この時刻の月は地平線下（またはこの視野の外）なので図には描かれていない"),
             "惑星の代表等級は固定値の近似（実際の等級変動は反映しない）",
             ("人工衛星は最新TLEをSGP4で伝播したその時刻の位置（予報ではない）。"
              "低軌道衛星 {} の可視区間（前後{}分・{}分刻み）を破線で描く".format(
@@ -1132,9 +1353,11 @@ def sky_ground(place=None, lat=None, lon=None, when=None, span=360.0, az0=0.0,
             "光害の設定: {}（限界等級 {:.1f}〜{:.1f} 等）".format(lpinfo["name"], lh_of(info, "h"),
                                                                   lh_of(info, "z")),
         ]),
-        caption="{:.2f}°N {:.2f}°E の {}（{}）の空。惑星: {} ／ 人工衛星: {}".format(
+        caption="{:.2f}°N {:.2f}°E の {}（{}）の空。惑星: {}{} ／ 人工衛星: {}".format(
             lat_v, lon_v, tstr, phase,
             ", ".join(info["planets"]) or "なし",
+            ("（視野外: {}）".format(", ".join(info["out_of_view"]))
+             if info["out_of_view"] else ""),
             ", ".join("{}（視野外）".format(nm) if nm in off_frame else nm
                       for nm in sats) or "なし"),
         verify=verify,
@@ -1157,13 +1380,21 @@ def sky_ground(place=None, lat=None, lon=None, when=None, span=360.0, az0=0.0,
                                             "drawn": info["star_stats"]["stars_drawn"]},
                            "satellites": sats, "satellite_errors": sat_errors,
                            "milky_way": info["milky_way"], "light_pollution": lpinfo,
+                           "out_of_view": info["out_of_view"],
+                           "limit_mag": info["limit_mag"],
                            "figure": fig, "image_path": out_path, "tle_sources": tle_sources,
                            "source": "JPL de421+Skyfield / {} / {}".format(
                                cat["source"], _tle_source_summary(tle_sources))})
 
 
 def lh_of(info, which):
-    """図の注記用に、実際に使った限界等級（天頂/地平線）を返す。"""
-    st = info.get("sky_state") or {}
-    v = st.get("lim_z" if which == "z" else "lim_h", 0.0)
-    return float(min(LP["lim_z" if which == "z" else "lim_h"], v))
+    """図の注記用に、実際に使った限界等級（天頂/地平線）を返す。
+
+    render が実効値（光害モードと空の明るさの小さい方）を `limit_mag` に入れる。
+    無い場合は旧 info 互換として sky_state から読む（グローバル LP は参照しない）。
+    """
+    key = "z" if which == "z" else "h"
+    lim = (info.get("limit_mag") or {}).get(key)
+    if lim is None:
+        lim = (info.get("sky_state") or {}).get("lim_z" if key == "z" else "lim_h", 0.0)
+    return float(lim)
