@@ -269,8 +269,14 @@ def _computed_month(year: int, month: int, off: float) -> None:
         add(t, "sky", title, detail, "computed", "eclipse")
     for m, day, nm, note in METEOR_SHOWERS:
         if m == month:
-            add(_ts_utc(ts, dt.datetime(year, m, day, 15) - dt.timedelta(hours=off)),
-                "sky", "{} 極大".format(nm), note + "／極大日は年により変動（目安）", "approx", "meteor")
+            recs.append({
+                "key": "computed:meteor:{:04d}{:02d}{:02d}:{}".format(year, m, day, nm),
+                "kind": "sky", "title": "{} 極大".format(nm),
+                "detail": note + "／極大日は年により変動（目安）",
+                "start_local": "{:04d}-{:02d}-{:02d}T15:00".format(year, m, day),
+                "all_day": False, "solid": True, "source": "JPL DE421 + Skyfield",
+                "url": "", "certainty": "approx",
+            })
     store.upsert(recs, src, window="v1", complete=True, ttl=store.TTL_NEVER)
 
 
@@ -589,7 +595,7 @@ def space_calendar(year: Optional[int] = None, month: Optional[int] = None, plac
         return _err("観測地を解決できませんでした: {!r}。地名を変えるか lat/lon を数値で指定してください".format(place))
     la, lo = res
     off = _local_tz(la, lo)
-    today = (dt.datetime.utcnow() + dt.timedelta(hours=off)).date()
+    today = (dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) + dt.timedelta(hours=off)).date()
     year_i = year_i or today.year
     month_i = month_i or today.month
     kinds_set, kerr = _parse_kinds(kinds)
@@ -782,7 +788,7 @@ def calendar_events(year: Optional[int] = None, month: Optional[int] = None, pla
     if res is None:
         return _err("観測地を解決できませんでした: {!r}".format(place))
     off = _local_tz(res[0], res[1])
-    today = (dt.datetime.utcnow() + dt.timedelta(hours=off)).date()
+    today = (dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) + dt.timedelta(hours=off)).date()
     year_i = as_int(year, today.year, 1900, 2200)
     month_i = as_int(month, today.month, 1, 12)
     kinds_set, kerr = _parse_kinds(kinds)

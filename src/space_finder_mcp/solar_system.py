@@ -256,17 +256,14 @@ def _load():
 
 
 def _resolve_when(when_iso, ts):
-    """ISO8601 を UTC として解釈し Skyfield 時刻へ。省略時は現在。不正なら None。"""
-    if when_iso:
-        iso = str(when_iso).strip().replace("Z", "+00:00")
-        import re
-        m = re.match(r"([0-9]{4})-([0-9]{2})-([0-9]{2})[T ]([0-9]{2}):([0-9]{2})(?::([0-9]{2}))?",
-                     iso)
-        if not m:
+    """ISO8601 を UTC として解釈し Skyfield 時刻へ。省略・空白のみは現在。不正なら None。"""
+    txt = "" if when_iso is None else str(when_iso).strip()
+    if txt:
+        from .ground_view import _parse_when
+        parsed = _parse_when(txt)
+        if parsed == "bad":
             return None
-        y, mo, d, h, mi, s_ = (int(m.group(1)), int(m.group(2)), int(m.group(3)),
-                               int(m.group(4)), int(m.group(5)), int(m.group(6) or 0))
-        return ts.utc(y, mo, d, h, mi, s_)
+        return ts.utc(*parsed)
     return ts.now()
 
 
@@ -2382,9 +2379,14 @@ def _comet_multi_result(names, when_iso=None):
             failed.append({"comet": nm, "error": str(e)[:150]}); continue
         except Exception as e:                       # 描画系の想定外もこの彗星だけ落とす
             failed.append({"comet": nm, "error": "描画に失敗: " + str(e)[:120]}); continue
+        panel_no = len(imgs) + 1
+        y_off = len(imgs) * (img.size[1] + 10)
         imgs.append(img)
         panels.append({
-            "markers": [dict(m, panel=len(imgs) + 1, px_in_panel=m.get("px"))
+            "markers": [dict(m, panel=panel_no, px_in_panel=m.get("px"),
+                             px=([m["px"][0], m["px"][1] + y_off]
+                                 if isinstance(m.get("px"), list) and len(m["px"]) == 2
+                                 else m.get("px")))
                         for m in (fig.get("markers") or [])],
             "name": el.get("fullname") or cid, "id": cid, "typ": el["typ"],
             "e": el["e"], "a_au": el.get("a"), "q_au": el["q"], "incl_deg": el.get("i_deg"),

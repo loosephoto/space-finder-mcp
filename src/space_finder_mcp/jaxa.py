@@ -99,11 +99,16 @@ def jaxa_dataset_search(query: str, limit: int = 10) -> CallToolResult:
     """
     limit = as_int(limit, 10, 1, 100)
     q = (query or "").strip().lower()
-    cols = _child_collections(max_collections=100)
     if not q:
         return CallToolResult(
             content=[TextContent(type="text", text="検索語を指定してください（例: GSMaP, ALOS, GCOM, precip）。")],
             structuredContent={"error": "empty query"},
+        )
+    cols = _child_collections(max_collections=100)
+    if not cols:
+        return CallToolResult(
+            content=[TextContent(type="text", text="JAXA Earth STAC カタログを取得できませんでした（一時的障害の可能性）。")],
+            structuredContent={"error": "no collections", "source": "data.earth.jaxa.jp"},
         )
     hits = [c for c in cols if q in (c["id"].lower() + " " + c["title"].lower() + " " + c["description"].lower())]
     total = len(hits)

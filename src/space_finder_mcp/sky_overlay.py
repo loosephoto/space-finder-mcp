@@ -145,19 +145,15 @@ def _compute(lat, lon, when_iso=None):
     ts = sk.load.timescale()
     topos = wgs84.latlon(lat, lon)
 
-    if when_iso:
-        # ISO8601 を UTC として解釈し ts.utc へ（Skyfield の ts に from_iso は無い版があるため）
-        iso = str(when_iso).strip().replace("Z", "+00:00")
-        import re
-        m = re.match(r"([0-9]{4})-([0-9]{2})-([0-9]{2})[T ]([0-9]{2}):([0-9]{2})(?::([0-9]{2}))?",
-                     iso)
-        if not m:
+    txt = "" if when_iso is None else str(when_iso).strip()
+    if txt:
+        from .ground_view import _parse_when
+        parsed = _parse_when(txt)
+        if parsed == "bad":
             return {"time_utc": str(when_iso), "lat": lat, "lon": lon,
                     "planets": {}, "stars": {}, "satellites": {},
                     "error": "when の形式が不正です (ISO8601: YYYY-MM-DDTHH:MM[:SS])"}
-        y, mo, d, h, mi, s_ = (int(m.group(1)), int(m.group(2)), int(m.group(3)),
-                               int(m.group(4)), int(m.group(5)), int(m.group(6) or 0))
-        t = ts.utc(y, mo, d, h, mi, s_)
+        t = ts.utc(*parsed)
     else:
         t = ts.now()
     tstr = t.utc_strftime("%Y-%m-%d %H:%M UTC")
@@ -198,6 +194,7 @@ def _compute(lat, lon, when_iso=None):
         try:
             tle, tle_source = _fetch_tle(catnr)
             if not tle:
+                sat_errors[nm] = "TLE を取得できませんでした（CelesTrak と代替源のいずれも返しませんでした）"
                 continue
             tle_sources[nm] = tle_source
             sat = EarthSatellite(*tle)
@@ -581,6 +578,11 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
     if eng == "auto" or eng not in ("accurate", "simple"):
         eng = "simple"  # 既定は視認性重視の Pillow 版
     scene = _compute(ll[0], ll[1], when)
+    if scene.get("error"):
+        return CallToolResult(
+            content=[TextContent(type="text", text=scene["error"])],
+            structuredContent={"error": scene["error"], "when": str(when)},
+        )
     tle_sources = scene.get("tle_sources") or {}      # TLE の出典（CelesTrak / 代替源）
     use_acc = eng == "accurate"
     import base64
@@ -606,6 +608,13 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
     # インライン画像を描けないハーネス向け: 保存してリンクを先頭に出す
     out_path = save_output(img_bytes, "sky_map_with_satellites",
                            "png" if mime == "image/png" else "jpg")
+    sat_errors_map = scene.get("satellite_errors") or {}
+    if scene["satellites"]:
+        sat_summary = ", ".join(scene["satellites"])
+    elif len(sat_errors_map) >= len(_SAT_CATALOG):
+        sat_summary = "なし（TLE を取得できなかったため位置を計算できません）"
+    else:
+        sat_summary = "なし(地平線下)"
     lines = [
         media_link_line("星空マップ・{}".format(eng_label),
                         path=out_path, kind="figure"),
@@ -613,7 +622,7 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
         "場所: 緯度 {:.2f}° 経度 {:.2f}°".format(ll[0], ll[1]),
         "",
         "**見えている惑星/月**: " + (", ".join(scene["planets"]) if scene["planets"] else "なし"),
-        "**見えている人工衛星**: " + (", ".join(scene["satellites"]) if scene["satellites"] else "なし(地平線下)"),
+        "**見えている人工衛星**: " + sat_summary,
     ]
     for nm, s in scene["satellites"].items():
         lines.append("- {}: 方位 {:.0f}° 仰角 {:.0f}°".format(nm, s["az"], s["alt"]))

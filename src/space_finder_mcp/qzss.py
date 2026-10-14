@@ -90,7 +90,7 @@ def _fetch(path: str, params: Optional[dict] = None) -> tuple:
 @ttl_cache(TTL_SHORT, maxsize=32, skip_if=lambda r: not r)
 def _search_ids(segment: str, days: int = 7) -> list:
     """公開アーカイブの ID 一覧を新しい順に取る（days で期間を絞る）。"""
-    since = (_dt.datetime.utcnow() - _dt.timedelta(days=days)).strftime("%Y-%m-%d 00:00:00")
+    since = (_dt.datetime.now(_dt.timezone.utc).replace(tzinfo=None) - _dt.timedelta(days=days)).strftime("%Y-%m-%d 00:00:00")
     text, err = _fetch("search/{}".format(segment), {"since_datetime": since})
     if err or not text:
         text, err = _fetch("search/{}".format(segment))       # 期間指定が効かない種別の保険

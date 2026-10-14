@@ -172,7 +172,7 @@ def _parse_vizier_tsv(text):
     return "\n".join(out) + "\n"
 
 
-@ttl_cache(TTL_DAILY, maxsize=2)
+@ttl_cache(TTL_DAILY, maxsize=2, skip_if=lambda c: bool((c or {}).get("fallback")))
 def _star_catalog():
     """Hipparcos 実星表（Vmag<8.5）を返す。
 

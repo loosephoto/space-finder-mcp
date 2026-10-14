@@ -1384,12 +1384,15 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
         zoom = 1 if whole else 3
     out_px = as_int(out_px, 900, 400, 1600)
 
-    if when:
-        iso = str(when).strip().replace("Z", "+00:00")
+    when_s = "" if when is None else str(when).strip()
+    if when_s:
+        iso = when_s.replace("Z", "+00:00")
         try:
             t0 = datetime.datetime.fromisoformat(iso)
             if t0.tzinfo is None:
                 t0 = t0.replace(tzinfo=datetime.timezone.utc)
+            else:
+                t0 = t0.astimezone(datetime.timezone.utc)
         except ValueError:
             return CallToolResult(
                 content=[TextContent(type="text", text="when は ISO8601（YYYY-MM-DDTHH:MM[:SS]Z）で指定してください。")],
@@ -1476,7 +1479,7 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
         return bb[3] - bb[1]
     line1 = f"🛰 {ja}（{en}）"
     line2 = f"{body_cfg['ja']}面: {ns} {abs(lat0):.2f}° / {ew} {abs(lon0):.2f}°  高度 {alt0:.1f} km"
-    line3 = f"速度 {spd} ・ 時刻 {tstr} UTC"
+    line3 = f"速度 {spd} ・ 時刻 {tstr}"
     # 情報パネルは現在位置マーカーを隠さない位置へ（隠れると画素検査が落ちる）
     panel_w = int(iw * 0.72)
     panel_h = (_fh(f_big, line1) + pad) + (_fh(f_mid, line2) + pad) + _fh(f_sm, line3) + 28

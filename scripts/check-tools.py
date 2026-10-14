@@ -556,10 +556,12 @@ def run_all(only=None, timeout=180, offline=False) -> list:
     from space_finder_mcp.server import mcp
 
     orig_get, orig_post = requests.get, requests.post
+    orig_sess_req = requests.Session.request
     if offline:
         def boom(*a, **k):
             raise requests.ConnectionError("check-tools: simulated network failure")
         requests.get, requests.post = boom, boom
+        requests.Session.request = boom
 
     import os
     import tempfile
@@ -570,60 +572,71 @@ def run_all(only=None, timeout=180, offline=False) -> list:
     names = sorted(mcp._tool_manager._tools)
     if only:
         names = [n for n in names if n in only]
-    for name in names:
-        fn = sync_fn(mcp._tool_manager._tools[name])
-        out = {}
+    try:
+        for name in names:
+            fn = sync_fn(mcp._tool_manager._tools[name])
+            out = {}
 
-        tmp_store = None
-        if name in STORE_WRITE_TOOLS:                   # 実ストアを汚さないよう一時ファイルへ
-            fd, tmp_store = tempfile.mkstemp(suffix=".json")
-            os.close(fd)
-            os.remove(tmp_store)
-            calendar_store.STORE_PATH = tmp_store
+            tmp_store = None
+            if name in STORE_WRITE_TOOLS:                   # 実ストアを汚さないよう一時ファイルへ
+                fd, tmp_store = tempfile.mkstemp(suffix=".json")
+                os.close(fd)
+                os.remove(tmp_store)
+                calendar_store.STORE_PATH = tmp_store
 
-        def call():
+            def call():
+                try:
+                    kw = _fill_kwargs(fn)
+                    kw.update(GATE_ARGS.get(name, {}))
+                    out["result"] = fn(**kw)
+                except Exception as e:                      # 例外が外へ漏れた = 異常
+                    out["exc"] = "{}: {}".format(type(e).__name__, e)
+
             try:
-                kw = _fill_kwargs(fn)
-                kw.update(GATE_ARGS.get(name, {}))
-                out["result"] = fn(**kw)
-            except Exception as e:                      # 例外が外へ漏れた = 異常
-                out["exc"] = "{}: {}".format(type(e).__name__, e)
-
-        th = threading.Thread(target=call, daemon=True)
-        t0 = time.perf_counter()
-        th.start()
-        th.join(timeout)
-        dt = time.perf_counter() - t0
-        if th.is_alive():
-            rows.append({"tool": name, "status": "TIMEOUT", "seconds": round(dt, 2)})
-            continue
-        if "exc" in out:
-            rows.append({"tool": name, "status": "LEAKED_EXCEPTION", "seconds": round(dt, 2),
-                         "detail": str(out["exc"])[:200]})
-            continue
-        r = out.get("result")
-        sc = getattr(r, "structuredContent", None)
-        kinds = [getattr(c, "type", "?") for c in getattr(r, "content", [])]
-        fig = sc.get("figure") if isinstance(sc, dict) else None
-        fissues = figure_issues(name, r) if "image" in kinds else []
-        missues = media_issues(name, r)
-        # 「未対応（figure なし）」は移行中のため警告どまり、内容が不正なら FAIL。
-        invalid = [i for i in fissues if not i.startswith("figure/1 未対応")]
-        fsum = ({"kind": fig.get("kind"), "notes": len(fig.get("notes") or []),
-                 "verify_ok": (fig.get("verify") or {}).get("ok")}
-                if isinstance(fig, dict) else None)
-        rows.append({"tool": name,
-                     "status": "ERROR_RESULT" if _is_error(r)
-                               else ("MEDIA_INVALID" if missues
-                                     else ("FIGURE_INVALID" if invalid else "OK")),
-                     "seconds": round(dt, 2), "blocks": kinds,
-                     "has_structured_content": isinstance(sc, dict),
-                     "figure": fsum, "figure_issues": fissues,
-                     "media_links": count_media_links(r),
-                     "media_issues": missues,
-                     "detail": (sc.get("error") if _is_error(r) else None)})
-
-    requests.get, requests.post = orig_get, orig_post
+                th = threading.Thread(target=call, daemon=True)
+                t0 = time.perf_counter()
+                th.start()
+                th.join(timeout)
+                dt = time.perf_counter() - t0
+            finally:
+                calendar_store.STORE_PATH = orig_store_path
+                if tmp_store and os.path.exists(tmp_store):
+                    try:
+                        os.remove(tmp_store)
+                    except OSError:
+                        pass
+            if th.is_alive():
+                rows.append({"tool": name, "status": "TIMEOUT", "seconds": round(dt, 2)})
+                continue
+            if "exc" in out:
+                rows.append({"tool": name, "status": "LEAKED_EXCEPTION", "seconds": round(dt, 2),
+                             "detail": str(out["exc"])[:200]})
+                continue
+            r = out.get("result")
+            sc = getattr(r, "structuredContent", None)
+            kinds = [getattr(c, "type", "?") for c in getattr(r, "content", [])]
+            fig = sc.get("figure") if isinstance(sc, dict) else None
+            fissues = figure_issues(name, r) if "image" in kinds else []
+            missues = media_issues(name, r)
+            # 「未対応（figure なし）」は移行中のため警告どまり、内容が不正なら FAIL。
+            invalid = [i for i in fissues if not i.startswith("figure/1 未対応")]
+            fsum = ({"kind": fig.get("kind"), "notes": len(fig.get("notes") or []),
+                     "verify_ok": (fig.get("verify") or {}).get("ok")}
+                    if isinstance(fig, dict) else None)
+            rows.append({"tool": name,
+                         "status": "ERROR_RESULT" if _is_error(r)
+                                   else ("MEDIA_INVALID" if missues
+                                         else ("FIGURE_INVALID" if invalid else "OK")),
+                         "seconds": round(dt, 2), "blocks": kinds,
+                         "has_structured_content": isinstance(sc, dict),
+                         "figure": fsum, "figure_issues": fissues,
+                         "media_links": count_media_links(r),
+                         "media_issues": missues,
+                         "detail": (sc.get("error") if _is_error(r) else None)})
+    finally:
+        calendar_store.STORE_PATH = orig_store_path
+        requests.get, requests.post = orig_get, orig_post
+        requests.Session.request = orig_sess_req
     return rows
 
 
@@ -821,45 +834,52 @@ def fuzz_args(only=None, timeout=60, live=False) -> list:
     import requests
     from space_finder_mcp.server import mcp
 
+    orig_get, orig_post = requests.get, requests.post
+    orig_sess_req = requests.Session.request
     if not live:
         def boom(*a, **k):
             raise requests.ConnectionError("check-tools: simulated network failure")
         requests.get, requests.post = boom, boom
+        requests.Session.request = boom
 
     names = sorted(mcp._tool_manager._tools)
     if only:
         names = [n for n in names if n in only]
     rows = []
-    for name in names:
-        # 登録済みツールは async ラッパーなので、元の同期関数を直接呼ぶ（sync_fn）
-        fn = sync_fn(mcp._tool_manager._tools[name])
-        base = _fill_kwargs(fn)
-        for p in _inspect.signature(fn).parameters.values():
-            ann = str(p.annotation)
-            if not any(k in ann for k in ("int", "float")):
-                continue
-            for bad in ("abc", "5件", [], {}):
-                kw = dict(base)
-                kw[p.name] = bad
-                out = {}
-
-                def call():
-                    try:
-                        out["r"] = fn(**kw)
-                    except Exception as e:
-                        out["exc"] = "{}: {}".format(type(e).__name__, e)
-
-                th = threading.Thread(target=call, daemon=True)
-                th.start()
-                th.join(timeout)
-                if th.is_alive():
-                    rows.append({"tool": name, "arg": p.name, "value": repr(bad), "status": "TIMEOUT"})
+    try:
+        for name in names:
+            # 登録済みツールは async ラッパーなので、元の同期関数を直接呼ぶ（sync_fn）
+            fn = sync_fn(mcp._tool_manager._tools[name])
+            base = _fill_kwargs(fn)
+            for p in _inspect.signature(fn).parameters.values():
+                ann = str(p.annotation)
+                if not any(k in ann for k in ("int", "float")):
                     continue
-                if "exc" in out:
-                    rows.append({"tool": name, "arg": p.name, "value": repr(bad),
-                                 "status": "LEAKED_EXCEPTION", "detail": str(out["exc"])[:160]})
-                else:
-                    rows.append({"tool": name, "arg": p.name, "value": repr(bad), "status": "OK"})
+                for bad in ("abc", "5件", [], {}):
+                    kw = dict(base)
+                    kw[p.name] = bad
+                    out = {}
+
+                    def call():
+                        try:
+                            out["r"] = fn(**kw)
+                        except Exception as e:
+                            out["exc"] = "{}: {}".format(type(e).__name__, e)
+
+                    th = threading.Thread(target=call, daemon=True)
+                    th.start()
+                    th.join(timeout)
+                    if th.is_alive():
+                        rows.append({"tool": name, "arg": p.name, "value": repr(bad), "status": "TIMEOUT"})
+                        continue
+                    if "exc" in out:
+                        rows.append({"tool": name, "arg": p.name, "value": repr(bad),
+                                     "status": "LEAKED_EXCEPTION", "detail": str(out["exc"])[:160]})
+                    else:
+                        rows.append({"tool": name, "arg": p.name, "value": repr(bad), "status": "OK"})
+    finally:
+        requests.get, requests.post = orig_get, orig_post
+        requests.Session.request = orig_sess_req
     return rows
 
 

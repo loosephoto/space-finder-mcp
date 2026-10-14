@@ -1194,3 +1194,199 @@ class NewCraterSiteTests(unittest.TestCase):
             requests.get = old_get
         self.assertEqual(r.structuredContent["figure"]["kind"], "impact_site_map")
         self.assertNotIn("LROC 公表値", r.structuredContent["source"])
+
+
+class BugSweepV0392Tests(unittest.TestCase):
+    """v0.39.2 で一括修正した日時解釈・キャッシュ汚染・カレンダー境界処理の回帰テスト。"""
+
+    def test_sky_map_simple_and_accurate_report_bad_when(self):
+        from space_finder_mcp.sky_overlay import sky_map_with_satellites
+        for eng in ("simple", "accurate"):
+            r = sky_map_with_satellites(place="東京", engine=eng, when="not-a-date")
+            self.assertIn("error", r.structuredContent, eng)
+
+    def test_sky_map_simple_reports_tle_failure_and_converts_offset(self):
+        from space_finder_mcp.sky_overlay import _compute, sky_map_with_satellites
+        old_get = requests.get
+        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(requests.ConnectionError("offline"))
+        try:
+            a = _compute(35.68, 139.69, "2026-10-14T12:00:00Z")
+            b = _compute(35.68, 139.69, "2026-10-14T21:00:00+09:00")
+            self.assertEqual(a["time_utc"], b["time_utc"])
+            r = sky_map_with_satellites(place="東京", engine="simple", when="2026-10-14T12:00:00Z")
+        finally:
+            requests.get = old_get
+        text = "\n".join(getattr(c, "text", "") for c in r.content)
+        self.assertIn("**見えている人工衛星**: なし（TLE を取得できなかったため位置を計算できません）", text)
+        self.assertNotIn("**見えている人工衛星**: なし(地平線下)", text)
+        self.assertTrue(r.structuredContent["satellite_errors"])
+
+    def test_solar_system_resolve_when_handles_blank_offset_and_bad_calendar_date(self):
+        from space_finder_mcp.solar_system import _load, _resolve_when
+        loader, _ = _load()
+        ts = loader.timescale()
+        self.assertIsNotNone(_resolve_when("   ", ts))
+        self.assertIsNone(_resolve_when("2026-02-30T12:00:00Z", ts))
+        t_utc = _resolve_when("2026-10-14T12:00:00Z", ts)
+        t_jst = _resolve_when("2026-10-14T21:00:00+09:00", ts)
+        self.assertAlmostEqual(t_utc.tt, t_jst.tt, places=6)
+
+    def test_comet_multi_result_panel_numbers_and_shifted_marker_px(self):
+        from PIL import Image
+        from space_finder_mcp import solar_system
+        old_elem = solar_system._comet_elements
+        old_kepler = solar_system._kepler_position
+        old_render = solar_system._render_comet_orbit
+        try:
+            solar_system._comet_elements = lambda nm: (
+                nm, {"typ": "sbdb", "fullname": nm, "e": 0.5, "a": 2.0, "q": 1.0,
+                     "i_deg": 10.0, "source": "test"}
+            )
+            solar_system._kepler_position = lambda raw, jd: (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+            solar_system._render_comet_orbit = lambda cid, el, pos, tstr: (
+                Image.new("RGB", (200, 100), (10, 14, 26)),
+                {"markers": [{"id": "periapsis", "label": "近日点", "au": 1.0, "px": [50, 40]}],
+                 "scale": {"px_per_AU": 20.0},
+                 "conic": {"closed": True, "apo": 3.0},
+                 "verify": {"ok": True, "periapsis_check": "equality", "label_overlap_px": 0},
+                 "notes": ["n"]},
+            )
+            r = solar_system._comet_multi_result(["1P", "2P"], "2026-10-14T12:00:00Z")
+        finally:
+            solar_system._comet_elements = old_elem
+            solar_system._kepler_position = old_kepler
+            solar_system._render_comet_orbit = old_render
+        markers = r.structuredContent["figure"]["markers"]
+        self.assertEqual([m["panel"] for m in markers], [1, 2])
+        self.assertEqual(markers[0]["px"], [50, 40])
+        self.assertEqual(markers[1]["px_in_panel"], [50, 40])
+        self.assertEqual(markers[1]["px"], [50, 40 + 100 + 10])
+
+    def test_planetary_orbiter_track_normalizes_offset_and_has_no_double_utc(self):
+        from PIL import Image
+        from space_finder_mcp import planetary_map
+        old_state = planetary_map._state
+        old_states = planetary_map._horizons_states
+        old_sv = planetary_map.surface_view
+        try:
+            planetary_map._state = lambda b, c, jd: {
+                "lat": 10.0, "lon": 20.0, "alt_km": 50.0, "speed_kms": 1.6, "dist_km": 1787.4
+            }
+            planetary_map._horizons_states = lambda c, ctr, jds: [
+                (1787.4, 0.0, 0.0, 0.0, 1.6, 0.0) for _ in jds
+            ]
+            planetary_map.surface_view = lambda *a, **k: {
+                "img": Image.new("RGB", (600, 300), (20, 20, 20)),
+                "g2px": lambda lon, lat: (300.0, 150.0),
+                "inv": lambda x, y: (20.0, 10.0),
+                "zoom": 1, "deg_per_px": 0.6, "tiles_failed": 0, "tiles_total": 1,
+            }
+            r = planetary_map.planetary_orbiter_track(
+                body="moon", orbiter="lro", when="2026-10-14T21:00:00+09:00"
+            )
+            r_blank = planetary_map.planetary_orbiter_track(
+                body="moon", orbiter="lro", when="   "
+            )
+        finally:
+            planetary_map._state = old_state
+            planetary_map._horizons_states = old_states
+            planetary_map.surface_view = old_sv
+        self.assertEqual(r.structuredContent["time_utc"], "2026-10-14 12:00 UTC")
+        self.assertNotIn("error", r_blank.structuredContent)
+
+    def test_jaxa_dataset_search_does_not_cache_network_failure_as_zero_hits(self):
+        from space_finder_mcp import jaxa
+        old_get = requests.get
+        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(requests.ConnectionError("offline"))
+        jaxa.jaxa_dataset_search.cache_clear()
+        try:
+            r_empty = jaxa.jaxa_dataset_search("")
+            self.assertEqual(r_empty.structuredContent.get("error"), "empty query")
+            r_fail = jaxa.jaxa_dataset_search("ALOS")
+            self.assertEqual(r_fail.structuredContent.get("error"), "no collections")
+            self.assertEqual(jaxa.jaxa_dataset_search.cache_info()["entries"], 0)
+        finally:
+            requests.get = old_get
+            jaxa.jaxa_dataset_search.cache_clear()
+
+    def test_oscar_satellite_status_does_not_cache_error_or_incomplete_catalog(self):
+        from space_finder_mcp import oscar
+        old_get = requests.get
+        old_disk = oscar._disk_read
+        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(requests.ConnectionError("offline"))
+        oscar._disk_read = lambda ttl: None
+        oscar.satellite_status.cache_clear()
+        oscar._catalogue.cache_clear()
+        try:
+            r = oscar.satellite_status("himawari")
+            self.assertIn("error", r.structuredContent)
+            self.assertEqual(oscar.satellite_status.cache_info()["entries"], 0)
+        finally:
+            requests.get = old_get
+            oscar._disk_read = old_disk
+            oscar.satellite_status.cache_clear()
+            oscar._catalogue.cache_clear()
+
+    def test_swpc_does_not_cache_total_failure(self):
+        from space_finder_mcp import swpc
+        old_get = requests.get
+        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(requests.ConnectionError("offline"))
+        swpc.fetch_all.cache_clear()
+        swpc.fetch_forecast.cache_clear()
+        try:
+            d1 = swpc.fetch_all()
+            d2 = swpc.fetch_forecast()
+            self.assertEqual(d1["sections"], {})
+            self.assertEqual(d2["sections"], {})
+            self.assertEqual(swpc.fetch_all.cache_info()["entries"], 0)
+            self.assertEqual(swpc.fetch_forecast.cache_info()["entries"], 0)
+        finally:
+            requests.get = old_get
+            swpc.fetch_all.cache_clear()
+            swpc.fetch_forecast.cache_clear()
+
+    def test_ground_view_star_catalog_does_not_cache_fallback(self):
+        import os as _os
+        from space_finder_mcp import ground_view as gv
+        old_exists = _os.path.exists
+        old_disk = gv.disk_get
+        _os.path.exists = lambda p: False if p == gv.CATALOG_CSV else old_exists(p)
+        gv.disk_get = lambda *a, **k: None
+        gv._star_catalog.cache_clear()
+        try:
+            cat = gv._star_catalog()
+            self.assertTrue(cat["fallback"])
+            self.assertEqual(gv._star_catalog.cache_info()["entries"], 0)
+        finally:
+            _os.path.exists = old_exists
+            gv.disk_get = old_disk
+            gv._star_catalog.cache_clear()
+
+    def test_calendar_store_prune_pre1970_and_multiday_month_crossing(self):
+        import datetime as dt
+        import os as _os
+        import tempfile
+        from space_finder_mcp import calendar_store as store
+        old_path = store.STORE_PATH
+        fd, tmp = tempfile.mkstemp(suffix=".json")
+        _os.close(fd)
+        _os.remove(tmp)
+        store.STORE_PATH = tmp
+        try:
+            store.upsert([{"key": "sky:1969", "kind": "sky", "title": "Apollo 11",
+                           "start_utc": "1969-07-20T20:17:00Z"}], "test")
+            removed = store.prune(keep_past_days=45)
+            self.assertEqual(removed, 1)
+            rec, _ = store.user_add("月跨ぎ展示", dt.date(2026, 10, 30),
+                                    end_date=dt.date(2026, 11, 2))
+            occ_oct = store.expand_user_occurrences(rec, 2026, 10)
+            occ_nov = store.expand_user_occurrences(rec, 2026, 11)
+            self.assertEqual(len(occ_oct), 1)
+            self.assertEqual(len(occ_nov), 1)
+            self.assertEqual(occ_nov[0][0].date(), dt.date(2026, 11, 1))
+            self.assertEqual(occ_nov[0][1].date(), dt.date(2026, 11, 2))
+        finally:
+            store.STORE_PATH = old_path
+            if _os.path.exists(tmp):
+                _os.remove(tmp)
+

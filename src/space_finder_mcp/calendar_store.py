@@ -84,7 +84,7 @@ def load() -> dict:
 def save(data: dict) -> bool:
     """ストアを原子的に書く（tmp に書いて os.replace）。成功したら True。"""
     try:
-        os.makedirs(STORE_DIR, exist_ok=True)
+        os.makedirs(os.path.dirname(STORE_PATH) or STORE_DIR, exist_ok=True)
         tmp = "{}.{}.tmp".format(STORE_PATH, os.getpid())
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(data, fh, ensure_ascii=False, separators=(",", ":"))
@@ -197,12 +197,13 @@ def prune(keep_past_days: int = KEEP_PAST_DAYS, tombstone_days: int = 180) -> in
                     data["events"].pop(key, None)
                     removed += 1
                 continue
+            import calendar as _cal
             try:
-                when = time.mktime(time.strptime(str(stamp)[:19].replace("T", " "), "%Y-%m-%d %H:%M:%S"))
-            except ValueError:
+                when = _cal.timegm(time.strptime(str(stamp)[:19].replace("T", " "), "%Y-%m-%d %H:%M:%S"))
+            except (ValueError, OverflowError):
                 try:
-                    when = time.mktime(time.strptime(str(stamp)[:10], "%Y-%m-%d"))
-                except ValueError:
+                    when = _cal.timegm(time.strptime(str(stamp)[:10], "%Y-%m-%d"))
+                except (ValueError, OverflowError):
                     continue
             if when < keep_past:
                 data["events"].pop(key, None)
@@ -357,7 +358,13 @@ def expand_user_occurrences(rec: dict, year: int, month: int) -> list:
             out.append((s, e))
 
     if rep == "none":
-        emit(dt.date(base.year, base.month, base.day))
+        d0 = dt.date(base.year, base.month, base.day)
+        d_end = d0 + dt.timedelta(days=span_days - 1)
+        if first <= d0 <= last:
+            emit(d0)
+        elif d0 < first <= d_end:
+            out.append((dt.datetime.combine(first, base.time()),
+                        dt.datetime.combine(d_end, base.time())))
     elif rep == "daily":
         for i in range(days):
             emit(first + dt.timedelta(days=i))

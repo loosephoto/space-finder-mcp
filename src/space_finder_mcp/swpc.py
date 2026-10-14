@@ -99,12 +99,12 @@ def _within_hours(time_tag: str, hours: float, now=None) -> bool:
         t = datetime.datetime.fromisoformat(str(time_tag)[:19])
     except ValueError:
         return False
-    ref = now or datetime.datetime.utcnow()
+    ref = now or datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     delta = (ref - t).total_seconds()
     return 0 <= delta <= hours * 3600.0
 
 
-@ttl_cache(TTL_SHORT, maxsize=4)
+@ttl_cache(TTL_SHORT, maxsize=4, skip_if=lambda d: not (d or {}).get("sections"))
 def fetch_all() -> dict:
     """SWPC の各項目を取得して1つにまとめる。
 
@@ -488,7 +488,7 @@ def _parse_forecast_text(raw: str) -> dict:
     }
 
 
-@ttl_cache(TTL_FORECAST, maxsize=4)
+@ttl_cache(TTL_FORECAST, maxsize=4, skip_if=lambda d: not (d or {}).get("sections"))
 def fetch_forecast() -> dict:
     """SWPC の予報プロダクト（発生確率・活動領域・3日予報）を取得して1つにまとめる。
 

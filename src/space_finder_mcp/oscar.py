@@ -31,7 +31,7 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
-from .cache import TTL_DAILY, disk_cache_path, ttl_cache
+from .cache import TTL_DAILY, disk_cache_path, is_error_result, ttl_cache
 from .input_utils import as_int
 from .name_common import expand_terms
 
@@ -88,7 +88,7 @@ def _disk_write(cat: dict) -> None:
         pass
 
 
-@ttl_cache(TTL_DAILY, maxsize=4)
+@ttl_cache(TTL_DAILY, maxsize=4, skip_if=lambda c: bool((c or {}).get("failed_pages")))
 def _catalogue() -> dict:
     """OSCAR の全衛星（全ページ）を取得してキャッシュする。
 
@@ -180,7 +180,7 @@ def match_score(s: dict, q_terms) -> Optional[int]:
     return best
 
 
-@ttl_cache(TTL_DAILY, maxsize=64)
+@ttl_cache(TTL_DAILY, maxsize=64, skip_if=lambda r: is_error_result(r) or bool((getattr(r, "structuredContent", None) or {}).get("failed_pages")))
 def satellite_status(query: Optional[str] = None, agency: Optional[str] = None,
                      limit: int = 10) -> CallToolResult:
     """世界気象機関（WMO）OSCARの衛星カタログから、気象・地球観測衛星の運用ステータスを返す。
