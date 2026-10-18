@@ -356,7 +356,8 @@ def _store_events(rows: list, source: str, window: str) -> int:
         return 0
 
 
-def _neo_calendar_records(results: list, *, days: int, dist: float) -> list:
+def _neo_calendar_records(results: list, *, days: int, dist: float,
+                          kind: str = "all") -> list:
     """`neo_close_approach` の結果を蓄積ストア用レコード（kind="neo"）にする。
 
     接近は日時が確定した計算値なので日付セルに置ける。数値は応答とまったく同じものを使い、
@@ -372,6 +373,12 @@ def _neo_calendar_records(results: list, *, days: int, dist: float) -> list:
         title = ("{} 接近（{:.1f} 月距離）".format(des, lunar) if lunar is not None
                  else "{} 接近".format(des))
         bits = []
+        # 種類は行ごとの object_type から取る。kind="all" では小惑星と彗星が混在するので、
+        # 呼び出し全体の kind で判定すると彗星を「小惑星」と記録してしまう（蓄積後は直せない）。
+        row_type = str(row.get("object_type") or "").strip().lower()
+        if row_type not in ("asteroid", "comet"):
+            row_type = "comet" if kind == "comet" else "asteroid"
+        bits.append("種類: {}".format("彗星" if row_type == "comet" else "小惑星"))
         if row.get("distance_au") is not None:
             bits.append("地心距離 {} au（{:,.0f} km・{:.2f} 月距離）".format(
                 _fmt_num(row.get("distance_au"), digits=5), row.get("distance_km") or 0.0,
@@ -388,8 +395,8 @@ def _neo_calendar_records(results: list, *, days: int, dist: float) -> list:
         bits.append("接近時刻の不確かさ {}".format(row.get("uncertainty") or "不明"))
         bits.append("**接近 ≠ 衝突**")
         bits.append("接近時刻は TDB（UTC とは最大約1分差）")
-        bits.append("蓄積元: neo_close_approach（JPL CNEOS CAD・{}日/{} au 以内の照会）".format(
-            days, "{:g}".format(dist)))
+        bits.append("蓄積元: neo_close_approach（JPL CNEOS CAD・{}日/{} au 以内・{} の照会）".format(
+            days, "{:g}".format(dist), kind))
         out.append({
             "key": "neo:{}:{}".format(des, when.strftime("%Y%m%dT%H%M")),
             "kind": "neo", "title": title, "detail": "／".join(bits),
@@ -558,9 +565,108 @@ def fireball_reports(days: int = 30, min_impact_energy_kt: Optional[float] = Non
         })
 
 
+_KIND_ALIASES = {
+    "all": "all", "both": "all", "any": "all",
+    "すべて": "all", "全部": "all", "両方": "all",
+    "asteroid": "asteroid", "asteroids": "asteroid", "a": "asteroid", "nea": "asteroid",
+    "小惑星": "asteroid",
+    "comet": "comet", "comets": "comet", "c": "comet", "彗星": "comet",
+}
+
+
+def _norm_kind(value):
+    """`kind` を "all"/"asteroid"/"comet" に正規化する。
+
+    戻り: (kind, 生の入力, 解釈できなかったか)。解釈できない値は既定の "all" に落とすが、
+    黙って別のものを返さないよう本文に注記する（引数の誤りを隠さない）。
+    """
+    raw = "" if value is None else str(value).strip()
+    if not raw:
+        return "all", raw, False
+    hit = _KIND_ALIASES.get(raw.lower())
+    if hit:
+        return hit, raw, False
+    return "all", raw, True
+
+
+def _cad_params(days: int, dist: float, limit: int, hazardous_only: bool,
+                want: str) -> dict:
+    """CAD の照会パラメータを組む（want="asteroid" / "comet"）。
+
+    **小惑星と彗星は別々に照会する**。実測（2026-10-15）: 既定の `neo=true` は彗星を
+    1件も返さず、`nea-comet=true` も同じ 243 件で彗星を含まなかった（彗星 169P が
+    0.17 au まで接近した 2026-08 の窓で 0 件）。彗星が返るのは `comet=true` だけ。
+    そのため kind="all" はこの2つの照会を結合して返す。
+    """
+    params = {"date-min": "now", "date-max": "+{}".format(days),
+              "dist-max": "{:g}".format(dist), "sort": "date", "limit": limit,
+              "diameter": "true", "fullname": "true"}
+    if want == "comet":
+        params["comet"] = "true"      # PHA は小惑星の区分なので彗星には付けない
+    else:
+        params["neo"] = "true"        # 既定だが明示する（既定が変わっても挙動を固定）
+        if hazardous_only:
+            params["pha"] = "true"
+    return params
+
+
+def _cad_result_row(rec: dict, object_type: str, *, hazardous_only: bool,
+                    show_type: bool) -> tuple:
+    """CAD の1レコード → (本文の行, structuredContent の行, jd)。
+
+    本文と JSON で同じ値を使い、両者が食い違わないようにする。彗星は絶対等級 H を
+    持たない（実測: `h` は null）ため直径は「不明」のままにする（推定しない）。
+    """
+    des = str(rec.get("des") or "?").strip()
+    km = _au_to_km(rec.get("dist"))
+    lunar = _lunar_distances(km)
+    dia_km = _num(rec.get("diameter"))
+    if dia_km is not None:
+        dia_m = dia_km * 1000.0
+        dia_text = "既知の直径 約 {:.3g} m".format(dia_m)
+    else:
+        dia_m = _diameter_from_h(rec.get("h"))
+        dia_text = ("推定直径 約 {:.3g} m（H={} から換算・アルベド{} 仮定）".format(
+            dia_m, _fmt_num(rec.get("h"), digits=4), ALBEDO_ASSUMED)
+            if dia_m is not None else "直径 不明")
+    is_comet = object_type == "comet"
+    label = ("（彗星）" if is_comet else "（小惑星）") if show_type else ""
+    line = ("- {mark}**{des}**{label} ／ {cd} TDB ／ 地心距離 {dist} au"
+            "（{km:,.0f} km・{lunar:.2f} 月距離）／ 相対速度 {vel} ／ {dia}").format(
+        mark="☄️ " if is_comet else "", des=des, label=label,
+        cd=str(rec.get("cd") or "").strip(), dist=_fmt_num(rec.get("dist"), digits=5),
+        km=km or 0.0, lunar=lunar or 0.0, vel=_fmt_num(rec.get("v_rel"), " km/s"),
+        dia=dia_text)
+    if hazardous_only and not is_comet:
+        line += "／ ⚠️ 潜在的に危険な小惑星(PHA)"
+    line += "／ 接近時刻の不確かさ {}".format(_uncertainty_text(rec.get("t_sigma_f")))
+    row = {
+        "designation": des,
+        "object_type": object_type,
+        "fullname": str(rec.get("fullname") or "").strip() or None,
+        "orbit_id": rec.get("orbit_id"),
+        "close_approach": str(rec.get("cd") or "").strip(),
+        "distance_au": _num(rec.get("dist")),
+        "distance_km": None if km is None else round(km, 1),
+        "distance_lunar": None if lunar is None else round(lunar, 3),
+        "distance_min_au": _num(rec.get("dist_min")),
+        "distance_max_au": _num(rec.get("dist_max")),
+        "relative_velocity_km_s": _num(rec.get("v_rel")),
+        "v_infinity_km_s": _num(rec.get("v_inf")),
+        "uncertainty": _uncertainty_text(rec.get("t_sigma_f")),
+        "h": _num(rec.get("h")),
+        "diameter_km": dia_km,
+        "diameter_sigma_km": _num(rec.get("diameter_sigma")),
+        "estimated_diameter_m": None if dia_m is None else round(dia_m, 3),
+        "diameter_is_estimate": dia_km is None and dia_m is not None,
+        "url": _sbdb_url(des),
+    }
+    return line, row, _num(rec.get("jd"))
+
+
 @ttl_cache(TTL_HOURLY, maxsize=32, skip_if=is_error_result)
 def neo_close_approach(days: int = 7, max_distance_au: float = 0.05, limit: int = 10,
-                       hazardous_only: bool = False) -> CallToolResult:
+                       hazardous_only: bool = False, kind: str = "all") -> CallToolResult:
     """小惑星・彗星の地球接近（近地球天体の接近イベント）を返す（認証不要・APIキー不要）。
 
     JPL SBDB の接近データ（CAD）から、これから接近する小天体を返します。
@@ -569,6 +675,7 @@ def neo_close_approach(days: int = 7, max_distance_au: float = 0.05, limit: int 
     から取得）より広い期間・距離を扱え、DEMO_KEY の共有枠も消費しません。
 
     例:「今日/今週地球に接近する小惑星」「危険な小惑星の接近予報」「月距離以内に来る天体」
+        「地球に接近する彗星」
 
     content に表示用サマリ、structuredContent に JSON を返します。
 
@@ -577,9 +684,17 @@ def neo_close_approach(days: int = 7, max_distance_au: float = 0.05, limit: int 
         max_distance_au: 接近距離の上限（au、既定 0.05 ≒ 19.5 月距離。0.00256 au ≒ 1 LD）。
         limit: 表示する最大件数（1〜50、既定 10）。接近時刻の早い順。
         hazardous_only: True なら「潜在的に危険な小惑星(PHA)」だけに絞ります。
+            PHA は**小惑星の区分**なので彗星は含めません（彗星に PHA はありません）。
+        kind: 対象の種別。"all"（既定＝小惑星＋彗星）/"asteroid"（小惑星のみ）/
+            "comet"（彗星のみ）。`a`/`c` や「小惑星」「彗星」も受け付けます。
+
+    **小惑星と彗星は別の照会で取ります**（実測: CAD の既定 `neo=true` も
+    `nea-comet=true` も彗星を1件も返さず、`comet=true` だけが返す）。彗星の接近は
+    小惑星よりずっと稀なので、`kind="comet"` で 0 件でも異常ではありません。
 
     既知の直径がある天体はそれを、無い天体は絶対等級 H から**推定**した直径
-    （アルベド0.14 仮定）を返します。接近時刻の不確かさ（3σ）も返します。
+    （アルベド0.14 仮定）を返します。彗星は H を持たないため直径は不明のままです。
+    接近時刻の不確かさ（3σ）も返します。
 
     出典: NASA/JPL CNEOS SBDB Close-Approach Data API（ssd-api.jpl.nasa.gov）
     """
@@ -588,81 +703,71 @@ def neo_close_approach(days: int = 7, max_distance_au: float = 0.05, limit: int 
     dist = as_float(max_distance_au, 0.05, 0.0001, 5.0)
     if dist is None:
         dist = 0.05
+    kind, kind_raw, kind_unknown = _norm_kind(kind)
 
-    params = {"date-min": "now", "date-max": "+{}".format(days),
-              "dist-max": "{:g}".format(dist), "sort": "date", "limit": limit,
-              "diameter": "true", "fullname": "true"}
-    if hazardous_only:
-        params["pha"] = "true"
+    want = [w for w, on in (("asteroid", kind != "comet"), ("comet", kind != "asteroid"))
+            if on]
+    if hazardous_only and kind == "all":
+        # PHA は小惑星の区分。混ぜると「危険な小惑星」の一覧に彗星が紛れ込むので取らない
+        # （kind="comet" を明示されたときは彗星を返し、pha は付けない）。
+        want = ["asteroid"]
+    records_by_kind, totals = {}, {}
+    for want_kind in want:
+        params = _cad_params(days, dist, limit, hazardous_only, want_kind)
+        try:
+            payload = _get_json("cad.api", params)
+        except requests.RequestException as e:
+            detail = _http_detail(e)
+            return _error_result(
+                "JPL の接近データを取得できませんでした: {}{}".format(
+                    str(e)[:150], "（{}）".format(detail) if detail else ""),
+                endpoint="cad.api", params=params)
+        err = _api_error(payload)
+        if err:
+            return _error_result("接近データの取得に失敗しました: {}".format(err),
+                                 endpoint="cad.api", params=params)
+        recs = _records(payload)
+        got = as_int(payload.get("total"), len(recs), 0)
+        totals[want_kind] = len(recs) if got is None else got
+        records_by_kind[want_kind] = recs
 
-    try:
-        payload = _get_json("cad.api", params)
-    except requests.RequestException as e:
-        detail = _http_detail(e)
-        return _error_result(
-            "JPL の接近データを取得できませんでした: {}{}".format(
-                str(e)[:150], "（{}）".format(detail) if detail else ""),
-            endpoint="cad.api", params=params)
-    err = _api_error(payload)
-    if err:
-        return _error_result("接近データの取得に失敗しました: {}".format(err),
-                             endpoint="cad.api", params=params)
+    # 2つの照会を接近時刻の早い順に統合して切る（各照会が日付昇順なので、
+    # 上位 limit 件は必ずどちらかの上位 limit 件に入っている）。
+    merged = []
+    for want_kind in want:
+        for rec in records_by_kind[want_kind]:
+            line, row, jd = _cad_result_row(rec, want_kind,
+                                            hazardous_only=bool(hazardous_only),
+                                            show_type=(kind == "all"))
+            merged.append((float("inf") if jd is None else jd, line, row))
+    merged.sort(key=lambda item: item[0])
 
-    records = _records(payload)
-    total = as_int(payload.get("total"), len(records), 0)
-    if total is None:
-        total = len(records)
     results, lines = [], []
-    for rec in records:
-        des = str(rec.get("des") or "?").strip()
-        km = _au_to_km(rec.get("dist"))
-        lunar = _lunar_distances(km)
-        dia_km = _num(rec.get("diameter"))
-        if dia_km is not None:
-            dia_m = dia_km * 1000.0
-            dia_text = "既知の直径 約 {:.3g} m".format(dia_m)
-        else:
-            dia_m = _diameter_from_h(rec.get("h"))
-            dia_text = ("推定直径 約 {:.3g} m（H={} から換算・アルベド{} 仮定）".format(
-                dia_m, _fmt_num(rec.get("h"), digits=4), ALBEDO_ASSUMED)
-                if dia_m is not None else "直径 不明")
-        row = "- **{}** ／ {} TDB ／ 地心距離 {} au（{:,.0f} km・{:.2f} 月距離）／ " \
-              "相対速度 {} ／ {}".format(
-                  des, str(rec.get("cd") or "").strip(), _fmt_num(rec.get("dist"), digits=5),
-                  km or 0.0, lunar or 0.0, _fmt_num(rec.get("v_rel"), " km/s"), dia_text)
-        if hazardous_only:
-            row += "／ ⚠️ 潜在的に危険な小惑星(PHA)"
-        row += "／ 接近時刻の不確かさ {}".format(_uncertainty_text(rec.get("t_sigma_f")))
-        lines.append(row)
-        results.append({
-            "designation": des,
-            "fullname": str(rec.get("fullname") or "").strip() or None,
-            "orbit_id": rec.get("orbit_id"),
-            "close_approach": str(rec.get("cd") or "").strip(),
-            "distance_au": _num(rec.get("dist")),
-            "distance_km": None if km is None else round(km, 1),
-            "distance_lunar": None if lunar is None else round(lunar, 3),
-            "distance_min_au": _num(rec.get("dist_min")),
-            "distance_max_au": _num(rec.get("dist_max")),
-            "relative_velocity_km_s": _num(rec.get("v_rel")),
-            "v_infinity_km_s": _num(rec.get("v_inf")),
-            "uncertainty": _uncertainty_text(rec.get("t_sigma_f")),
-            "h": _num(rec.get("h")),
-            "diameter_km": dia_km,
-            "diameter_sigma_km": _num(rec.get("diameter_sigma")),
-            "estimated_diameter_m": None if dia_m is None else round(dia_m, 3),
-            "diameter_is_estimate": dia_km is None,
-            "url": _sbdb_url(des),
-        })
+    for _jd, line, row in merged[:limit]:
+        lines.append(line)
+        results.append(row)
+
+    total = sum(totals.values())
+    shown = len(results)
 
     # 呼び出した結果をカレンダーの蓄積ストアへ入れる（後日の space_calendar / calendar_events に出る）
-    stored = _store_events(_neo_calendar_records(results, days=days, dist=dist), SOURCE_NEO,
-                           "neo_close_approach:{}:days={}:dist={:g}au".format(
+    stored = _store_events(_neo_calendar_records(results, days=days, dist=dist, kind=kind),
+                           SOURCE_NEO,
+                           "neo_close_approach:{}:days={}:dist={:g}au:kind={}".format(
                                _dt.datetime.now(_dt.timezone.utc).date().isoformat(),
-                               days, dist))
+                               days, dist, kind))
 
-    head = "☄️ **JPL CNEOS 小惑星・彗星の地球接近** {}日以内・{} au 以内: 全{}件中{}件".format(
-        days, "{:g}".format(dist), total, len(results))
+    if kind == "comet":
+        subject = "彗星"
+    elif kind == "asteroid":
+        subject = "小惑星"
+    else:
+        subject = "小惑星・彗星"
+    head = "☄️ **JPL CNEOS {}の地球接近** {}日以内・{} au 以内: 全{}件中{}件".format(
+        subject, days, "{:g}".format(dist), total, shown)
+    if kind == "all":
+        head += "（小惑星 {}・彗星 {}）".format(totals.get("asteroid", 0),
+                                               totals.get("comet", 0))
     notes = [
         "",
         "ℹ️ **接近＝衝突ではありません**。距離は地球中心からの距離（地心距離）で、"
@@ -670,22 +775,39 @@ def neo_close_approach(days: int = 7, max_distance_au: float = 0.05, limit: int 
         "ℹ️ 直径は観測からの**推定**です（既知の直径があればそれを、無ければ絶対等級 H と"
         "アルベド{} の仮定から換算）。接近時刻は TDB（力学時）で表示しています。".format(
             ALBEDO_ASSUMED),
+        "ℹ️ 小惑星と彗星は JPL への**別々の照会**で取っています（彗星が返るのは "
+        "`comet=true` の照会だけで、既定の `neo=true` は小惑星のみを返します）。",
         ("ℹ️ この結果 {} 件をカレンダーの蓄積ストアへ反映しました"
          "（`space_calendar` / `calendar_events` に表示されます）".format(stored)
          if stored else
          "ℹ️ カレンダーへの蓄積はできませんでした（蓄積ストアに書き込めませんでした）"),
         "出典: NASA/JPL CNEOS（ssd-api.jpl.nasa.gov）／ 各天体の詳細は JPL SBDB で確認できます。",
     ]
+    if kind_unknown:
+        notes.insert(1, "⚠️ `kind` に解釈できない値「{}」が渡されたため、"
+                        "`all`（小惑星＋彗星）として扱いました。".format(kind_raw[:40]))
+    if hazardous_only and kind != "asteroid":
+        notes.insert(1, "ℹ️ `hazardous_only=True` は **PHA（潜在的に危険な小惑星）**の"
+                        "区分なので、彗星は絞り込みに使えません"
+                        + ("（`kind=\"all\"` でも彗星は含めていません）。"
+                           if kind == "all" else "（彗星には PHA が無いため、"
+                                                 "この照会では彗星を絞り込んでいません）。"))
     if not results:
-        lines.append("この期間・距離に該当する接近はありませんでした"
-                     "（`days` か `max_distance_au` を広げてください）。")
+        if kind == "comet":
+            lines.append("この期間・距離に該当する**彗星**の接近はありませんでした"
+                         "（彗星の接近は小惑星よりずっと稀です。`days` か "
+                         "`max_distance_au` を広げてください）。")
+        else:
+            lines.append("この期間・距離に該当する接近はありませんでした"
+                         "（`days` か `max_distance_au` を広げてください）。")
     return CallToolResult(
         content=[TextContent(type="text", text="\n".join([head] + lines + notes))],
         structuredContent={
             "source": "NASA/JPL CNEOS SBDB Close-Approach Data API",
             "days": days, "max_distance_au": dist, "hazardous_only": hazardous_only,
-            "total": total, "shown": len(results),
-            "truncated": total > len(results),
+            "kind": kind, "totals_by_kind": totals,
+            "total": total, "shown": shown,
+            "truncated": total > shown,
             "calendar_stored": stored, "results": results,
         })
 

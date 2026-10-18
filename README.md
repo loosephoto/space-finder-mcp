@@ -99,7 +99,7 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 
 ## 📝 更新履歴
 
-各バージョンの変更内容は **[GitHub Releases](https://github.com/loosephoto/space-finder-mcp/releases)** に記載しています（最新: [v0.39.2](https://github.com/loosephoto/space-finder-mcp/releases/tag/v0.39.2)）。
+各バージョンの変更内容は **[GitHub Releases](https://github.com/loosephoto/space-finder-mcp/releases)** に記載しています（最新: [v0.39.3](https://github.com/loosephoto/space-finder-mcp/releases/tag/v0.39.3)）。
 
 **README では履歴を二重管理しません** — 同じ内容を2か所に書くと必ず片方が古くなるため、変更点はリリース時に GitHub Releases の本文へ書きます（手順は [`CLAUDE.md`](CLAUDE.md) の「リリース手順」）。
 
@@ -310,7 +310,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `eodashboard_detail` | EO Dashboardの1データセットの詳細（衛星・センサー・説明・画像・参照リンク） | EO Dashboard (GitHub catalog) | 不要 |
 | `space_weather` | 宇宙天気（太陽フレア・CME・地磁気嵐・太陽粒子現象）と**予報**（`kind="forecast"`: フレア発生確率 C/M/X・活動領域別確率・NOAA 3日予報）。**DONKI が障害・URL 変更のときは認証不要の NOAA SWPC（Kp・NOAAスケール・GOES X線・フレアイベント（直近7日）・太陽風・陽子・警報・黒点）へ自動切替**（出典を明記）。予報は DONKI に無いため**常に SWPC から取得** | NASA DONKI（CCMC）→ **NOAA SWPC（フォールバック）**／予報は **NOAA SWPC** | 不要 |
 | `fireball_reports` | **火球（大気圏突入）の観測記録**（直近1〜1825日・衝突エネルギーの下限指定可）。緯度経度・突入高度・**衝突エネルギー(kt)**・放射エネルギー(J)・突入速度（成分から算出）。広島型原爆（約15kt）との比を併記。⚠️ 隕石の回収情報ではなく**大気圏突入の観測**。**呼ぶと結果がカレンダーの蓄積ストアに入り、後日 `space_calendar` / `calendar_events` に出ます**（`calendar_stored` に件数） | NASA/JPL CNEOS Fireball Data | 不要 |
-| `neo_close_approach` | **小惑星・彗星の地球接近**（1〜365日先・距離上限 au）。地心距離を **au / km / 月距離**で併記し、既知の直径（無ければ絶対等級 H から**推定**・アルベド0.14 仮定）と接近時刻の不確かさを返す。`hazardous_only` で PHA のみ。⚠️ 接近は衝突ではない。**呼ぶと結果がカレンダーに蓄積され、後日 `space_calendar` / `calendar_events` に反映されます**（接近時刻は TDB・UTC とは最大約1分差） | NASA/JPL CNEOS SBDB CAD | 不要 |
+| `neo_close_approach` | **小惑星・彗星の地球接近**（1〜365日先・距離上限 au・`kind`＝`"all"`（既定＝小惑星＋彗星）/ `"asteroid"` / `"comet"`）。地心距離を **au / km / 月距離**で併記し、既知の直径（無ければ絶対等級 H から**推定**・アルベド0.14 仮定。彗星は H が無いので不明のまま）と接近時刻の不確かさを返す。`kind="all"` では各行に**種別（小惑星／彗星）**を併記する。`hazardous_only` で PHA のみ（PHA は小惑星の区分なので彗星は含めない）。⚠️ 接近は衝突ではない。**呼ぶと結果がカレンダーに蓄積され、後日 `space_calendar` / `calendar_events` に反映されます**（接近時刻は TDB・UTC とは最大約1分差） | NASA/JPL CNEOS SBDB CAD | 不要 |
 | `impact_risk` | **将来の衝突リスク**（JPL Sentry）。累積衝突確率を**確率＋「何回に1回」**で表示し、パレルモスケール・想定時期・想定衝突数を返す。`designation`（**仮符号/番号のみ・和名不可**）を指定すると仮想衝突(VI)の一覧まで。⚠️ 確率は特定の日付ではなく**数十年〜百年の幅**に対する値なので**カレンダーには置きません** | NASA/JPL CNEOS Sentry | 不要 |
 | `stac_collections` | AWS Earth Searchの衛星データコレクション一覧 | AWS Earth Search STAC | 不要 |
 | `stac_search` | Sentinel-2 / Landsat / NAIP / DEM をSTAC検索（場所・日時・雲量） | AWS Earth Search STAC | 不要 |
@@ -615,6 +615,7 @@ A: space_weather(kind="forecast") → 発生確率（C/M/X・1〜3日）・活�
 
 - **`fireball_reports`** — 火球（fireball）は**大気圏に突入して光った現象**の観測記録です（米国政府センサ・地上観測の報告）。`days`（1〜1825）・`min_impact_energy_kt`（kt TNT 換算の下限）・`limit`（1〜50）・`require_location`（位置が報告された記録のみ）を指定できます。火球の**ゼロ件**は `data` キー自体が返らない（`count: 0` のみ）ため、その場合も「該当なし」として扱います。**隕石の回収・落下物の推定はしません**（落下物の情報が欲しい場合は別の情報源が必要です）。
 - **`neo_close_approach`** — `days`（1〜365）・`max_distance_au`（既定 0.05 ≒ 19.5 月距離。1 LD ≒ 0.00256 au）・`limit`・`hazardous_only`（PHA のみ）。距離は **au / km / 月距離(LD)** の3通りで併記します。直径は**既知の値があればそれを、無ければ絶対等級 H とアルベド 0.14 の仮定から換算**した推定値で、推定の場合はその旨を表示と `structuredContent`（`diameter_is_estimate`）に残します。**接近時刻は TDB**（力学時）で、`t_sigma_f`（3σ の不確かさ）も返します。`neo_today` との違いは「今日だけ・api.nasa.gov のキー枠」ではなく、**任意の期間・距離**を扱えることです。
+- **`neo_close_approach` の小惑星と彗星（`kind`）** — `kind="all"`（既定）は**小惑星＋彗星**を返します。JPL の CAD は**既定の `neo=true` が小惑星だけ**を返し（実測: 彗星 169P/NEAT が 0.17 au まで接近した 2026-08 の窓でも彗星は 0 件。`nea-comet=true` も同じ 243 件で彗星を含まなかった）、彗星が返るのは **`comet=true` の照会だけ**なので、**小惑星と彗星を別々に照会して接近時刻の早い順に統合**しています（`structuredContent.kind` / `totals_by_kind` に内訳、`results[].object_type` に種別）。彗星は絶対等級 H を持たないため**直径は推定しません**（「不明」と表示）。彗星の接近は小惑星よりずっと稀なので、`kind="comet"` で 0 件でも異常ではありません（その旨を本文に出します）。`kind="asteroid"` は従来と同じ挙動（彗星の照会をしません）。
 - **カレンダーへの反映（v0.34.0）** — `neo_close_approach` / `fireball_reports` を呼ぶと、返した行がそのまま**蓄積ストア**（`%LOCALAPPDATA%\space-finder-mcp\calendar_store.json`）の `neo` / `fireball` レコードになり、**後日 `space_calendar` / `calendar_events` に表示**されます（`structuredContent.calendar_stored` に件数、`content` にも「◯件を反映しました」と出ます。書けなかった場合はその旨を出し、例外にはしません）。接近は**日付セルに置ける**（時刻が確定した計算値。蓄積時に TDB である旨を併記）一方、火球は**過去の観測記録**として置き、落下地点ではない旨を併記します。**`impact_risk` は日付が無い**（数十年〜百年の幅の確率）ため蓄積しません。保持期限は既存の規則どおり **45日**（古い API 由来レコードは prune。ユーザー予定は対象外）。
 
 - **`impact_risk`** — Sentry の**衝突確率の推算**です（進路が確定した衝突予報ではありません）。`min_probability`（既定 1e-3 = 0.1%）以上の天体を確率の高い順に返し、`designation` を指定すると1天体の詳細（累積確率・想定時期・仮想衝突(VI)・観測弧・パレルモスケール）を返します。`designation` は**仮符号または番号**（例 `"2024 YR4"` / `"2000 SG344"` / `"99942"`）で、**和名・愛称は JPL 側が受け付けません**（推測せず指定方法を案内します）。**確率が 0 になった天体は Sentry から削除され、HTTP 200 + `error` で返る**ため、それを検査して「リスクなし（監視対象から外れた）」を意味しうる旨を案内します。
@@ -625,6 +626,7 @@ Q: 最近の火球は?                  A: fireball_reports(days=30)
 Q: 大きな火球だけ                   A: fireball_reports(days=365, min_impact_energy_kt=1)
 Q: 今週接近する小惑星               A: neo_close_approach(days=7)
 Q: 月距離以内に来る天体             A: neo_close_approach(days=30, max_distance_au=0.0026)
+Q: 地球に接近する彗星               A: neo_close_approach(days=365, max_distance_au=0.3, kind="comet")
 Q: 危険な小惑星は?                  A: impact_risk()
 Q: 2024 YR4 の衝突リスク            A: impact_risk(designation="2024 YR4")
 ```

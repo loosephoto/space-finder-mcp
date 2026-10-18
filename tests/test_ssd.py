@@ -84,6 +84,23 @@ CAD_PAYLOAD = {
     ],
 }
 
+CAD_EMPTY = {"count": 0,
+             "signature": {"version": "1.5",
+                           "source": "NASA/JPL SBDB Close Approach Data API"}}
+
+# 彗星の照会（`comet=true`）だけが返す形。実測: 彗星は `h` も `diameter` も null。
+CAD_COMET_PAYLOAD = {
+    "signature": {"version": "1.5", "source": "NASA/JPL SBDB Close Approach Data API"},
+    "count": 1, "total": 1,
+    "fields": ["des", "orbit_id", "jd", "cd", "dist", "dist_min", "dist_max", "v_rel",
+               "v_inf", "t_sigma_f", "h", "diameter", "diameter_sigma", "fullname"],
+    "data": [
+        ["169P", "168", "2461264.315354597", "2026-Aug-11 19:34", "0.167171786787124",
+         "0.167171621680593", "0.167171951893654", "19.8967758151758", "19.8959747360621",
+         "< 00:01", None, None, None, "169P/NEAT"],
+    ],
+}
+
 SENTRY_SUMMARY = {
     "signature": {"version": "2.0", "source": "NASA/JPL Sentry Data API"},
     "count": 3,
@@ -237,8 +254,19 @@ class CloseApproachTests(unittest.TestCase):
         from space_finder_mcp import ssd
         self.ssd = ssd
 
-    def _run(self, payload, **kw):
-        with mock.patch.object(self.ssd, "_get_json", lambda *a, **k: payload):
+    def _run(self, payload, comet_payload=None, seen=None, **kw):
+        """小惑星の照会には payload、彗星の照会には comet_payload（既定は 0 件）を返す。
+
+        ツールは小惑星と彗星を**別々に照会する**（彗星が返るのは `comet=true` だけ）ので、
+        呼び出し側も同じ形で応答を返さないと実際の挙動を再現しない。
+        """
+        comet_payload = CAD_EMPTY if comet_payload is None else comet_payload
+
+        def fake(endpoint, params=None):
+            if seen is not None:
+                seen.append(dict(params or {}))
+            return comet_payload if (params or {}).get("comet") else payload
+        with mock.patch.object(self.ssd, "_get_json", fake):
             return self.ssd.neo_close_approach.__wrapped__(**kw)
 
     def test_distance_is_converted_to_km_and_lunar_distances(self):
@@ -294,6 +322,90 @@ class CloseApproachTests(unittest.TestCase):
             res = self.ssd.neo_close_approach.__wrapped__(hazardous_only=True)
         self.assertEqual(seen["pha"], "true")
         self.assertEqual(res.structuredContent["shown"], 0)
+
+    def test_comet_query_uses_comet_flag_and_merges_by_date(self):
+        """彗星は `comet=true` の別照会で取り、日付順に小惑星と統合する。"""
+        seen = []
+        res = self._run(CAD_PAYLOAD, comet_payload=CAD_COMET_PAYLOAD, seen=seen)
+        self.assertEqual([p.get("comet") for p in seen], [None, "true"])   # 小惑星→彗星
+        self.assertEqual(seen[0]["neo"], "true")
+        self.assertNotIn("pha", seen[1])                                   # 彗星に PHA は無い
+        sc = res.structuredContent
+        self.assertEqual(sc["kind"], "all")
+        self.assertEqual(sc["totals_by_kind"], {"asteroid": 16, "comet": 1})
+        self.assertEqual(sc["total"], 17)
+        self.assertEqual(sc["shown"], 3)
+        self.assertTrue(sc["truncated"])
+        # 8/11（彗星）→ 9/21 → 10/16 の順に並ぶ
+        self.assertEqual([r["object_type"] for r in sc["results"]],
+                         ["comet", "asteroid", "asteroid"])
+        text = res.content[0].text
+        self.assertIn("（小惑星 16・彗星 1）", text)
+        self.assertIn("☄️ **169P**（彗星）", text)
+        self.assertIn("（小惑星）", text)          # 混在時だけ種別を添える
+        self.assertIn("直径 不明", text)            # 彗星は H が無い → 推定しない
+
+    def test_kind_comet_queries_only_comets(self):
+        seen = []
+        res = self._run(CAD_EMPTY, comet_payload=CAD_COMET_PAYLOAD, seen=seen, kind="comet")
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0]["comet"], "true")
+        self.assertNotIn("neo", seen[0])
+        sc = res.structuredContent
+        self.assertEqual(sc["kind"], "comet")
+        self.assertEqual(sc["total"], 1)
+        self.assertEqual([r["object_type"] for r in sc["results"]], ["comet"])
+        text = res.content[0].text
+        self.assertIn("JPL CNEOS 彗星の地球接近", text)
+        self.assertNotIn("（小惑星）", text)        # 彗星だけなら種別ラベルは付けない
+
+    def test_kind_asteroid_keeps_previous_behaviour(self):
+        """`kind="asteroid"` は従来と同じ（彗星の照会をしない・種別ラベルも付けない）。"""
+        seen = []
+        res = self._run(CAD_PAYLOAD, seen=seen, kind="asteroid")
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0]["neo"], "true")
+        self.assertNotIn("comet", seen[0])
+        self.assertEqual(res.structuredContent["kind"], "asteroid")
+        self.assertEqual(res.structuredContent["total"], 16)
+        self.assertIn("JPL CNEOS 小惑星の地球接近", res.content[0].text)
+        self.assertNotIn("（小惑星）", res.content[0].text)
+
+    def test_kind_aliases_are_accepted(self):
+        """`c`/`彗星` などの別名も彗星として扱う（誤った種別を黙って返さない）。"""
+        for alias in ("c", "C", "comets", "彗星", " comet "):
+            seen = []
+            res = self._run(CAD_EMPTY, comet_payload=CAD_COMET_PAYLOAD, seen=seen,
+                            kind=alias)
+            self.assertEqual(len(seen), 1, alias)
+            self.assertEqual(seen[0].get("comet"), "true", alias)
+            self.assertEqual(res.structuredContent["kind"], "comet", alias)
+
+    def test_unknown_kind_falls_back_to_all_and_says_so(self):
+        seen = []
+        res = self._run(CAD_PAYLOAD, seen=seen, kind="komet")
+        self.assertEqual([p.get("comet") for p in seen], [None, "true"])
+        self.assertEqual(res.structuredContent["kind"], "all")
+        self.assertIn("解釈できない値「komet」", res.content[0].text)
+
+    def test_hazardous_only_does_not_pull_in_comets(self):
+        """PHA は小惑星の区分。hazardous_only のときは彗星を照会しない旨を本文に出す。"""
+        seen = []
+        res = self._run(CAD_PAYLOAD, seen=seen, hazardous_only=True)
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0]["pha"], "true")
+        self.assertNotIn("comet", seen[0])
+        self.assertIn("PHA", res.content[0].text)
+        self.assertIn("彗星", res.content[0].text)
+
+    def test_empty_comet_result_is_explained(self):
+        """彗星が 0 件なのは異常ではない（小惑星よりずっと稀）と本文で説明する。"""
+        res = self._run(CAD_EMPTY, kind="comet")
+        text = res.content[0].text
+        self.assertEqual(res.structuredContent["shown"], 0)
+        self.assertIn("彗星**の接近はありませんでした", text)
+        self.assertIn("稀", text)
+        self.assertNotIn("error", res.structuredContent)
 
     def test_port_and_timeouts_are_fixed(self):
         """(connect, read) タイムアウトを必ず指定する（規約14）。"""
@@ -440,7 +552,9 @@ class AnomalyCalendarStoreTests(unittest.TestCase):
         self.assertIn("fireball_reports の呼び出しで蓄積", recs[0]["source"])   # 来歴
 
     def test_neo_call_stores_records_with_tdb_note(self):
-        with mock.patch.object(self.ssd, "_get_json", return_value=CAD_PAYLOAD):
+        def fake(endpoint, params=None):
+            return CAD_EMPTY if (params or {}).get("comet") else CAD_PAYLOAD
+        with mock.patch.object(self.ssd, "_get_json", fake):
             res = self.ssd.neo_close_approach.__wrapped__(days=7)
         self.assertEqual(res.structuredContent["calendar_stored"], 2)
         recs = self.store.records(kinds={"neo"})
@@ -450,6 +564,18 @@ class AnomalyCalendarStoreTests(unittest.TestCase):
         self.assertIn("TDB", recs[0]["detail"])
         self.assertIn("接近 ≠ 衝突", recs[0]["detail"])
         self.assertIn("neo_close_approach の呼び出しで蓄積", recs[0]["source"])
+
+    def test_stored_records_label_the_actual_object_type(self):
+        """`kind="all"` の蓄積でも彗星を「小惑星」と記録しない（行ごとの種別を使う）。"""
+        def fake(endpoint, params=None):
+            return CAD_COMET_PAYLOAD if (params or {}).get("comet") else CAD_PAYLOAD
+        with mock.patch.object(self.ssd, "_get_json", fake):
+            self.ssd.neo_close_approach.__wrapped__(days=365, max_distance_au=0.3)
+        by_des = {r["title"].split(" 接近")[0]: r for r in self.store.records(kinds={"neo"})}
+        self.assertEqual(sorted(by_des), ["169P", "2019 OK", "2026 SM9"])
+        self.assertIn("種類: 彗星", by_des["169P"]["detail"])
+        self.assertIn("種類: 小惑星", by_des["2026 SM9"]["detail"])
+        self.assertIn("種類: 小惑星", by_des["2019 OK"]["detail"])
 
     def test_unparsable_rows_are_skipped_not_crashed(self):
         payload = {"fields": ["des", "cd", "dist"], "data": [["X", "いつか", "0.01"]]}
