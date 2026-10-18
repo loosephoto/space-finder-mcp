@@ -7,6 +7,91 @@ import requests
 sys.path.insert(0, "src")
 
 
+class OverviewLabelBoxTests(unittest.TestCase):
+    """表示範囲を絞った俯瞰図で、彗星・小惑星・探査機のラベル箱が惑星マーカーを覆わないこと。
+
+    実測（2026-10-18）: `solar_system_now(range_au="fit", comet="エンケ彗星", route=True)` で
+    地球が彗星のラベル箱（320×42px）の下に隠れ、`figure.verify.ok=False` になった（地球の
+    画素 0px）。ラベル箱は「マーカーの右 → はみ出したら左」で置いていたため、左へ回り込むと
+    内側の惑星マーカーを覆っていた（惑星のラベル箱だけがマーカーの描き直しで守られていた）。
+    対策は二段: (a) 彗星・小惑星・探査機のラベルも `_place_rect` に空きを探させる、
+    (b) すべてのラベル箱を描いた後にマーカーを描き直す。
+    """
+
+    RANGE_AU = 4.3
+    CX = CY = 750.0
+
+    def _rpx(self, au):
+        import math
+        lo = min(0.30, self.RANGE_AU * 0.05)
+        return 620.0 * (math.log10(au) - math.log10(lo)) / (math.log10(self.RANGE_AU) - math.log10(lo))
+
+    def _xy(self, au, lon):
+        import math
+        r = self._rpx(au)
+        return (self.CX + r * math.cos(math.radians(lon)), self.CY + r * math.sin(math.radians(lon)))
+
+    def _scene(self, planet_lon=25.0, comet_lon=17.0, comet_au=2.0):
+        """日付に依存しない合成シーン（地球と彗星の位置だけ固定する）。
+
+        他の惑星は黄経 200° 側へ寄せ、彗星のラベル箱が回り込む側（黄経 0〜40°）を空ける。
+        """
+        from space_finder_mcp import solar_system as ss
+
+        scene = ss._compute(when_iso="2026-10-18T12:00:00Z")
+        self.assertNotIn("error", scene)
+        for jname, _k, _c, sma in ss._PLANETS:
+            scene["planets"][jname].update({"au": sma, "eclLon": 200.0, "eclLat": 0.0})
+        scene["planets"]["地球"].update({"au": 1.0, "eclLon": planet_lon, "eclLat": 0.0})
+        scene["comets"] = {"試験彗星": {"name": "試験彗星", "au": comet_au, "proj_au": comet_au,
+                                       "eclLon": comet_lon, "eclLat": 0.0}}
+        scene["range_au"] = self.RANGE_AU
+        return ss, scene
+
+    def test_comet_label_box_does_not_cover_planet_marker(self):
+        ss, scene = self._scene()
+        png = ss._render_simple(scene)
+        rep = ss._verify_range_draw(png, scene)
+        self.assertTrue(rep["ok"], rep)
+        earth = [c for c in rep["planets_drawn"] if c["name"] == "地球"]
+        self.assertTrue(earth and earth[0]["pixels_found"] >= 20, rep["planets_drawn"])
+        # 旧実装（右→はみ出したら左）はこの配置で地球を覆っていた
+        box = scene["comets"]["試験彗星"]["label_box"]
+        ex, ey = self._xy(1.0, 25.0)
+        self.assertFalse(box[0] <= ex <= box[2] and box[1] <= ey <= box[3],
+                         "彗星のラベル箱 {} が地球のマーカー ({:.0f}, {:.0f}) を覆っている".format(box, ex, ey))
+        # 空きを探すあまり自分のマーカーから逃げない（自分の座標は採点から除外している）
+        import math
+        mxc, myc = self._xy(2.0, 17.0)
+        self.assertLess(math.hypot((box[0] + box[2]) / 2.0 - mxc, (box[1] + box[3]) / 2.0 - myc),
+                        400.0, "彗星のラベル箱が自分のマーカーから離れすぎている {}".format(box))
+
+    def test_asteroid_label_box_does_not_cover_planet_marker(self):
+        """小惑星のラベル（240×30px）も同じ規則で置く。"""
+        ss, scene = self._scene()
+        scene["asteroids"] = {"試験小惑星": {"name": "試験小惑星", "au": 2.0, "eclLon": 17.0,
+                                            "eclLat": 0.0, "sma": 2.0}}
+        png = ss._render_simple(scene)
+        rep = ss._verify_range_draw(png, scene)
+        self.assertTrue(rep["ok"], rep)
+        box = scene["asteroids"]["試験小惑星"]["label_box"]
+        ex, ey = self._xy(1.0, 25.0)
+        self.assertFalse(box[0] <= ex <= box[2] and box[1] <= ey <= box[3],
+                         "小惑星のラベル箱 {} が地球のマーカーを覆っている".format(box))
+
+    def test_markers_are_redrawn_after_every_label_box(self):
+        """ラベルの空きが無い配置でも、マーカーは最後に描き直される（データを隠さない）。"""
+        ss, scene = self._scene()
+        scene["probes"] = {"試験探査機{:02d}".format(i): {
+            "name": "試験探査機{:02d}".format(i), "au": 3.0, "proj_au": 3.0,
+            "eclLon": 10.0 * i, "eclLat": 0.0, "color": [255, 214, 90]} for i in range(1, 12)}
+        png = ss._render_simple(scene)
+        rep = ss._verify_range_draw(png, scene)
+        self.assertTrue(rep["ok"], rep)
+        self.assertTrue(all(c["pixels_found"] >= 20 for c in rep["planets_drawn"]),
+                        rep["planets_drawn"])
+
+
 class RegressionTests(unittest.TestCase):
     def test_neo_error_content_redacts_api_key(self):
         from space_finder_mcp import nasa

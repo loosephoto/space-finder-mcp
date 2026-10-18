@@ -791,6 +791,37 @@ def _render_simple(scene):
     def scale(dist):
         return R0 * (math.log10(dist) - math.log10(lo)) / (math.log10(hi) - math.log10(lo))
 
+    def _place_rect(w, h, r_px, prefer=None, avoid=(), ignore_pts=()):
+        """リングの外側に置くラベル箱の位置を、占有領域との重なりが最小の角度で選ぶ。
+
+        `ignore_pts` は「そのラベル自身のマーカー」の座標（自分の真横に置くのが正しいので、
+        除外しないと自分から最も遠い角度へ逃げてしまう）。
+        """
+        best, best_pen = None, None
+        order = ([float(prefer)] if prefer is not None else []) + list(range(0, 360, 6))
+        for a_ in order:
+            th = math.radians(a_)
+            cxx = CX + (r_px + 18 + h / 2.0) * math.cos(th)
+            cyy = CY + (r_px + 18 + h / 2.0) * math.sin(th)
+            x0 = min(max(6, cxx - w / 2.0), W - w - 6)
+            y0 = min(max(112, cyy - h / 2.0), H - 62 - h)
+            pen = 0.0
+            for (ox0, oy0, ox1, oy1) in list(avoid) + _occ_rects:
+                _ox = min(x0 + w, ox1) - max(x0, ox0)
+                _oy = min(y0 + h, oy1) - max(y0, oy0)
+                if _ox > 0 and _oy > 0:
+                    pen += _ox * _oy
+            for (mx, my, mr) in _occ_pts:
+                if any(abs(mx - ix) < 1e-6 and abs(my - iy) < 1e-6 for (ix, iy) in ignore_pts):
+                    continue
+                if (x0 - mr) <= mx <= (x0 + w + mr) and (y0 - mr) <= my <= (y0 + h + mr):
+                    pen += 500.0 * mr
+            if best is None or pen < best_pen - 1e-9:
+                best, best_pen = (x0, y0, x0 + w, y0 + h), pen
+        if best is None:                       # 候補が尽きることは無いが、None は返さない
+            best = (6.0, 112.0, 6.0 + w, 112.0 + h)
+        return best
+
     img = Image.new("RGB", (W, H), (3, 4, 12))
     dr = ImageDraw.Draw(img)
 
@@ -904,6 +935,7 @@ def _render_simple(scene):
     # 大きく、後から描くと隣の惑星マーカーを隠す（表示範囲を絞ると環の間隔より箱が大きくなる。
     # 実測: range_au=10 で内惑星の画素が 0 になった）。
     _planet_draw = []
+    _marker_redraws = []          # ラベル箱に隠されないよう、最後にもう一度描くマーカー
 
     def _draw_planet_marker(px, py, rad, col, jname):
         halo = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -920,6 +952,45 @@ def _render_simple(scene):
         elif jname == "木星":
             dd.line([px - rad, py - 8, px + rad, py - 8], fill=symbol_rgb("band"), width=3)
             dd.line([px - rad, py + 5, px + rad, py + 5], fill=symbol_rgb("band"), width=3)
+
+    def _draw_asteroid_marker(px, py, rad):
+        halo = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        hd = ImageDraw.Draw(halo)
+        hd.ellipse([px - rad - 12, py - rad - 12, px + rad + 12, py + rad + 12],
+                   fill=(96, 230, 120, 160))
+        halo = halo.filter(ImageFilter.GaussianBlur(6))
+        img.paste(Image.alpha_composite(img.convert("RGBA"), halo).convert("RGB"), (0, 0))
+        dd = ImageDraw.Draw(img)
+        dd.line([px - rad - 7, py, px + rad + 7, py], fill=(200, 255, 215), width=2)
+        dd.line([px, py - rad - 7, px, py + rad + 7], fill=(200, 255, 215), width=2)
+        dd.ellipse([px - rad, py - rad, px + rad, py + rad], fill=symbol_rgb("asteroid"),
+                   outline=(220, 255, 230), width=2)
+
+    def _draw_comet_core(px, py, rad):
+        halo = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        hd = ImageDraw.Draw(halo)
+        hd.ellipse([px - rad - 16, py - rad - 16, px + rad + 16, py + rad + 16],
+                   fill=(230, 250, 255, 200))
+        halo = halo.filter(ImageFilter.GaussianBlur(8))
+        img.paste(Image.alpha_composite(img.convert("RGBA"), halo).convert("RGB"), (0, 0))
+        dd = ImageDraw.Draw(img)
+        dd.ellipse([px - rad, py - rad, px + rad, py + rad], fill=(225, 248, 255),
+                   outline=(255, 255, 255))
+
+    def _draw_probe_marker(px, py, rad, col):
+        halo = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        hd = ImageDraw.Draw(halo)
+        hd.ellipse([px - rad - 14, py - rad - 14, px + rad + 14, py + rad + 14], fill=col + (170,))
+        halo = halo.filter(ImageFilter.GaussianBlur(7))
+        img.paste(Image.alpha_composite(img.convert("RGBA"), halo).convert("RGB"), (0, 0))
+        dd = ImageDraw.Draw(img)
+        dd.polygon([(px, py - rad), (px + rad, py), (px, py + rad), (px - rad, py)],
+                   fill=col, outline=(255, 255, 255))
+
+    def _draw_route_mark(mx, my, col):
+        dd = ImageDraw.Draw(img)
+        dd.polygon([(mx, my - 6), (mx + 6, my), (mx, my + 6), (mx - 6, my)],
+                   fill=(10, 14, 24), outline=col, width=2)
 
     _labels = []
     for p in scene["planets"].values():
@@ -961,22 +1032,13 @@ def _render_simple(scene):
         rr = scale(d["au"])
         px, py = CX + rr * math.cos(ang), CY + rr * math.sin(ang)
         rad = 10
-        halo = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        hd = ImageDraw.Draw(halo)
-        hd.ellipse([px - rad - 12, py - rad - 12, px + rad + 12, py + rad + 12],
-                   fill=(96, 230, 120, 160))
-        halo = halo.filter(ImageFilter.GaussianBlur(6))
-        img.paste(Image.alpha_composite(img.convert("RGBA"), halo).convert("RGB"), (0, 0))
-        dr = ImageDraw.Draw(img)
-        dr.line([px - rad - 7, py, px + rad + 7, py], fill=(200, 255, 215), width=2)
-        dr.line([px, py - rad - 7, px, py + rad + 7], fill=(200, 255, 215), width=2)
-        dr.ellipse([px - rad, py - rad, px + rad, py + rad], fill=symbol_rgb("asteroid"),
-                   outline=(220, 255, 230), width=2)
+        _draw_asteroid_marker(px, py, rad)
+        _marker_redraws.append(("asteroid", (px, py, rad)))
         rr2 = scale(d["sma"])
         dr.ellipse([CX - rr2, CY - rr2, CX + rr2, CY + rr2], outline=symbol_rgb("asteroid"), width=2)
-        lx, ly = px + 16, py - 14
-        if lx + 240 > W:
-            lx = px - rad - 250
+        _b = _place_rect(240, 30, rr, prefer=d["eclLon"], ignore_pts=((px, py),))
+        lx, ly = _b[0], _b[1]
+        d["label_box"] = [int(v) for v in _b]
         dr.rectangle([lx, ly, lx + 240, ly + 30], fill=(10, 40, 18, 235))
         _occ_rects.append((lx, ly, lx + 240, ly + 30))
         _occ_pts.append((px, py, rad + 10))
@@ -995,14 +1057,8 @@ def _render_simple(scene):
         px, py = CX + rr * math.cos(ang), CY + rr * math.sin(ang)
         rad = 13
         dr.line([CX, CY, px, py], fill=col + (70,), width=1)
-        halo = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        hd = ImageDraw.Draw(halo)
-        hd.ellipse([px - rad - 14, py - rad - 14, px + rad + 14, py + rad + 14], fill=col + (170,))
-        halo = halo.filter(ImageFilter.GaussianBlur(7))
-        img.paste(Image.alpha_composite(img.convert("RGBA"), halo).convert("RGB"), (0, 0))
-        dr = ImageDraw.Draw(img)
-        dr.polygon([(px, py - rad), (px + rad, py), (px, py + rad), (px - rad, py)],
-                   fill=col, outline=(255, 255, 255))
+        _draw_probe_marker(px, py, rad, col)
+        _marker_redraws.append(("probe", (px, py, rad, col)))
         _ld_extra = ""
         if d.get("light_days") is not None:
             if d.get("light_day_reached"):
@@ -1013,10 +1069,9 @@ def _render_simple(scene):
             else:
                 _ld_extra = "1光日(173.14AU)まで {:.2f}AU".format(float(d["to_light_day_au"]))
         _bh = 60 if _ld_extra else 42
-        lx, ly = px + rad + 12, py - 16
-        if lx + 300 > W:
-            lx = px - rad - 310
-        lx = max(lx, 4); ly = max(112, min(ly, H - 62 - _bh))
+        _b = _place_rect(300, _bh, rr, prefer=d["eclLon"], ignore_pts=((px, py),))
+        lx, ly = _b[0], _b[1]
+        d["label_box"] = [int(v) for v in _b]
         dr.rectangle([lx, ly, lx + 300, ly + _bh], fill=(40, 20, 0, 235))
         _occ_rects.append((lx, ly, lx + 300, ly + _bh))
         _occ_pts.append((px, py, rad + 12))
@@ -1060,19 +1115,15 @@ def _render_simple(scene):
             dr = ImageDraw.Draw(img)
         # 核の光背
         rad = 11
-        halo = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        hd = ImageDraw.Draw(halo)
-        hd.ellipse([px - rad - 16, py - rad - 16, px + rad + 16, py + rad + 16], fill=(230, 250, 255, 200))
-        halo = halo.filter(ImageFilter.GaussianBlur(8))
-        img.paste(Image.alpha_composite(img.convert("RGBA"), halo).convert("RGB"), (0, 0))
-        dr = ImageDraw.Draw(img)
-        dr.ellipse([px - rad, py - rad, px + rad, py + rad], fill=(225, 248, 255),
-                   outline=(255, 255, 255))
+        _draw_comet_core(px, py, rad)
+        _marker_redraws.append(("comet", (px, py, rad)))
         # ラベル（真距離・黄緯を併記）
-        lx, ly = px + rad + 12, py - 16
-        if lx + 320 > W:
-            lx = px - rad - 330
-        lx = max(lx, 4)
+        # ラベル箱は 320×42px と大きく、素朴に「右→（はみ出したら）左」で置くと、左へ回り込んだ
+        # ときに内側の惑星マーカーを覆う（実測 2026-10-18: 地球が 0px になり --figures が落ちた）。
+        # 既存の _place_rect に、占有領域（他の箱・マーカー）との重なりが最小の角度を選ばせる。
+        _b = _place_rect(320, 42, rr, prefer=d["eclLon"], ignore_pts=((px, py),))
+        lx, ly = _b[0], _b[1]
+        d["label_box"] = [int(v) for v in _b]        # 回帰テストが配置を検査できるように残す
         dr.rectangle([lx, ly, lx + 320, ly + 42], fill=(0, 30, 45, 235))
         _occ_rects.append((lx, ly, lx + 320, ly + 42))
         _occ_pts.append((px, py, rad + 12))
@@ -1159,34 +1210,11 @@ def _render_simple(scene):
     # 上に来る位置では、先に描くと見えなくなる（実測: ハレー彗星は現在位置＝遠日点付近で
     # 目印が尾に隠れ、最近点側は太陽のグローで色が沈んだ）。
     for (mx, my, rcol_) in deferred_marks:
-        dr.polygon([(mx, my - 6), (mx + 6, my), (mx, my + 6), (mx - 6, my)],
-                   fill=(10, 14, 24), outline=rcol_, width=2)
+        _draw_route_mark(mx, my, rcol_)
+        _marker_redraws.append(("routemark", (mx, my, rcol_)))
 
     # ---- 1光日のラベル。他のラベルを描いた後に、既存の箱・マーカーから最も遠い角度へ置く
     # （重ねると図と数値が食い違う。太陽・タイトル帯・下部の帯も避ける）。
-    def _place_rect(w, h, r_px, prefer=None, avoid=()):
-        """リングの外側に置くラベル箱の位置を、占有領域との重なりが最小の角度で選ぶ。"""
-        best, best_pen = None, None
-        order = ([float(prefer)] if prefer is not None else []) + list(range(0, 360, 6))
-        for a_ in order:
-            th = math.radians(a_)
-            cxx = CX + (r_px + 18 + h / 2.0) * math.cos(th)
-            cyy = CY + (r_px + 18 + h / 2.0) * math.sin(th)
-            x0 = min(max(6, cxx - w / 2.0), W - w - 6)
-            y0 = min(max(112, cyy - h / 2.0), H - 62 - h)
-            pen = 0.0
-            for (ox0, oy0, ox1, oy1) in list(avoid) + _occ_rects:
-                _ox = min(x0 + w, ox1) - max(x0, ox0)
-                _oy = min(y0 + h, oy1) - max(y0, oy0)
-                if _ox > 0 and _oy > 0:
-                    pen += _ox * _oy
-            for (mx, my, mr) in _occ_pts:
-                if (x0 - mr) <= mx <= (x0 + w + mr) and (y0 - mr) <= my <= (y0 + h + mr):
-                    pen += 500.0 * mr
-            if best is None or pen < best_pen - 1e-9:
-                best, best_pen = (x0, y0, x0 + w, y0 + h), pen
-        return best
-
     if ld_draw.get("drawn"):
         _pref = 180.0
         if ld_draw.get("projections"):
@@ -1225,6 +1253,21 @@ def _render_simple(scene):
         ld_draw["proj_label_box"] = _projs[0].get("label_box")
         ld_draw["mark_px"] = _projs[0].get("mark_px")
     scene["light_day_draw"] = ld_draw
+
+    # ---- 最終パス: すべてのラベル箱を描いた後に、マーカーをもう一度描く。
+    # ラベルは _place_rect が空いている角度を探すが、どの角度も埋まっている場合もある。
+    # 「天体が箱に隠れない」ことをラベル配置の巧さに依存させないための保険。
+    for _p in _planet_draw:
+        _draw_planet_marker(*_p)
+    for _k, _args in _marker_redraws:
+        if _k == "asteroid":
+            _draw_asteroid_marker(*_args)
+        elif _k == "comet":
+            _draw_comet_core(*_args)
+        elif _k == "probe":
+            _draw_probe_marker(*_args)
+        elif _k == "routemark":
+            _draw_route_mark(*_args)
 
     dr.rectangle([0, 0, W, 104], fill=(0, 0, 0, 230))
     title = "太陽系・現在の惑星位置（太陽を中心とした俯瞰図）"
