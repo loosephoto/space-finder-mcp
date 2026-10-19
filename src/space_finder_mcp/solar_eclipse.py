@@ -313,7 +313,7 @@ def solar_eclipse_series(date: Optional[str] = None, place: Optional[str] = None
         days_win = _SEARCH_DAYS
         res = copy.deepcopy(_next_eclipse_search(
             round(ll[0], 2), round(ll[1], 2),
-            datetime.datetime.now().date().isoformat(), days_win, round(float(tz), 2)))
+            datetime.datetime.now(datetime.timezone.utc).date().isoformat(), days_win, round(float(tz), 2)))
         day_found, found = res if res else (None, None)
         dy, dmo, dd = day_found if day_found else (None, None, None)
         if not found:

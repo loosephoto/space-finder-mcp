@@ -221,7 +221,7 @@ uv run space-finder-mcp          # stdio サーバーとして起動
 - 応答の`content`には、インライン画像を描画できないクライアント向けに
   `🖼️ [生成した画像を開く](file:///…)` のリンクが先頭に入ります（回答時はそのまま提示）。
 
-実装メモ（このサーバーを改修する場合）: 全56ツールは `server.py` の `_reg()` で登録し、
+実装メモ（このサーバーを改修する場合）: 全66ツールは `server.py` の `_reg()` で登録し、
 本体は `anyio.to_thread` のワーカースレッドで実行します（元の同期関数は
 `tool.fn.sync_fn` に残るので、検証スクリプトは同期呼び出しのまま使えます）。検査は
 `scripts/check-tools.py --concurrency`（single-flight・スレッド逃がし・混在並列）と
@@ -259,7 +259,7 @@ uv run python scripts/check-tools.py --figures        # 描画系の図の注記
 uv run python scripts/check-tools.py --media-links    # 画像/音声/動画の「リンク先行」を検査
 uv run python scripts/check-tools.py --concurrency    # 並列ツール呼び出し（single-flight・スレッド逃がし）を検査
 uv run python scripts/check-tools.py --stdio          # 実クライアント経路(stdio)で代表ツールが応答するか検査
-uv run python scripts/check-tools.py                  # 全56ツール実呼び出し（数分、exit 1 で失敗）
+uv run python scripts/check-tools.py                  # 全66ツール実呼び出し（数分、exit 1 で失敗）
 ```
 
 **MCPサーバーはホットリロードなし** — `src/` 変更後はクライアント再起動が必要です。
@@ -308,6 +308,7 @@ uv run python scripts/check-tools.py                  # 全56ツール実呼び�
 - リポジトリ: https://github.com/loosephoto/space-finder-mcp
 
 ## 更新履歴
+- v0.39.5 — **日食の探索開始日を UTC 基準に統一＋オフライン回帰テストの補強**: `solar_eclipse_series` の「次の日食を自動検索」経路が `datetime.now()`（ローカル時刻）で開始日を決めていたのを `datetime.now(timezone.utc)` に統一（ホスト TZ が JST 以外で窓が 1 日ずれる可能性を解消）。`tests/test_network_resilience.py` が `requests.get` だけを遮断していたため `csa_dataset_search`（`requests.Session()` 経由）が実通信のまま通っていた穴を、`requests.Session.request` も遮断対象に含めることで閉じ、csa のオフライン回帰テストを追加。`SKILL.md` のツール本数表記を 56 → 66 に是正。回帰テスト 345 件、`--figures`・`--offline`・`--fuzz`・`--fonts`・`--stdio`・`--concurrency`・`--dead-code`・`--media-links` はすべて exit 0。
 
 - v0.39.4 — **俯瞰図（`solar_system_now`）のラベル箱が惑星マーカーを覆う不具合の修正**: `range_au="fit"` の彗星指定で、彗星のラベル箱（320×42px）が右端からあふれて**左へ回り込むと内側の惑星マーカーを覆い**、`figure.verify.range_au.ok` が偽になっていた（実測 2026-10-18: 地球の画素 0px・`--figures` が exit 1。惑星と彗星の位置は日付で動くため、いつでも発現しうる）。原因は「マーカーの右 → はみ出したら左」という素朴な配置で、**惑星のラベル箱だけがマーカーの描き直しで守られていた**こと（彗星・小惑星・探査機の箱はマーカーの描き直しより後に描かれていた）。対策は二段: **(a) 彗星・小惑星・探査機のラベルも既存の `_place_rect`（1光日のラベルで実績のある「占有領域との重なりが最小の角度を選ぶ」関数）に置かせ、`ignore_pts` で自分のマーカーだけを採点から除外**する（除外しないと自分の真横から最も遠い角度へ逃げる）、**(b) すべてのラベル箱を描いた後に惑星・小惑星・彗星核・探査機・経路の目印（◇）を描き直す**（「天体が箱に隠れない」ことを配置の巧さに依存させない保険）。併せて彗星・小惑星・探査機の `label_box` を `structuredContent` に残す（回帰テストと切り分けのため）。回帰テスト **341件**（新規 3 件 `tests/test_regressions.py::OverviewLabelBoxTests`。**変更を `git stash` すると 3 件とも失敗**＝地球の画素 0px になることを確認済み）。`--only solar_system_now`・`--figures`・`--offline`・`--fuzz`（444組・例外漏れ0）・`--fonts`・`--stdio`・`--concurrency`・`--dead-code`・`--media-links` はすべて exit 0。
 - v0.39.3 — **`neo_close_approach` に彗星を追加（`kind`＝`"all"`（既定）/`"asteroid"`/`"comet"`）**: JPL CNEOS CAD の**既定 `neo=true` は小惑星だけ**を返す（実測 2026-10-15: 彗星 169P/NEAT が 0.17 au まで接近した 2026-08 の窓でも彗星 0 件。`nea-comet=true` も同じ 243 件で彗星を含まなかった）ため、彗星が返る **`comet=true` の照会**を別に投げ、`kind="all"` は**接近時刻（`jd`）の早い順に統合**します（`structuredContent.kind` / `totals_by_kind`、各行に `object_type`。混在時だけ本文に「（小惑星）」「（彗星）」を付け、彗星は ☄️ を冠する）。`limit` は照会ごとに効くので統合後に切ります。彗星は `h`・`diameter` が null なので**直径を推定しません**（「直径 不明」・`diameter_is_estimate=False`）。`hazardous_only`（PHA）は**小惑星の区分**なので彗星の照会には付けず、`kind="all"` との併用時は**彗星を照会しない**旨を本文に出します。`kind` は別名（`asteroids`/`c`/`nea`/「小惑星」「彗星」等）を受け付け、解釈できない値は既定の `all` に落として**注記**します（黙って別の種別を返さない）。カレンダー蓄積の「種類」は**行ごとの `object_type`** から取ります（呼び出し全体の `kind` で判定すると `kind="all"` の彗星を「小惑星」と記録してしまう）。回帰テスト **338件**（新規 8 件＝`CloseApproachTests` 7件・`AnomalyCalendarStoreTests` 1件）、`--only neo_close_approach`・`--dead-code`・`--fonts`・`--fuzz`（444組・例外漏れ0）・`--stdio`・`--concurrency`・`--offline`・`--media-links` は exit 0。`--figures` は `solar_system_now[range_au="fit"]` の 1 件が `verify.ok=False`（**彗星のラベル箱 320×42px が内側の惑星マーカーを覆う**既存の不具合。実測: 本日は地球が 0px。`git stash` して HEAD でも同じ結果になるため本変更とは無関係）。

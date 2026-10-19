@@ -21,11 +21,13 @@ class NetworkResilienceTests(unittest.TestCase):
         self.celestrak = celestrak
         self._old_until = celestrak._COOLDOWN_UNTIL
         self._old_get = requests.get
+        self._old_sess_req = requests.Session.request
 
     def tearDown(self):
         self.celestrak._COOLDOWN_UNTIL = self._old_until
         self.celestrak._COOLDOWN_LAST = ""
         requests.get = self._old_get
+        requests.Session.request = self._old_sess_req
 
     def test_celestrak_fails_fast_after_connection_failure(self):
         calls = []
@@ -99,6 +101,29 @@ class NetworkResilienceTests(unittest.TestCase):
             elapsed = time.perf_counter() - started
             self.assertIsInstance(res.structuredContent, dict)
             self.assertLess(elapsed, 5.0, "{} が遮断中でも待たされています".format(name))
+
+
+class CsaOfflineTests(unittest.TestCase):
+    def test_csa_returns_error_result_when_network_blocked(self):
+        import requests
+        from space_finder_mcp.server import mcp
+
+        def boom(*args, **kwargs):
+            raise requests.ConnectionError("simulated blackhole")
+
+        old_sess = requests.Session.request
+        old_get = requests.get
+        requests.Session.request = boom
+        requests.get = boom
+        try:
+            tool = mcp._tool_manager._tools["csa_dataset_search"]
+            fn = getattr(tool.fn, "sync_fn", tool.fn)
+            res = fn(query="radarsat")
+            self.assertIsInstance(res.structuredContent, dict)
+            self.assertTrue(res.structuredContent.get("error"))
+        finally:
+            requests.Session.request = old_sess
+            requests.get = old_get
 
 
 if __name__ == "__main__":
