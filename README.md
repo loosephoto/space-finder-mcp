@@ -317,7 +317,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `iss_now` | ISS（国際宇宙ステーション）の現在位置を取得し Googleマップリンクで表示 | Open Notify | 不要 |
 | `sat_ground_track` | 任意の人工衛星（ISS・ひので・ハッブル等）の現在位置と地上軌道を地球地図にプロットした画像を返す。CelesTrak TLE + Skyfield(SGP4) で真下の点・高度・速度を計算し、NASA Blue Marble 地図に軌道トレイルを重ねる | CelesTrak + Skyfield + Blue Marble | 不要 |
 | `planetary_orbiter_track` | 任意の天体（月・火星・水星・タイタン等）を周回する探査機の現在位置と軌道トレイルを、その天体の地図にプロットした画像を返す。JPL Horizons の状態ベクトルを IAU 自転モデルで天体固定座標（緯度経度・高度）に変換し、NASA Trek の等角図法地図に重ねる。`span_deg=360`で天体全面表示にも対応。**過去機（かぐや等）は運用終了を案内し、落点が公表されている機体は落点を地点マーカーで描いた地図（`figure.kind="impact_site_map"`）を返す**。`sites="apollo"`（または `"apollo11"`〜`"apollo17"`, `"all"`, `"newcrater"`）で **地点マーカー図**（`figure.kind="landing_site_map"`／木星は `impact_site_map`）も返す。**18天体**（月・火星・水星・金星・タイタン・ベスタ・ケレス・イオ・エウロパ・ガニメデ・カリスト・木星・土星・天王星・海王星・冥王星・ベンヌ・リュウグウ）に対応し、**全球等角図がある天体は地形画像の上に、無い天体（リュウグウ）は緯度経度グリッドの上に**公表座標を描く（全球図は NASA Trek のタイル／USGS の全球モザイク／**Hubble OPAL の全球図**（気体惑星）／New Horizons・OSIRIS-REx のモザイクを天体ごとに自動選択） | JPL Horizons + NASA Trek / USGS Astrogeology / Hubble OPAL (STScI) / NASA NSSDC / PDS | 不要 |
-| `planetary_rover_location_map` | 任意の天体面を移動する探査ローバーの現在地をその天体の地図中心に示した画像（走行経路・着陸点）。NASA MMGIS の位置データと NASA Trek の等角地図を合成。現状データは火星ローバー（Perseverance/Curiosity） | NASA MMGIS + Trek WMTS | 不要 |
+| `planetary_rover_location_map` | 任意の天体面を移動する探査ローバーの現在地をその天体の地図中心に示した画像（走行経路・着陸点）。火星は NASA MMGIS の位置データと NASA Trek の等角地図を合成。**フォボス（MMX / IDEFIX）にも対応** — 着陸地点は未公表なので `site_lat`/`site_lon`（東向き正）または `site_lon_w`（西向き正）で任意の場所を描き、未指定なら**着陸候補条件の緯度帯 ±30°**を明示。IAU/U.S. Gazetteer に着陸地点が公表されれば自動検出 | NASA MMGIS + Trek WMTS ＋ USGS 公式全球図 + IAU Gazetteer | 不要 |
 | `weather_satellite_now` | GEO/LEO気象衛星19機（ひまわり9号・GOES-18/19・Meteosat・FY・GK-2A・INSAT・NOAA-20/-21・SNPP・Metop-B/C・FY-3D）の公開画像。GEOは最新フレーム、LEOは日次全球合成。取得不可は `restricted`/`unavailable`/`non_image_product` の理由コードで返す | JMA(himawari.asia)/NOAA STAR/EUMETSAT WMS/CMA-NSMC/KMA/IMD/NASA GIBS | 不要 |
 | `space_calendar` | **宇宙・天文イベントカレンダー**（月グリッド図＋JSON）。打ち上げ（LL2 の月範囲クエリ・日付精度 `net_precision` が Day/Hour/Minute/Second の行だけを日付セルに配置）・天文現象（Skyfield のローカル計算: 月相・二十四節気・惑星の衝/合/内合・最大離角・日食月食・流星群）・公開イベント（国立天文台＋**JAXA の施設一般公開・特別公開**＝ファン!ファン!JAXA! の施設見学ページと宇宙科学研究所のイベント表。告知済みのみを載せ、取得日を窓にして毎日取り直します）・**小天体イベント（小惑星接近・火球観測。`neo_close_approach` / `fireball_reports` の呼び出し結果を蓄積したもの＝カレンダー自身は JPL を叩かないので未蓄積の月は空）**・自分の予定を重ねて描く。取得結果は**蓄積ストア**に溜め、要求月 M に対して窓 [M-1, M+2] を確保し**未取得・期限切れの月だけ**取りに行く（2回目は API 0 回）。NASA の公式リスト（WP REST）と照合した行には公式URLを付与 | Launch Library 2 + JPL DE421/Skyfield + 国立天文台 + JAXA + nasa.gov | 不要 |
 | `calendar_events` | 蓄積済みイベントの一覧（**図を描かず外部APIも呼ばない**軽い経路）。打ち上げ・天文現象・**小惑星接近・火球観測（`neo_close_approach` / `fireball_reports` の呼び出しで蓄積されたぶん）**・公開イベント・自分の予定を日付順に返す | 蓄積ストア（ローカル） | 不要 |
@@ -864,8 +864,24 @@ ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカ�
 任意の天体面を移動する探査ローバーの**現在地・走行経路・着陸地点**を、その天体の局所地図に重ねて画像化します。ベースマップ・タイル合成・切り出し・投影・マーカー・画素検証は共通ルーチン `surface_map.py` を再利用（周回機・ローバー・落点マップで同じ投影・同じ検証）。
 
 - 走行経路(橙線)・現在地(赤●)・着陸地点(青●)を合成し、ローバーを画像中心に配置。
-- 対応ローバー（ROVERS テーブル）: perseverance（パーサヴィアランス）・curiosity（キュリオシティ）。
-- **正直な制約**: ローバー位置データは NASA MMGIS（火星専用）のみ。月面ローバー等の現役位置データは公開されておらず、データ源ができればテーブル追加で対応可能。
+- 対応ローバー（ROVERS テーブル）: perseverance（パーサヴィアランス）・curiosity（キュリオシティ）・**idefix（MMX 同梱のフォボス用ローバー）**。
+- **正直な制約**: 走行経路まで取得できるローバー位置データは NASA MMGIS（火星専用）のみ。月面ローバー等の現役位置データは公開されておらず、データ源ができればテーブル追加で対応可能。
+
+#### 🪨 フォボス（MMX / IDEFIX）— 着陸地点の公表に備えた表示
+
+JAXA の **MMX**（2026-10-19 打ち上げ）と、その前身降低成本の小型ローバー **IDEFIX**（DLR/CNES 製造）は 2028 年度末〜2029 年頭にフォボスへ着陸します（本体は 2030 年頃に着陸して 10 g の試料を持ち帰る）。**着陸地点は 2027〜2028 年に選定されるため現時点では未公表**なので、次の 3 通りに対応しています。
+
+| 指定 | 描かれるもの |
+|:--|:--|
+| `site_lat` / `site_lon` | 指定した地点を**着陸予定点（赤●）**として描きます。公表値をそのまま渡せます。 |
+| `site_lat` / `site_lon_w` | 同じ，但**西向き正**の経度で指定します（IAU/フォボスの慣用表記。例: Stickney は 1°N 49°W）。`site_lon` とは排他。 |
+| （指定なし） | 着陸地点の**候補条件である緯度帯 ±30°**（緑枠）を描きます。着陸地点そのものではありません。 |
+
+- **公表値の自動検出**: IAU/U.S. Gazetteer of Planetary Nomenclature の機械可読な地名 feed（`PHOBOS_nomenclature_center_pts.kmz`）を毎回読み、`type` に "Landing Site" が含まれる地名を**着陸地点として自動採用**します。公表されていない今は「未公表」と表示します（`structuredContent.landing_site_status` = `not_published` / `published` / `user_specified` / `unknown`）。
+- **ベースマップ**: USGS 公式全球等角図（Shaded Relief）。配布 PNG には地形ラスタの外に白地の余白・目盛ラベル・題字・クレジットがあるため、`surface_map.image_view(crop=…)` で**地形だけの範囲**を切り出して使います（相対範囲なので解像度非依存）。
+- **経度の向き**: この図の印字目盛は「西向き正の大きさ」で並んでいますが、地図自体は**標準の東向き正**（経度が右へ増加）です。IAU 地名 20 点の実測で確定させています（Stickney=49°W は図の左 36.39% に一致）。**この向きを誤ると全マーカーが左右反転します。**
+- **注意**: 内部の座標は**東向き正**で保持します。0〜360°E の公表値も内部で ±180° に折り返してから投影するので、311°E のような値も画像の外には出ません。
+
 
 ## ⚡ キャッシュ（API呼び出しと処理の削減）
 

@@ -441,6 +441,13 @@ FIGURES_EXTRA_CALLS = (
     ("moon_phase_map[朔望月パネル]", "moon_phase_map",
      {"layout": "lunation", "place": "東京", "days": 8},
      {"figure_kind": "moon_phase_lunation"}),
+    # ローバーのフォボス（MMX / IDEFIX）経路: 着陸地点未公表（制約帯のみ）と、
+    # 地点を明示した経路（公表後に使う）。全局図ベースマップなので verify.ok を見る。
+    ("planetary_rover_location_map[フォボス着陸地点未公表]", "planetary_rover_location_map",
+     {"body": "phobos", "rover": "idefix"}, {"figure_kind": "ground_track_map"}),
+    ("planetary_rover_location_map[フォボス地点指定]", "planetary_rover_location_map",
+     {"body": "phobos", "rover": "idefix", "site_lat": 1.0, "site_lon_w": 49.0},
+     {"figure_kind": "ground_track_map"}),
 )
 
 

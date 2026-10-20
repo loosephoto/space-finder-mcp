@@ -376,7 +376,8 @@ def _regional_view(src, tl, gx, gy, W, H, span_deg, out_px, dim):
 def image_view(url: str, lon: float, lat: float, span_deg: float, out_px: int, *,
                credit: str = "", subdir: str = "basemap", headers: Optional[dict] = None,
                whole_dim: Optional[float] = None, regional_dim: Optional[float] = None,
-               left_edge_lon: Optional[float] = None) -> dict:
+               left_edge_lon: Optional[float] = None,
+               crop: Optional[Tuple[float, float, float, float]] = None) -> dict:
     """全球等角図（画像1枚）をベースマップにしたビューを作る（Trek と同じ投影契約）。
 
     タイル化された全球データが無い天体でも、**1枚の全球図**があれば同じ描画・検証の
@@ -389,6 +390,11 @@ def image_view(url: str, lon: float, lat: float, span_deg: float, out_px: int, *
     （「どのあたりか」が分かればよい用途では、厳密な幾何より可用性を優先。補正の有無と
     元の AR は戻り値に入れ、呼び出し側が注記に出す）。画像は不変資産なのでディスク
     キャッシュ経由（2回目以降は再取得しない）。
+
+    `crop` は画像中の**全球地図だけ**を切り出すための相対範囲 (left, top, right, bottom) を
+    0〜1 で指定する（例: 0.045, 0.083, 0.955, 0.917）。白地の余白・タイトル・出典表記・
+    目盛ラベルを含む配布用画像から地形だけを取り出すときに使う。切り出したあとの
+    アスペクト比は補正の可否判定に使い、切り出し前の余白は計算に入れない。
     """
     import io as _io
     from PIL import Image
@@ -402,6 +408,24 @@ def image_view(url: str, lon: float, lat: float, span_deg: float, out_px: int, *
     if not data:
         raise ValueError("basemap 画像を取得できません: " + url[:80])
     src = Image.open(_io.BytesIO(data)).convert("RGB")
+    # 余白・タイトル・出典表記を除いた「地図だけ」の範囲を切り出す（crop 指定時）。
+    # 実測: USGS のフォボス全球図は 5499x2999 px で、地形ラスタは cols 249..5250 /
+    # rows 248..2750 だけ（残りは白地・目盛ラベル・題字・クレジット）。
+    crop_px = None
+    if crop:
+        try:
+            cl, ct, cr, cb = (float(v) for v in crop)
+        except (TypeError, ValueError):
+            cl = ct = cr = cb = 0.0
+        cl, ct = max(0.0, min(1.0, cl)), max(0.0, min(1.0, ct))
+        cr, cb = max(0.0, min(1.0, cr)), max(0.0, min(1.0, cb))
+        if 0 <= cl < cr <= 1 and 0 <= ct < cb <= 1 and (cl or ct or cr < 1 or cb < 1):
+            W0, H0 = src.size
+            box = (int(round(cl * W0)), int(round(ct * H0)),
+                   int(round(cr * W0)), int(round(cb * H0)))
+            if box[2] - box[0] > 8 and box[3] - box[1] > 8:
+                crop_px = box
+                src = src.crop(box)
     w0, h0 = src.size
     ar0 = w0 / float(h0)
     W = w0
@@ -436,7 +460,9 @@ def image_view(url: str, lon: float, lat: float, span_deg: float, out_px: int, *
     res.update({"source_ar": round(ar0, 4), "ar_corrected": bool(abs(ar0 - 2.0) > 1e-6),
                 "pixels": [w0, h0], "credit": credit, "zoom": None,
                 "left_edge_lon": None if left_edge_lon is None else float(left_edge_lon),
-                "lon_roll_deg": round(roll_deg, 4)})
+                "lon_roll_deg": round(roll_deg, 4),
+                "crop_px": list(crop_px) if crop_px else None,
+                "ar_correction_percent": round(abs(ar0 - 2.0) / 2.0 * 100.0, 4)})
     return res
 
 

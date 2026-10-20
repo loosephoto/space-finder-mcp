@@ -14,7 +14,9 @@
 | CelesTrak (gp.php) | `FORMAT=JSON` は**軌道要素のみで TLE行を返さない**。SGP4 に渡す生 TLE は `FORMAT=TLE` で取得する（JSON由来だと `SGP4 error code 2` で常時失敗する）。404 は「該当なし」。**短時間の連続リクエストで IP 単位に遮断（403／TCP blackhole）**され、素の呼び出しは分単位で固まるため、接続は (connect 10s, read 25s) で打ち切り、遮断を記憶して以降は fail fast する（`celestrak.blocked_status`） |
 | JPL Horizons / SBDB / DE421 | Horizons の宇宙機は**負のID**（例: はやぶさ2 = -37）。SBDB は小惑星のみ（探査機は不可） |
 | JPL CNEOS CAD（接近データ） | **既定の `neo=true` は小惑星だけを返す**（実測 2026-10-15: 彗星 169P が 0.17 au まで接近した 2026-08 の窓で彗星 0 件）。`nea-comet=true` も同じ 243 件で彗星を含まなかったため、彗星は **`comet=true` の別照会**で取り、`kind="all"` は2つの照会を日付順に統合する。彗星は `h`・`diameter` が null（直径は推定しない）。**`pha` は小惑星の区分**なので彗星の照会には付けない |
-| NASA MMGIS / NASA Trek / Blue Marble | 位置データは火星ローバーのみ公開。天体地図は Trek WMTS（等角図法、`cols=2^(z+1)`, `rows=2^z`）。タイルはディスクキャッシュ対象 |
+| NASA MMGIS / NASA Trek / Blue Marble | 位置データは火星ローバーのみ公開。天体地図は Trek WMTS（等角図法、`cols=2^(z+1)`, `rows=2^z`）。タイルはディスクキャッシュ対象。**Trek にフォボスの層は無い**（実測: 層名候補8種すべて 404）ので、フォボスは 1 枚の全球図を使う |
+| USGS 公式全球等角図（フォボス等） | Commons 経由。**`upload.wikimedia.org` の直リンクは 429（レート制限）になる**（実測: 既存のタイタン・エウロパ図も同じ扱い）ので `commons.wikimedia.org/wiki/Special:FilePath/<file>?width=2400` を使う。配布 PNG は地形ラスタの外に白地・目盛ラベル・題字・クレジットがあるので `image_view(crop=…)` で**相対範囲**を切り出す（解像度非依存）。**フォボス図の印字目盛は西向き正だが地図自体は東向き正**（IAU 地名20点で実測）＝`left_edge_lon=-180`（横回転なし） |
+| IAU/U.S. Gazetteer（地名 feed） | `asc-planetarynames-data.s3.us-west-2.amazonaws.com/<TARGET>_nomenclature_center_pts.kmz`（zip 内 KML）。**`center_lon` は 0〜360 の東向き正**（Stickney=311 は 49°W・IAU Feature 5707 と一致）。種別は英字の `type` 文字列で判別する（"Landing Site" を含むものが着陸地点）。座標系は `GCS_<body>_2000` |
 | Sky & Telescope ほかRSS | Cloudflare がブラウザ偽装UAを弾く（curl/Wget系UAは許可）。`astronomy_news` は**複数フィードのフォールバック連鎖** |
 | Open-Meteo / Nominatim | Open-Meteo は都市名（英語強め・ja→enエイリアス付き）。Nominatim は識別可能なUA必須（403 になるUAあり）。結果は 24時間キャッシュ |
 | Wikidata SPARQL | 「初・記録」の回答は SPARQL の結果に基づく（記憶から捏造しない）。必ず Wikipedia 記事を引用する |
