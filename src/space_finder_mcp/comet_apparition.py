@@ -699,11 +699,16 @@ def _apparition_content(d: dict, fig: dict, image_path, emax_note: str) -> List[
              "### ☄️ {} の見え方（{}）".format(nel["fullname"], span)]
     if emax_note:
         lines.append("⚠️ " + emax_note)
+    # 期間の端で r が最小のときは「近日点」ではない（真の近日点はこの期間の外）。
+    # notes 側はそう書いているのに表が「（近日点）」だと図と文が食い違う
+    # （実測 2026-10-20: ハレー彗星 days=400 で features.perihelion.inside_window=False）。
+    _r_label = "最小日心距離 r" if d["edge_r"] else "最小日心距離 r（近日点）"
+    _d_label = "最小地心距離 Δ" if d["edge_d"] else "最小地心距離 Δ（最接近）"
     lines += ["", "| 項目 | 値 | 日時（UTC） |", "|---|---|---|",
-              "| 最小地心距離 Δ | {:.4f} AU ＝ {:.0f} 万 km（光で約 {:.1f} 分） | {} |".format(
-                  dmin["delta_au"], dmin["delta_au"] * _AU_KM / 1e4,
+              "| {} | {:.4f} AU ＝ {:.0f} 万 km（光で約 {:.1f} 分） | {} |".format(
+                  _d_label, dmin["delta_au"], dmin["delta_au"] * _AU_KM / 1e4,
                   dmin["delta_au"] * 499.005 / 60.0, dmin["utc"]),
-              "| 最小日心距離 r（近日点） | {:.4f} AU | {} |".format(rmin["r_au"], rmin["utc"])]
+              "| {} | {:.4f} AU | {} |".format(_r_label, rmin["r_au"], rmin["utc"])]
     if d["has_mag"]:
         b = series[d["idx_m"]]
         lines.append("| 最明の予想光度 | {:.1f} 等 | {} |".format(b["mag"], b["utc"]))
@@ -715,7 +720,9 @@ def _apparition_content(d: dict, fig: dict, image_path, emax_note: str) -> List[
             s["utc"][:10], s["r_au"], s["delta_au"],
             "-" if s["mag"] is None else "{:.1f}".format(s["mag"]), s["elong_deg"]))
     lines += ["", figure_text_block(fig),
-              "画像は上に表示（base64 PNG）。出典: " + _SRC_HZ]
+              # 出典は**実際に使った位置の出典**を書く（2体近似へ退避したときは
+              # Horizons の n 体解ではない。ハードコードすると図と出典が食い違う）
+              "画像は上に表示（base64 PNG）。出典: " + _src_of(d)]
     return lines
 
 

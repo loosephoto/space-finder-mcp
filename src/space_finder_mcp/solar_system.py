@@ -653,9 +653,12 @@ def _comet_route(name, jd):
             "nbody_error": nbody_error,
             # 要素の出所（"sbdb"=2体近似 / "horizons"=n 体解の接触軌道）。注記の文言を分ける
             "typ": el.get("typ") or "sbdb",
-            # 経路の最大半径（表示範囲に収まるかの判定に使う）と、既存の ±45AU 判定
-            "r_max_au": max(max(abs(q[0]), abs(q[1])) for q in pts),
-            "out_of_frame": bool(max(max(abs(q[0]), abs(q[1])) for q in pts) > 43.0)}
+            # 経路の最大半径（表示範囲に収まるかの判定に使う）と、既存の ±45AU 判定。
+            # 軌道は傾いているので max|x,y| は半径の**下界**になる（実測 2026-10-20:
+            # ハレー彗星で 27.69 AU に対し実際の描画半径 33.84 AU）。正射影半径の
+            # 最大（hypot）で取る（表示範囲の判定と実際の描画を一致させる）。
+            "r_max_au": max(math.hypot(q[0], q[1]) for q in pts),
+            "out_of_frame": bool(max(math.hypot(q[0], q[1]) for q in pts) > 43.0)}
 
 
 # ---------- 描画ヘルパー ----------
@@ -977,6 +980,26 @@ def _render_simple(scene):
         dd.ellipse([px - rad, py - rad, px + rad, py + rad], fill=(225, 248, 255),
                    outline=(255, 255, 255))
 
+    def _draw_comet_tail(px, py, ux, uy, col):
+        """彗星の尾（シアン帯）を描く。太陽と反対側（反太陽点）へ向かう。
+
+        尾は**ラベル箱より後に**描かないと箱に隠れる（実測 2026-10-20: ハレー彗星で
+        尾 77px のうち 51px が自分の 320x42px ラベル箱の内側に入り、箱内で尾の色が
+        箱色 (0,30,45) に潰れた）。`_marker_redraws` に "comettail" として登録し、
+        最終パス（すべてのラベル箱の後）で尾を描く。
+        """
+        for seg in range(3, 0, -1):
+            tail_len = 34 + seg * 14
+            tw = 6 + seg * 5
+            alpha = 60 + seg * 40
+            ex = px + ux * tail_len
+            ey = py + uy * tail_len
+            halo = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            hd = ImageDraw.Draw(halo)
+            hd.line([px, py, ex, ey], fill=col + (alpha,), width=tw)
+            halo = halo.filter(ImageFilter.GaussianBlur(3))
+            img.paste(Image.alpha_composite(img.convert("RGBA"), halo).convert("RGB"), (0, 0))
+
     def _draw_probe_marker(px, py, rad, col):
         halo = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         hd = ImageDraw.Draw(halo)
@@ -1098,25 +1121,12 @@ def _render_simple(scene):
         tx, ty = (px - CX), (py - CY)
         tl = math.hypot(tx, ty) or 1.0
         ux, uy = tx / tl, ty / tl
-        # 尾（複数セグメントで放射状に広がる）: 彗星の尾は太陽光を反射し広がる
-        for seg in range(3, 0, -1):
-            tail_len = 34 + seg * 14
-            tw = 6 + seg * 5
-            half = 2 + seg * 2
-            # 尾の先端と基端（彗星核側）
-            ex = px + ux * tail_len; ey = py + uy * tail_len
-            alpha = 60 + seg * 40
-            halo = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-            hd = ImageDraw.Draw(halo)
-            # 尾を帯状に（太さを持たせて2点間に線→広がりは ellipse の組合せで表現）
-            hd.line([px, py, ex, ey], fill=col + (alpha,), width=tw)
-            halo = halo.filter(ImageFilter.GaussianBlur(3))
-            img.paste(Image.alpha_composite(img.convert("RGBA"), halo).convert("RGB"), (0, 0))
-            dr = ImageDraw.Draw(img)
-        # 核の光背
+        # 尾（反太陽点方向）と核。尾はラベル箱に隠れないよう最終パスでも描き直す。
+        _draw_comet_tail(px, py, ux, uy, col)
         rad = 11
         _draw_comet_core(px, py, rad)
         _marker_redraws.append(("comet", (px, py, rad)))
+        _marker_redraws.append(("comettail", (px, py, ux, uy, col)))
         # ラベル（真距離・黄緯を併記）
         # ラベル箱は 320×42px と大きく、素朴に「右→（はみ出したら）左」で置くと、左へ回り込んだ
         # ときに内側の惑星マーカーを覆う（実測 2026-10-18: 地球が 0px になり --figures が落ちた）。
@@ -1264,6 +1274,9 @@ def _render_simple(scene):
             _draw_asteroid_marker(*_args)
         elif _k == "comet":
             _draw_comet_core(*_args)
+        elif _k == "comettail":
+            # 尾もラベル箱より上に描く（箱に隠すと「尾が無い彗星」に見える）
+            _draw_comet_tail(*_args)
         elif _k == "probe":
             _draw_probe_marker(*_args)
         elif _k == "routemark":
@@ -1378,11 +1391,17 @@ def _render_accurate(scene):
                           "proj_au": rr, "lon_deg": float(mk.get("lon_deg") or 0.0),
                           "date": mk.get("date"), "drawn": True})
         co = (scene.get("comets") or {}).get(rname) or {}
-        if co.get("eclLon") is not None and co.get("au") and (not rng_au or co["au"] <= rng_au):
-            cxr = co["au"] * math.cos(math.radians(co["eclLon"]))
-            cyr = co["au"] * math.sin(math.radians(co["eclLon"]))
+        # マーカーは**黄道面への正射影位置**（proj_au）に置く。真距離 au を黄道面に
+        # 落とすと黄緯の分だけ外側にずれ、彗星自身の軌道線から外れて見える
+        # （実測 2026-10-20: C/2023 A3 で au=8.729 / proj_au=6.743 AU → 24.2 px ずれ、
+        #  simple エンジンと位置が食い違っていた）。経路の線も同じ正射影なので線上に乗る。
+        _c_proj = float(co.get("proj_au") or 0.0)
+        if co.get("eclLon") is not None and _c_proj > 0 and (not rng_au or _c_proj <= rng_au):
+            cxr = _c_proj * math.cos(math.radians(co["eclLon"]))
+            cyr = _c_proj * math.sin(math.radians(co["eclLon"]))
             ax.scatter([cxr], [cyr], s=120, color=rcol, edgecolor="white", lw=1.0, zorder=8)
-            ax.annotate("{}（現在 {:.2f}AU）".format(co.get("name") or rname, co["au"]),
+            ax.annotate("{}（現在 {:.2f}AU・黄道面投影 {:.2f}AU）".format(
+                        co.get("name") or rname, co.get("au") or 0.0, _c_proj),
                         (cxr, cyr), textcoords="offset points", xytext=(9, 7), fontsize=10,
                         color=rcol, fontweight="bold", zorder=9,
                         bbox=dict(boxstyle="round,pad=0.2", fc="#00131ad9", ec=rcol))
@@ -2050,19 +2069,28 @@ def _render_orbit_plane(cid, el, pos_xyz, when_str, body_kind="comet"):
     xp, yp = _ecliptic_to_perifocal(pos_xyz[0], pos_xyz[1], pos_xyz[2], incl or 0.0,
                                     el.get("node_deg", 0.0), el.get("argp_deg", 0.0))
     r_now = math.hypot(xp, yp)
+    # 図の範囲に**現在位置を含める**（実測 2026-10-20: C/2023 A3 は図の範囲 3.13 AU に
+    # 対し現在位置 8.73 AU → 「現在位置」マーカーが px=[-233,-34] で画面外に落ちていた）。
+    # 軌道点列は取り直す（r_max を伸ばすと線の形が変わるため）。
+    if r_now > r_max * 0.98:
+        r_max = r_now * 1.15
+        pts = _conic_orbit_points(a, e, q, r_max)
 
     img = Image.new("RGB", (W, H), (10, 14, 26))
     dr = ImageDraw.Draw(img)
     f_t, f_s, f_m, f_b = load_font(26, True), load_font(17), load_font(20, True), load_font(15)
 
-    xs = [p[0] for p in pts]
-    ys = [p[1] for p in pts]
-    bx, by = (min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0
     pl, ptop, pr, pb = 70, 150, W - 70, H - 150
-    span_x, span_y = (max(xs) - min(xs)), (max(ys) - min(ys))
-    ppau = min((pr - pl) / max(span_x, 1e-6), (pb - ptop) / max(span_y, 1e-6)) * 0.92
-    X0 = (pl + pr) / 2.0 - bx * ppau          # 太陽＝焦点の画面x
-    Y0 = (ptop + pb) / 2.0 + by * ppau        # 太陽＝焦点の画面y
+    # 座標系は**太陽（円錐曲線の焦点）＝画面中央**に置く。軌道点列の bbox 中心を
+    # 基準にすると、太陽が端へ寄り、現在位置マーカーや遠日点が画面外へ出る
+    # （実測: ハレー彗星で現在位置が 2398px = 画面外、太陽は x=1261 に寄る）。
+    # 縮尺は「太陽から最も遠い点（軌道点列 or 現在位置）」が枠に収まるよう決める。
+    r_pts = max(math.hypot(x_, y_) for x_, y_ in pts)
+    r_span = max(r_pts, r_now)
+    ppau = min((pr - pl) / max(2.0 * r_span, 1e-6),
+               (pb - ptop) / max(2.0 * r_span, 1e-6)) * 0.92
+    X0 = (pl + pr) / 2.0                      # 太陽＝焦点の画面x（画面中央）
+    Y0 = (ptop + pb) / 2.0                    # 太陽＝焦点の画面y（画面中央）
     to_px = lambda x, y: (X0 + x * ppau, Y0 - y * ppau)
     boxes = []
     seq = list(pts) + ([pts[0]] if (e < 1.0 and pts) else [])
@@ -2205,11 +2233,17 @@ def _render_orbit_plane(cid, el, pos_xyz, when_str, body_kind="comet"):
         el.get("fullname") or cid, "楕円" if e < 1.0 else "双曲線の枝", e, _au_fmt(q),
         "・遠日点 {} AU".format(_au_fmt(apo)) if apo else "・遠日点なし", when_str, r_now))
     view_description = "{}自身の軌道面を真横から見た図（太陽は円錐曲線の焦点）".format(body_label)
-    markers = [{"id": "periapsis", "label": "近日点", "au": q, "px": [round(hx), round(hy)]},
-               {"id": "current", "label": "現在位置", "au": r_now, "px": [round(cx_), round(cy_)]}]
+    # in_frame: マーカーが図の画面内に在るか（画面外は「図から確認できない」ので区別する）
+    def _in_frame(px_, py_):
+        return bool(6 <= px_ <= W - 6 and 4 <= py_ <= H - 92)
+
+    markers = [{"id": "periapsis", "label": "近日点", "au": q, "px": [round(hx), round(hy)],
+                "in_frame": _in_frame(hx, hy)},
+               {"id": "current", "label": "現在位置", "au": r_now, "px": [round(cx_), round(cy_)],
+                "in_frame": _in_frame(cx_, cy_)}]
     if apo:
         markers.append({"id": "apoapsis", "label": "遠日点", "au": apo,
-                        "px": [round(ax_), round(ay_)]})
+                        "px": [round(ax_), round(ay_)], "in_frame": _in_frame(ax_, ay_)})
     fig = figure_payload(
         kind="orbit_plane", title=title,
         view=view_spec("orbital_plane", "side", view_description,

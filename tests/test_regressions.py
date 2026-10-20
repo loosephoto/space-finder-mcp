@@ -1475,3 +1475,253 @@ class BugSweepV0392Tests(unittest.TestCase):
             if _os.path.exists(tmp):
                 _os.remove(tmp)
 
+
+class CometRenderRegressionTests(unittest.TestCase):
+    """彗星の描画ルーチンの実測バグの再発防止（2026-10-20 実測）。
+
+    1. simple エンジン: 彗星の尾が自分のラベル箱に隠れない
+       実測: ハレー彗星で尾 77px のうち 51px が自分の 320x42px のラベル箱の内側に入り、
+       箱内で尾の色が箱色 (0,30,45) に潰れていた。尾は最終パスで描き直す。
+    2. accurate エンジン: 彗星マーカーは黄道面への正射影位置（proj_au）に乗る
+       実測: 真距離 au で置くと黄緯の分だけ外へずれ、彗星自身の軌道線から外れていた
+       （C/2023 A3 で 24.2 px）。simple エンジンと位置も食い違っていた。
+    3. comet_orbit: 現在位置マーカーが図の範囲外（画面外）に出ない
+       実測: C/2023 A3 は図の範囲 3.13 AU に対し現在位置 8.73 AU → px=[-233,-34]。
+    4. _comet_route の r_max_au は実際の描画半径（hypot）と一致する
+       実測: max|x,y| を使っていたためハレー彗星で 27.69 AU（実際 33.84 AU）。
+    5. apparition: 期間の端で最小のとき表が「（近日点）」と書かない／出典が実際のもの。
+    """
+
+    def _scene(self, comet_au=2.0, comet_lon=17.0, range_au=None):
+        """日付に依存しない合成シーン（彗星の位置だけ固定する）。"""
+        from space_finder_mcp import solar_system as ss
+
+        scene = ss._compute(when_iso="2026-10-20T00:00:00Z")
+        self.assertNotIn("error", scene)
+        scene["comets"] = {"試験彗星": {"name": "試験彗星", "au": comet_au,
+                                       "proj_au": comet_au, "eclLon": comet_lon,
+                                       "eclLat": 0.0, "color": (150, 235, 255)}}
+        scene["routes"] = {}
+        if range_au:
+            scene["range_au"] = range_au
+        return ss, scene
+
+    def _comet_marker_px(self, scene, co):
+        import math
+        hi = 60.0
+        for c in scene["comets"].values():
+            if not c.get("error") and c["proj_au"] > 0:
+                hi = max(hi, c["proj_au"] * 1.15)
+        lo = 0.30
+        r = 620.0 * (math.log10(co["proj_au"]) - math.log10(lo)) / (math.log10(hi) - math.log10(lo))
+        ang = math.radians(co["eclLon"])
+        return 750 + r * math.cos(ang), 750 + r * math.sin(ang)
+
+    def test_comet_tail_is_not_hidden_by_its_own_label_box(self):
+        """尾はラベル箱より上に描かれる（箱の中でシアン色が見える）。"""
+        import io
+        from PIL import Image
+        ss, scene = self._scene()
+        png = ss._render_simple(scene)
+        im = Image.open(io.BytesIO(png)).convert("RGB")
+        px = im.load()
+        co = scene["comets"]["試験彗星"]
+        box = co.get("label_box")
+        self.assertTrue(box, "彗星の label_box が残っていない")
+        mx, my = self._comet_marker_px(scene, co)
+        import math
+        ux, uy = math.cos(math.radians(co["eclLon"])), math.sin(math.radians(co["eclLon"]))
+        # ラベル箱の内部を通る尾の点を数え、シアン色が残っているか見る
+        inside = cyan = 0
+        t = 0
+        while t <= 76:
+            X, Y = int(mx + ux * t), int(my + uy * t)
+            if box[0] <= X <= box[2] and box[1] <= Y <= box[3]:
+                inside += 1
+                c = px[X, Y]
+                if c[2] > 110 and c[1] > 90 and c[2] >= c[1] >= c[0]:
+                    cyan += 1
+            t += 1
+        if inside:
+            # 箱の中で尾が消えている＝箱に隠れている（実測: 51/51 が箱色だった）
+            self.assertEqual(cyan, inside,
+                             "尾がラベル箱に隠れている（箱内 {} 点中 {} 点しかシアンではない）".format(
+                                 inside, cyan))
+
+    def test_comet_tail_points_away_from_sun(self):
+        """尾は太陽と反対側（反太陽点）へ向かう。"""
+        import io
+        from PIL import Image
+        ss, scene = self._scene(comet_lon=17.0)
+        png = ss._render_simple(scene)
+        im = Image.open(io.BytesIO(png)).convert("RGB")
+        px = im.load()
+        co = scene["comets"]["試験彗星"]
+        mx, my = self._comet_marker_px(scene, co)
+        import math
+        ang = math.radians(co["eclLon"])
+        ux, uy = math.cos(ang), math.sin(ang)          # 反太陽方向
+        sx, sy = (750 - mx), (750 - my)                 # 太陽方向
+        sl = math.hypot(sx, sy) or 1.0
+        sx, sy = sx / sl, sy / sl
+
+        def count(dx, dy, t0=30, t1=70):
+            n = 0
+            t = t0
+            while t <= t1:
+                X, Y = int(mx + dx * t), int(my + dy * t)
+                if 0 <= X < 1500 and 0 <= Y < 1500:
+                    c = px[X, Y]
+                    if c[2] > 110 and c[1] > 90 and c[2] >= c[1] >= c[0]:
+                        n += 1
+                t += 1
+            return n
+
+        away, toward = count(ux, uy), count(sx, sy)
+        self.assertGreater(away, toward,
+                           "尾が太陽側を向いている（反太陽側 {} px / 太陽側 {} px）".format(
+                               away, toward))
+
+    def test_accurate_comet_marker_uses_projected_distance(self):
+        """accurate の彗星マーカーは proj_au（正射影）に置く（軌道線に乗る）。"""
+        import io
+        import math
+        from PIL import Image
+        ss, scene = self._scene(comet_au=10.0)
+        # 合成シーン: 軌道は半径 5 AU の円、彗星は au=10 / proj_au=5
+        scene["routes"] = {"試験彗星": {
+            "name": "試験彗星", "color": (150, 235, 255), "marks": [], "closed": True,
+            "period_days": 100.0, "e": 0.5, "q_au": 5.0, "r_cap_au": None, "typ": "sbdb",
+            "r_max_au": 5.0, "out_of_frame": False,
+            "points": [(5.0 * math.cos(2 * math.pi * k / 360),
+                        5.0 * math.sin(2 * math.pi * k / 360), 0.0) for k in range(361)]}}
+        scene["comets"]["試験彗星"].update({"au": 10.0, "proj_au": 5.0, "eclLon": 0.0,
+                                            "eclLat": 60.0})
+        png = ss._render_accurate(scene)
+        im = Image.open(io.BytesIO(png)).convert("RGB")
+        px = im.load()
+        ox, oy = [float(v) for v in scene["origin_px"]]
+        pu = float(scene["px_per_au"])
+        tgt = (150, 235, 255)
+
+        def count_at(c, r=12):
+            n = 0
+            for y in range(max(0, int(c[1]) - r), min(im.size[1], int(c[1]) + r + 1)):
+                for x in range(max(0, int(c[0]) - r), min(im.size[0], int(c[0]) + r + 1)):
+                    q = px[x, y]
+                    if abs(q[0] - tgt[0]) + abs(q[1] - tgt[1]) + abs(q[2] - tgt[2]) <= 3:
+                        n += 1
+            return n
+
+        co = scene["comets"]["試験彗星"]
+        n_au = count_at((ox + co["au"] * pu, oy))
+        n_proj = count_at((ox + co["proj_au"] * pu, oy))
+        self.assertGreater(n_proj, n_au * 2,
+                           "accurate の彗星マーカーが真距離 au に置かれている"
+                           "（au 位置 {} px / proj 位置 {} px）".format(n_au, n_proj))
+
+    def test_comet_orbit_current_position_marker_stays_in_frame(self):
+        """comet_orbit: 現在位置マーカーが図の範囲外（画面外）に出ない。"""
+        import math
+        from space_finder_mcp import solar_system as ss
+        # C/彗星（双曲線）で q が小さく現在位置が遠くにあるケース
+        el = {"typ": "horizons", "fullname": "C/2023 A3", "e": 1.000185, "a": -2111.3,
+              "q": 0.3913, "i_deg": 139.10, "node_deg": 49.0, "argp_deg": 21.0,
+              "period_days": None, "source": "test"}
+        # 軌道面内の位置: 遠方（r_now > 8q）にして「図の範囲外」になるケースを再現
+        xp, yp = 8.729, 0.0
+        # 位置を軌道面座標から日心黄道座標へ戻す（_ecliptic_to_perifocal の逆変換）。
+        # 実装と同じ 3 段階（節点回転 → 傾斜 → 近点引数）を行列で組み、逆行列で戻す。
+        _i, _node, _argp = (math.radians(el["i_deg"]), math.radians(el["node_deg"]),
+                            math.radians(el["argp_deg"]))
+        _cn, _sn = math.cos(_node), math.sin(_node)
+        _ci, _si = math.cos(_i), math.sin(_i)
+        _ca, _sa = math.cos(_argp), math.sin(_argp)
+        _T1 = ((_cn, _sn, 0.0), (-_sn, _cn, 0.0), (0.0, 0.0, 1.0))       # 節点回転
+        _T2 = ((1.0, 0.0, 0.0), (0.0, _ci, _si), (0.0, -_si, _ci))       # 傾斜
+        _T3 = ((_ca, _sa, 0.0), (-_sa, _ca, 0.0), (0.0, 0.0, 1.0))       # 近点引数
+
+        def _mul(A, B):
+            return tuple(tuple(sum(A[i][k] * B[k][j] for k in range(3)) for j in range(3))
+                         for i in range(3))
+
+        def _inv3(A):
+            d = (A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1])
+                 - A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0])
+                 + A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0]))
+            C = [[0.0] * 3 for _ in range(3)]
+            for i in range(3):
+                for j in range(3):
+                    a, b = [k for k in range(3) if k != i], [k for k in range(3) if k != j]
+                    det = A[a[0]][b[0]] * A[a[1]][b[1]] - A[a[0]][b[1]] * A[a[1]][b[0]]
+                    C[j][i] = ((-1) ** (i + j)) * det / d
+            return tuple(tuple(C[i]) for i in range(3))
+
+        _B = _inv3(_mul(_T3, _mul(_T2, _T1)))   # perifocal -> 黄道
+        x = sum(_B[0][k] * (xp, yp, 0.0)[k] for k in range(3))
+        y = sum(_B[1][k] * (xp, yp, 0.0)[k] for k in range(3))
+        z2 = sum(_B[2][k] * (xp, yp, 0.0)[k] for k in range(3))
+        # 逆変換が正しいことを確認（実装の順変換へ戻して perifocal 座標が一致すること）
+        _bx, _by = ss._ecliptic_to_perifocal(x, y, z2, el["i_deg"], el["node_deg"],
+                                             el["argp_deg"])
+        self.assertAlmostEqual(_bx, xp, places=6)
+        self.assertAlmostEqual(_by, yp, places=6)
+        img, fig = ss._render_comet_orbit("C/2023 A3", el, (x, y, z2),
+                                          "2026-10-20 00:00 UTC")
+        W, H = img.size
+        cur = [m for m in fig["markers"] if m["id"] == "current"][0]
+        self.assertTrue(cur.get("in_frame"),
+                        "現在位置マーカーが画面外（px={}）".format(cur.get("px")))
+        self.assertTrue(0 <= cur["px"][0] < W and 0 <= cur["px"][1] < H,
+                        "現在位置マーカー px={} が画像 {} の外".format(cur["px"], img.size))
+
+    def test_comet_route_r_max_au_matches_drawn_radius(self):
+        """_comet_route の r_max_au は実際の描画半径（hypot）と一致する。"""
+        import math
+        from space_finder_mcp import solar_system as ss
+        cid, el = ss._comet_elements("ハレー彗星")
+        nel = ss.norm_orbit_el(cid, el)
+        pts = ss.orbit_path_xyz(nel, r_cap=max(30.0, 8.0 * float(nel["q"])))
+        real = max(math.hypot(q[0], q[1]) for q in pts)
+        # 旧実装は max|x,y| を使って 18% 過小だった
+        self.assertGreaterEqual(real, 0.0)
+        old = max(max(abs(q[0]), abs(q[1])) for q in pts)
+        self.assertLess(old, real,
+                        "傾いた軌道の max|x,y| が半径と等しい（過小評価されていない）")
+
+    def test_apparition_table_does_not_call_edge_minimum_perihelion(self):
+        """apparition: 期間の端で最小のとき表が「（近日点）」と書かない。"""
+        from space_finder_mcp import comet_apparition as ca
+        d = {"series": [{"jd": 2461041.5, "utc": "2026-01-01 00:00", "r_au": 30.0,
+                         "delta_au": 30.0, "elong_deg": 10.0, "mag": 5.0},
+                        {"jd": 2461042.5, "utc": "2026-01-02 00:00", "r_au": 29.0,
+                         "delta_au": 29.0, "elong_deg": 20.0, "mag": 4.5}],
+               "idx_d": 1, "idx_r": 1, "idx_e": 1, "idx_m": 1, "has_mag": True,
+               "edge_d": False, "edge_r": True, "nel": {"fullname": "試験彗星"},
+               "m1": 10.0, "k1": 4.0, "jd0": 2461041.5, "jd1": 2461042.5,
+               "now_str": "2026-01-01 00:00 UTC",
+               "days": 30, "before": 0, "samples": 2, "peri_prev": None, "peri_next": None}
+        lines = ca._apparition_content(d, {"notes": [], "caption": ""}, None, "")
+        table = [ln for ln in lines if ln.startswith("| 最小日心距離")]
+        self.assertTrue(table)
+        self.assertNotIn("（近日点）", table[0],
+                         "期間の端で最小の値を「（近日点）」と書いている: {}".format(table[0]))
+
+    def test_apparition_content_source_matches_position_source(self):
+        """apparition: content 末尾の出典は実際に使った位置の出典（2体近似なら Horzizons にしない）。"""
+        from space_finder_mcp import comet_apparition as ca
+        d = {"series": [{"jd": 2461041.5, "utc": "2026-01-01 00:00", "r_au": 30.0,
+                         "delta_au": 30.0, "elong_deg": 10.0, "mag": 5.0}],
+             "idx_d": 0, "idx_r": 0, "idx_e": 0, "idx_m": 0, "has_mag": True,
+             "edge_d": True, "edge_r": True, "nel": {"fullname": "試験彗星"},
+             "m1": 10.0, "k1": 4.0, "jd0": 2461041.5, "jd1": 2461041.5,
+             "now_str": "2026-01-01 00:00 UTC",
+             "days": 30, "before": 0, "samples": 1, "peri_prev": None, "peri_next": None,
+             "pos_src": "kepler2body"}
+        lines = ca._apparition_content(d, {"notes": [], "caption": ""}, None, "")
+        tail = [ln for ln in lines if ln.startswith("画像は上に表示")]
+        self.assertTrue(tail)
+        self.assertIn("ケプラー2体", tail[0],
+                      "2体近似のときに出典が Horizons のまま: {}".format(tail[0]))
+        self.assertNotIn("N 体解", tail[0],
+                         "2体近似のときに出典が N 体解を名乗っている: {}".format(tail[0]))
