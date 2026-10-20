@@ -448,6 +448,13 @@ FIGURES_EXTRA_CALLS = (
     ("planetary_rover_location_map[フォボス地点指定]", "planetary_rover_location_map",
      {"body": "phobos", "rover": "idefix", "site_lat": 1.0, "site_lon_w": 49.0},
      {"figure_kind": "ground_track_map"}),
+    # 月面ローバー: 2 段構え（位置図 + 局地サイトプラン）。
+    # Apollo 15 は LM・旗・ALSEP・LRRR・LRV の 5 点が全部描ける最も情報量の多い例。
+    ("planetary_rover_location_map[アポロ15号月面遺跡]", "planetary_rover_location_map",
+     {"body": "moon", "rover": "apollo15"}, {"figure_kind": "ground_track_map"}),
+    # Apollo 12 は LM のすぐ隣にサーベイヤー3号があり、近傍着陸地点の重ね表示も出る。
+    ("planetary_rover_location_map[アポロ12号月面遺跡]", "planetary_rover_location_map",
+     {"body": "moon", "rover": "apollo12"}, {"figure_kind": "ground_track_map"}),
 )
 
 

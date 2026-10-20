@@ -74,10 +74,30 @@ ROVERS: dict[str, dict] = {
     },
 }
 
+# 月面ローバー（site_plan.py の一次情報データから読んで ROVERS と同じ形にする）。
+# 走行経路が機械可読で公開されているのは「最終駐車地点」だけなので、描けるのは
+# 公開されている端点間（LM → 最終駐車地点）に限る（全体は推測で埋めない）。
+LUNAR_ROVER_KEYS = {
+    # LRV を搭載したアポロ15〜17〜17
+    "apollo15": "LRV（Apollo 15）",
+    "apollo16": "LRV（Apollo 16）",
+    "apollo17": "LRV（Apollo 17）",
+    # LRV は無いが LM / 旗 / ALSEP / LRRR の座標・公開値がある
+    "apollo11": "アポロ11号（LRV なし・旗と LRRR）",
+    "apollo12": "アポロ12号（LRV なし・旗）",
+    "apollo14": "アポロ14号（LRV なし・旗と LRRR）",
+    # ソ連・中国の月面車
+    "lunokhod1": "ルノホート1号",
+    "lunokhod2": "ルノホート2号",
+    "yutu": "玉兔号（嫦娥3号）",
+    "yutu2": "玉兔2号（嫦娥4号）",
+}
+
 # ベースマップの種類: "trek"（タイル合成）か "image"（1枚の全球等角図）か
 ROVER_BODIES: dict[str, dict] = {
     "mars": {"ja": "火星", "en": "Mars", "basemap": "trek"},
     "phobos": {"ja": "フォボス", "en": "Phobos", "basemap": "image"},
+    "moon": {"ja": "月", "en": "Moon", "basemap": "trek"},
 }
 
 # ====================================================================
@@ -205,19 +225,210 @@ def _fmt_lon(lon_e: float) -> str:
     return ("東経 {:.4f}°" if v > 0 else "西経 {:.4f}°").format(abs(v))
 
 
+
+def _lunar_rover_result(site: dict, rv: str, rover_ja: str, body_cfg: dict,
+                        *, zoom: Optional[int] = None, span_deg: float = 1.0,
+                        out_px: int = 1200) -> CallToolResult:
+    """月面ローバーの 2 段構え図（位置図 + 局地サイトプラン）を返す。
+
+    位置図 = 天体面地図（等角図法、着陸地点と近隣の着陸地点）
+    局地サイトプラン = 一次情報が公開する距離＋方位から求めたメートル単位の配置
+    """
+    from . import site_plan as _sp
+    from .planetary_map import BODIES as _BODIES
+
+    body_tiles = _BODIES.get("moon")
+    if body_tiles is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="月面のタイル設定がありません。")],
+            structuredContent={"error": "no tile config", "body": "moon"})
+
+    lat0, lon0 = _sp.site_center(site)
+    lon0 = ((float(lon0) + 180.0) % 360.0) - 180.0
+
+    # 近隣の着陸地点（同じ天体の別ミッション。planetary_map の SITES = 一次情報）
+    nearby = []
+    try:
+        from .planetary_map import SITES as _SITES
+        for key, st in (_SITES.get("moon") or {}).items():
+            if key in ("mcgetchin", "falcon9"):
+                continue
+            nearby.append({"ja": st.get("ja", key), "lat": st["lat"], "lon": st["lon"],
+                           "key": key})
+    except Exception:
+        pass
+
+    # 位置図の画角: 近隣の着陸地点が収まるように決める。
+    # 例: アポロ12号の LM とサーベイヤー3号は約 0.4 km 離れている（同一クレーター内）。
+    # 近傍の着陸地点があればそれを、なければ既定値（1°）を使う。
+    sp = max(0.05, float(span_deg))
+    _near = []
+    for nb in nearby:
+        _dlon = abs(((float(nb["lon"]) - lon0 + 180.0) % 360.0) - 180.0)
+        _dlat = abs(float(nb["lat"]) - lat0)
+        # **自分自身は近傍から除外する**（含めると画角が 0 に潰れる。実測）。
+        if _dlon < 1e-4 and _dlat < 1e-4:
+            continue
+        if _dlon < 1.0 and _dlat < 1.0:
+            _near.append(nb)
+    if _near:
+        # 近傍の着陸地点がすべて収まる最小の画角（余裕 1.6 倍・下限 0.05°・上限 5°）
+        _need = max(max(abs(((float(n["lon"]) - lon0 + 180.0) % 360.0) - 180.0),
+                         abs(float(n["lat"]) - lat0)) for n in _near) * 1.6
+        sp = max(0.05, min(_need, 5.0))
+    nearby = _near
+
+    # ズームは画角に合わせる（0.05° のような狭い画角で zoom 6 だと地形が 1 画素に
+    # 潰れて地図が無地味になる。実測）。月面の Trek は 1 タイル 0.703125° なので、
+    # 画角 / 0.703125 がその画角を満たす最小タイル段になる。
+    z = as_int(zoom, None, 4, body_tiles["maxzoom"])
+    if z is None:
+        _sp0 = max(0.05, float(span_deg))
+        z = 0
+        while z < body_tiles["maxzoom"] and (360.0 / (2 ** (z + 1))) > _sp0:
+            z += 1
+        z = max(4, min(int(z), body_tiles["maxzoom"]))
+
+    try:
+        comp = _sp.render_lunar_site_figure(
+            site, body_cfg=body_tiles, zoom=z, span_deg=sp, out_px=out_px,
+            radius_m=_sp.MOON_RADIUS_M, nearby=nearby)
+    except Exception as e:
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"月面遺跡の図の生成に失敗: {e}")],
+            structuredContent={"error": str(e), "rover": rv})
+
+    img = comp["img"]
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="JPEG", quality=88)
+    jpeg = buf.getvalue()
+    out_path = save_output(jpeg, "planetary_rover_location_map", "jpg")
+    imgc = ImageContent(type="image", data=base64.b64encode(jpeg).decode("ascii"),
+                        mimeType="image/jpeg",
+                        altText="{} の月面遺跡マップ".format(site.get("ja", rv)))
+
+    plan_res = comp["plan_res"]
+    drawn = plan_res["drawn"]
+    not_drawn = plan_res["not_drawn"]
+
+    # --- 注記（数値から生成する）---
+    notes = [
+        "**左が位置図、右が局地サイトプラン**（メートル単位・北が上・縮尺バーつき）。"
+        "等角図法の天体面地図は 1px あたり数百 m〜20 km なので、"
+        "数十 m から数百 m 離れた機材は、どのズームでも 1 画素に収まらない。"
+        "そのため公開値から局地座標を計算して別パネルに描いている",
+        "局地プランの位置は**一次情報が公開する値だけ**から求めた。"
+        "距離・方位の公開値がない機材は凡例に「位置の公開値なし」と記して**図には描かない**",
+        "LM / ALSEP / LRRR の座標は NASA NSSDCA「Apollo Landing Site Coordinates」"
+        "（planetocentric Mean Earth/Polar Axis・DE421・Wagner et al., Icarus 283 (2017)）",
+        "旗・LRV 最終駐車地点は NASA Apollo Lunar Surface Journal（ALSJ）",
+    ]
+    if drawn:
+        for a in drawn:
+            if a.get("kind") == "rover":
+                notes.append("橙●の{}は{}。LM からの{}".format(
+                    "LRV 最終駐車地点",
+                    "ALSJ が公開した端点（LM から {}・方位 {} 度）".format(
+                        _sp.fmt_m(a["dist_m"]), a.get("az_deg")),
+                    "直線で結んだのは公開されている端点間だけで、パス全体ではない"))
+                break
+    for a in not_drawn:
+        notes.append("{}: {}".format(a.get("ja", ""), a.get("note", "")))
+    if site.get("note"):
+        notes.append(site["note"])
+    if site.get("dist_m") and not any(a.get("kind") == "rover" for a in drawn):
+        notes.append("このローバーの走行距離は {}。経路の座標が機械可読で公開されておらず、"
+                     "距離のみ.".format(_sp.fmt_m(site["dist_m"])))
+    notes.append(comp.get("tile_failure") or "")
+
+    caption = (f"{site.get('ja', rv)}（{rv}）の月面遺跡。着陸 {site.get('landed', '')}・"
+               f"座標 {lat0:.4f}°N / {lon0:.4f}°E。")
+
+    fig = figure_payload(
+        kind="ground_track_map",
+        title="{}の月面遺跡マップ（{}）".format(site.get("ja", rv), body_tiles["attrib"]),
+        view=view_spec("body_surface", "equirectangular",
+                       "左: 月面地図（等角図法）に着陸地点と近隣の着陸地点。"
+                       "右: 一次情報が公開する距離＋方位から求めた局地サイトプラン（m・北が上）",
+                       why="月面の機材は 8〜165 m の範囲に収まり等角図法では 1 画素に収まらないため、"
+                           "位置図と局地計画を分けて示す"),
+        primary=primary_spec("月", "surface_map",
+                             note="天体面の地図なので主天体は図の中心に置いていない"),
+        scale=scale_spec("linear", to_scale=True, unit="m",
+                         exaggerated=["マーカーの大きさは実寸ではない",
+                                      "左の位置図は縮尺指定なし（等角図法）"]),
+        markers=[{"id": a["id"], "label": a.get("ja", a["id"]),
+                  "east_m": round(a["east_m"], 2), "north_m": round(a["north_m"], 2),
+                  "kind": a.get("kind"), "position_status": a.get("position_status"),
+                  "derived": bool(a.get("derived"))}
+                 for a in drawn],
+        notes=notes,
+        caption=caption,
+        verify={"ok": bool(drawn) or bool(not_drawn) or bool(site.get("dist_m")),
+                "site_plan_drawn": len(drawn),
+                "site_plan_not_drawn": len(not_drawn),
+                "site_plan_has_local_markers": bool(drawn),
+                "scale_bar_m": plan_res["scale_bar_m"],
+                "px_per_m": round(plan_res["px_per_m"], 4),
+                "note": "局地サイトプランの機材数と縮尺（位置図側は `--figures` の "
+                        "basemap 色数検査と同じ扱い）"},
+    )
+    lines = [
+        media_link_line("{} の月面遺跡マップ".format(site.get("ja", rv)),
+                        path=out_path, kind="figure"),
+        f"🔴 **{site.get('ja', rv)}（{rv}）の月面遺跡マップ**:",
+        f"📍 座標: {lat0:.4f}° {'N' if lat0 >= 0 else 'S'} / {lon0:.4f}°E ・ 着陸 {site.get('landed', '')}",
+        f"🗺 局地サイトプラン: 機材 {len(drawn)} 点を描画（縮尺バー {plan_res['scale_bar_m']:.0f} m）",
+    ]
+    if not_drawn:
+        lines.append("⚠️ 位置の公開値がない機材: " + "、".join(a.get("ja", "") for a in not_drawn))
+    lines += ["", figure_text_block(fig),
+              "出典: NASA NSSDCA（着陸地点座標）／NASA Apollo Lunar Surface Journal（旗・LRV 駐車地点）"
+              "／NASA Trek LRO WAC（地図）"]
+    return CallToolResult(
+        content=[TextContent(type="text", text="\n".join(lines)), imgc],
+        structuredContent={"body": "moon", "rover": rv, "rover_ja": rover_ja,
+                           "lat": lat0, "lon": lon0,
+                           "site_ja": site.get("ja"),
+                           "site_en": site.get("en"),
+                           "place": site.get("place"),
+                           "landed": site.get("landed"),
+                           "site_plan_markers": len(drawn),
+                           "site_plan_markers_without_position": [a.get("ja") for a in not_drawn],
+                           "scale_bar_m": plan_res["scale_bar_m"],
+                           "zoom": z, "span_deg": sp,
+                           "figure": fig, "image_path": out_path,
+                           "source": "NASA NSSDCA + Apollo Lunar Surface Journal + NASA Trek"},
+    )
+
 def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance",
                                  zoom: Optional[int] = None, span_deg: float = 0.5,
                                  out_px: int = 1000, site_lat: Optional[float] = None,
                                  site_lon: Optional[float] = None,
                                  site_lon_w: Optional[float] = None,
-                                 show_lat_band: bool = True) -> CallToolResult:
+                                 show_lat_band: bool = True,
+                                 show_sites: bool = True) -> CallToolResult:
     """任意の天体面を移動する探査ローバーの現在地を、その天体の地図上に示した画像を返す（認証不要）。
 
     例:「パーサヴィアランスの現在地を火星地図で」「キュリオシティが今どこにいるか地図で」
-    「MMX の IDEFIX ローバーはフォボスのどこに着陸するのか」で呼びます。
+    「MMX の IDEFIX ローバーはフォボスのどこに着陸するのか」
+    「アポロ15号の月面遺跡の地図」で呼びます。
 
     火星ローバーは NASA MMGIS の現在地・走行経路を取得し、NASA Trek の等角地図に
     走行経路(橙線)・現在地(赤●)・着陸地点(青●)を合成して描画します。
+    同じ天体にある**ほかの人工物着陸地点**は黄枠●で重ねます
+    （例: 火星のマルス2/3号・バイキング、月ではサーベイヤー3号など）。
+
+    **月面ローバー**（アポロ11〜17号の LRV、ルノホート1/2号、玉兔号・玉兔2号）は
+    2 段構えの図で描きます。
+    1. 左: NASA Trek の月面地図（等角図法）に着陸地点と近隣の着陸地点
+    2. 右: **局地サイトプラン**（メートル単位・北が上・縮尺バーつき）
+       LM・ALSEP・LRRR・LRV 最終駐車地点・アメリカ国旗を、一次情報が公開する
+       「距離＋方位」だけから求めた位置で描きます。
+    等角図法の天体面地図は 1px あたり数百 m〜20 km なので、数十 m 離れていても
+    月面機材はどのズームでも 1 画素に収まりません。だから位置図と局地計画を分けます。
+    位置の公開値がない機材（例: アポロ11号の旗）は**図には描かず**、
+    凡例に「位置の公開値なし」と書いてテキストで伝えます。
 
     **フォボス（MMX / IDEFIX）**は着陸地点がまだ未公表（2027〜2028 年に選定）のため、
     現時点では「制約帯（緯度 ±30°）」と、地図上の任意の場所を指定する
@@ -225,8 +436,9 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
     IAU/U.S. Gazetteer に着陸地点が公表されれば自動で検出します。
 
     Args:
-        body: 天体名（既定 "mars"。"mars" / "phobos"）。
-        rover: ローバー名（"perseverance"=既定, "curiosity", "idefix"）。
+        body: 天体名（既定 "mars"。"mars" / "phobos" / "moon"）。
+        rover: ローバー名（"perseverance"=既定, "curiosity", "idefix"、
+            "apollo11"〜"apollo17", "lunokhod1", "lunokhod2", "yutu", "yutu2"）。
         zoom: 地図ズーム（タイル系のみ）。省略時は天体の最大ズーム。
         span_deg: 表示する画角(経度幅・度)。大きいほど広範囲・解像度低下。既定0.5。
         out_px: 出力画像の長辺ピクセル(既定1000, 最大2000)。
@@ -234,6 +446,9 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
         site_lon: 着陸地点の経度(度・**東向き正**)。`site_lon_w` とは排他。
         site_lon_w: 着陸地点の経度(度・**西向き正**。IAU/フォボスの慣用表記)。
         show_lat_band: 着陸地点の緯度制約帯（フォボスでは ±30°）を描くか。既定 True。
+        show_sites: 同じ天体にある**ほかの人工物の着陸地点**を地図に重ねて描くか。既定 True。
+            例: 火星ではマルス2/3号・バイキング・フェニックスなど、月では
+            サーベイヤー3号（Apollo 12 号の LM のすぐ隣）など。
 
     インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
     content の先頭へ「🖼️ [生成した画像を開く: …](file:///…) ｜ 保存先: `…`」という
@@ -253,18 +468,49 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
     body_cfg = ROVER_BODIES[b]
 
     rv = str(rover).strip().lower()
-    if rv not in ROVERS:
+    # 月面ローバーは site_plan.py のデータから解決する（ROVERS には無い）
+    lunar_site = None
+    if rv in LUNAR_ROVER_KEYS:
+        from . import site_plan as _sp
+        _entries = _sp.lunar_rover_entries()
+        if rv not in _entries:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"月面ローバー '{rv}' のデータがありません。")],
+                structuredContent={"error": "unknown lunar rover", "rover": rv},
+            )
+        lunar_site = _entries[rv]
+    if rv not in ROVERS and lunar_site is None:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"対応ローバー: {', '.join(sorted(ROVERS.keys()))}（位置データが公開されている、または着陸予定の表示ができるローバー）")],
-            structuredContent={"error": "unsupported rover", "supported": sorted(ROVERS.keys())},
+            content=[TextContent(type="text", text=(
+                "対応ローバー: " + ", ".join(sorted(list(ROVERS.keys()) + list(LUNAR_ROVER_KEYS.keys())))
+                + "（位置データが公開されている、または着陸予定の表示ができるローバー）"))],
+            structuredContent={"error": "unsupported rover",
+                               "supported": sorted(list(ROVERS.keys()) + list(LUNAR_ROVER_KEYS.keys()))},
         )
-    rcfg = ROVERS[rv]
-    if rcfg["body"] != b:
-        return CallToolResult(
-            content=[TextContent(type="text", text=f"'{rv}'（{rcfg['ja']}）は {ROVER_BODIES[rcfg['body']]['ja']} のローバーです。天体 '{body}' と一致しません。")],
-            structuredContent={"error": "body mismatch", "rover": rv, "body": body},
-        )
+    if lunar_site is not None:
+        if b != "moon":
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"'{rv}'（{LUNAR_ROVER_KEYS[rv]}）は月のローバーです。天体 '{body}' と一致しません。")],
+                structuredContent={"error": "body mismatch", "rover": rv, "body": body},
+            )
+        rcfg = {"body": "moon", "ja": LUNAR_ROVER_KEYS[rv], "en": lunar_site.get("en", rv),
+                "land_ja": lunar_site.get("place", "")}
+    else:
+        rcfg = ROVERS[rv]
+        if rcfg["body"] != b:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"'{rv}'（{rcfg['ja']}）は {ROVER_BODIES[rcfg['body']]['ja']} のローバーです。天体 '{body}' と一致しません。")],
+                structuredContent={"error": "body mismatch", "rover": rv, "body": body},
+            )
     rover_ja = rcfg["ja"]
+
+    # ================= 月面ローバー =================
+    # 月面の各機材は 8〜165 m の範囲に収まるが、等角図法の天体面地図は
+    # 1px あたり数百 m〜20 km なので**どのズームでも 1 画素に収まらない**。
+    # そのため (1) 位置図 と (2) メートル単位の局地サイトプラン の 2 枚を合成して 1 枚にする。
+    if lunar_site is not None:
+        return _lunar_rover_result(lunar_site, rv, rover_ja, body_cfg,
+                                   zoom=zoom, span_deg=span_deg, out_px=out_px)
 
     # 座標指定の相互排他チェック（東向き正と西向き正を同時に受けない）
     site_lon = as_float(site_lon, None, -360.0, 360.0)
@@ -348,6 +594,8 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
     # （0〜360°E の公表値 311° をそのまま渡すと画像の外へ出る。実測）。
     clat = float(clat)
     clon = ((float(clon) + 180.0) % 360.0) - 180.0
+
+
     if mode == "trek":
         # ---- タイル合成・切り出し・投影は共通ルーチン（surface_map）----
         try:
@@ -412,6 +660,25 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
             d.ellipse([lx0 - 8, ly0 - 8, lx0 + 8, ly0 + 8], fill=(80, 160, 255),
                       outline=(255, 255, 255), width=3)
 
+    # 同じ天体にある**ほかの人工物着陸地点**（黄枠●）:
+    # 火星の Parsons/Clint/ Viking…、月の Surveyor 3 など。
+    # 出典は planetary_map.SITES（各点の一次出典を明記済み）。
+    other_sites_drawn = []
+    if show_sites and mode == "trek":
+        from .planetary_map import SITES as _SITES
+        for _k, _st in (_SITES.get(b) or {}).items():
+            if _st.get("kind") in ("crater", "impact"):
+                continue          # 自然衝突・人工物衝突は「着陸地点」ではない
+            _sla, _slo = float(_st["lat"]), float(_st["lon"])
+            _sx, _sy = g2px(_slo, _sla)
+            if not (-200 <= _sx <= img.size[0] + 200 and -200 <= _sy <= img.size[1] + 200):
+                continue
+            d.ellipse([_sx - 7, _sy - 7, _sx + 7, _sy + 7], outline=(255, 210, 60), width=3)
+            _f_other = load_font(15, bold=True)
+            d.text((_sx + 10, _sy - 9), _st.get("ja", _k), font=_f_other, fill=(255, 225, 120))
+            other_sites_drawn.append({"id": _k, "ja": _st.get("ja", _k),
+                                      "lat": _sla, "lon": _slo})
+
     # 現在地／着陸予定点（赤●）
     cx, cy = g2px(clon, clat)
     has_point = bool(wp or landing_site)
@@ -464,7 +731,12 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
     if mode == "trek":
         d.ellipse([20, ly + 12, 36, ly + 28], fill=(80, 160, 255))
         d.ellipse([58, ly + 12, 74, ly + 28], fill=(255, 40, 30))
-        d.text((86, ly + 9), "青●着陸地点  赤●現在地  橙線=走行経路  NASA Trek 等角図法",
+        _leg_x = 86
+        if other_sites_drawn:
+            d.ellipse([_leg_x, ly + 12, _leg_x + 16, ly + 28], outline=(255, 210, 60), width=3)
+            d.text((_leg_x + 22, ly + 9), "黄枠●ほかの着陸地点", font=f_sm, fill=(235, 238, 250))
+            _leg_x += 22 + int(d.textlength("黄枠●ほかの着陸地点", font=f_sm)) + 20
+        d.text((_leg_x, ly + 9), "青●着陸地点  赤●現在地  橙線=走行経路  NASA Trek 等角図法",
                font=f_sm, fill=(235, 238, 250))
     else:
         if band_drawn:
@@ -492,6 +764,9 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
             "青●は着陸地点、赤●は現在地。走行距離は着陸地点からの累積 km",
             "地図は NASA Trek の等角図法のため、高緯度ほど東西方向が圧縮されて見える",
             "座標・sol・RMC は NASA MMGIS (mars.nasa.gov) の公開 waypoint データ",
+            (("黄枠●は同じ天体にあるほかの人工物着陸地点（{} 件）。"
+              "自然衝突クレーター・人工物衝突は含まない。出典は地点ごとに planetary_map.SITES に記載"
+              ).format(len(other_sites_drawn)) if other_sites_drawn else ""),
             ("" if (px0, py0) == (8, 8) and not panel_hidden else
              "情報パネルは現在地マーカー（cx={:.0f}, cy={:.0f}px）と重ならない隅に配置した".format(cx, cy)),
             ("" if not panel_hidden else
@@ -504,6 +779,8 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
         source_txt = "出典: NASA MMGIS (mars.nasa.gov) + Trek WMTS（認証不要）"
         markers = [{"id": "current", "label": f"{rover_ja} 現在地", "lat": clat, "lon": clon,
                     "sol": wp.get("sol"), "rover_distance_km": wp.get("dist_km")}]
+        markers += [{"id": o["id"], "label": o["ja"], "lat": o["lat"], "lon": o["lon"],
+                     "kind": "landing_site"} for o in other_sites_drawn]
         verify = dict(verify_marker(img, (cx, cy), clon, clat, sv["inv"],
                                     r=marker_scan_radius(13)),
                       panel_overlaps_marker=bool(panel_hidden))
