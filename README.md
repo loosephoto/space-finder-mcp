@@ -980,6 +980,7 @@ planetary_rover_location_map(body="moon", rover="apollo15")
 - `satellite_status`（全1,044件の走査）: **初回 38.5s → 以後 0.07s**（カタログをディスクにも保存し、プロセス再起動後も即時）
 - `sky_map_with_satellites`(simple) の画像: **992KB → 188KB**（JPEG化）
 - `search_space_images`: インライン画像を3枚 → 1枚（`inline_max` で増やせる）
+- **`tools/list`（全66ツールの定義。毎ターンのプロンプトに載る）: 118.7KB ≈ 約39,600 トークン → 69.1KB ≈ 約23,000 トークン（−42%）**。description は「要約＋例＋Args（引数の一次情報は改変しない）＋契約文」に圧縮し、inputSchema からは意味のない `title` と `anyOf: [..., null]` を落とす（`tool_docs.py`）。**リポジトリ側の docstring は完全なまま**（`README`/`SKILL.md` を読む人・エージェント向けの説明は減らない）
 
 **設計上の約束**
 - **同じ引数の並行呼び出しは1回の実行にまとめます**（single-flight）。8並列で投げても実行は1回で、結果は全員に同じものが返ります（共有レート枠を N 倍消費しない）

@@ -13,6 +13,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, TextContent
 
 from . import img_common
+from . import tool_docs
 from .wikidata_lookup import reverse_lookup
 from . import nasa as _nasa
 from . import nasa_budget as _nasa_budget
@@ -129,12 +130,19 @@ def _delivered(result):
 
 
 def _reg(fn, name: Optional[str] = None):
-    """ツールを登録する（同期ツールは自動的にワーカースレッド実行になる）。"""
+    """ツールを登録する（同期ツールは自動的にワーカースレッド実行になる）。
+
+    description は `tool_docs.compact_description` で「要約＋例＋Args＋契約文」に縮める。
+    `tools/list` の description は**毎ターンのプロンプトに載る**ため、66本ぶんで
+    44,963 文字（実測）あり、モデルの入力トークンと生成速度を押し下げていた。
+    関数の docstring 自体は完全なまま残す（リポジトリを読む人は従来どおり読める）。
+    """
     wrapped = _threaded(fn)
+    desc = tool_docs.compact_description(fn.__doc__ or "")
     if name:
-        mcp.tool(name=name)(wrapped)
+        mcp.tool(name=name, description=desc)(wrapped)
     else:
-        mcp.tool()(wrapped)
+        mcp.tool(description=desc)(wrapped)
     return wrapped
 
 
@@ -313,3 +321,30 @@ _reg(_calendar.space_calendar)
 _reg(_calendar.calendar_events)
 _reg(_calendar.calendar_event_add)
 _reg(_calendar.calendar_event_remove)
+
+
+def _install_slim_tools_list() -> None:
+    """`tools/list` の inputSchema を `tool_docs.slim_schema` で軽くする。
+
+    description は `_reg()` で圧縮済みだが、FastMCP が吐く inputSchema にも
+    意味のない `title` と `anyOf: [..., null]` が入る（`tools/list` は毎ターンの
+    プロンプトに載るので効いてくる）。プライベートなハンドラ差し替えなので、
+    失敗したら差し替えずに終わる（従来どおり動く）。
+    """
+    try:
+        @mcp._mcp_server.list_tools()
+        async def _slim_list_tools():                 # pragma: no cover - SDK 内部経路
+            tools = await mcp.list_tools()
+            out = []
+            for tool in tools:
+                try:
+                    out.append(tool.model_copy(
+                        update={"inputSchema": tool_docs.slim_schema(tool.inputSchema)}))
+                except Exception:
+                    out.append(tool)
+            return out
+    except Exception:                                 # pragma: no cover - SDK 変更時の保険
+        pass
+
+
+_install_slim_tools_list()
