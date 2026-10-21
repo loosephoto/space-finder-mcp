@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Optional
 
+import json
+import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -20,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 from functools import lru_cache
 from mcp.types import CallToolResult, TextContent
+from .cache import CACHE_ROOT
 from .input_utils import as_int
 from .name_common import expand_terms
 
@@ -55,18 +58,59 @@ _COOLDOWN_SECONDS_BLOCKED = 300.0     # 403（IP 単位の遮断）: 数分待�
 _COOLDOWN_SECONDS_NET = 60.0          # 接続不可・タイムアウト: 短めに再試行
 CONNECT_TIMEOUT = (10, 25)            # (connect, read) 秒。connect を短くして固まりを防ぐ
 
+# 遮断状態は**プロセスをまたいで**覚える。MCP サーバーはツール呼び出しごとに同じ
+# プロセスだが、`check-tools.py` の各ゲートや利用者の新しいセッションは別プロセスに
+# なる。blackhole されたホストへの connect は待ち時間がそのまま乗る（実測:
+# CelesTrak が blackhole のとき connect タイムアウト 10 秒を毎回払っていた）。
+# 60〜300 秒のクールダウンは時間で必ず切れるので、ディスクに置いても固定化しない。
+_BLOCK_FILE = os.path.join(CACHE_ROOT, "celestrak_block.json")
+_STATE_LOADED = False
+
+
+def _load_block_state() -> None:
+    """ディスクに残した遮断状態を一度だけ読み込む（無い・壊れている場合は無視）。"""
+    global _COOLDOWN_UNTIL, _COOLDOWN_LAST, _STATE_LOADED
+    with _COOLDOWN_LOCK:
+        if _STATE_LOADED:
+            return
+        _STATE_LOADED = True
+        try:
+            with open(_BLOCK_FILE, encoding="utf-8") as fh:
+                st = json.load(fh)
+            until = float(st.get("until") or 0.0)
+            if until > time.time():
+                _COOLDOWN_UNTIL = max(_COOLDOWN_UNTIL, until)
+                _COOLDOWN_LAST = str(st.get("reason") or "")
+        except (OSError, ValueError, TypeError):
+            pass
+
+
+def _save_block_state() -> None:
+    """遮断状態を原子的に書く（失敗しても取得処理は止めない）。"""
+    try:
+        os.makedirs(os.path.dirname(_BLOCK_FILE), exist_ok=True)
+        tmp = _BLOCK_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"until": _COOLDOWN_UNTIL, "reason": _COOLDOWN_LAST}, fh)
+        os.replace(tmp, _BLOCK_FILE)
+    except OSError:
+        pass
+
 
 def blocked_status() -> tuple:
     """遮断中なら (残り秒, 理由)、そうでなければ (0.0, "")。"""
+    _load_block_state()
     with _COOLDOWN_LOCK:
         return (max(0.0, _COOLDOWN_UNTIL - time.time()), _COOLDOWN_LAST)
 
 
 def _note_blocked(seconds: float, reason: str) -> None:
     global _COOLDOWN_UNTIL, _COOLDOWN_LAST
+    _load_block_state()
     with _COOLDOWN_LOCK:
         _COOLDOWN_UNTIL = max(_COOLDOWN_UNTIL, time.time() + seconds)
         _COOLDOWN_LAST = reason
+        _save_block_state()
 
 
 def _blocked_message(remaining: float, reason: str) -> str:

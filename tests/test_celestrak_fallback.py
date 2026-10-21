@@ -4,6 +4,7 @@
 位置系ツールが全滅した。TLE は同じ衛星でもエポックにより要素値が異なるので、遮断中は公開ミラー（tle.ivanstanojevic.me / db.satnogs.org）へ切り替える。
 ここでは通信をすべて差し替えて、切り替え・出典表示・fail fast・グループ検索の案内を検証する。
 """
+import os
 import sys
 import time
 import unittest
@@ -42,6 +43,14 @@ class CelestrakFallbackTests(unittest.TestCase):
         self.c = celestrak
         self._old_get = requests.get
         self._old_until = celestrak._COOLDOWN_UNTIL
+        # 遮断状態はプロセスをまたいでディスクに残る（cold start の connect 待ちを
+        # 無くすため）。テストは前の実行の記憶を引き継がないよう、メモリとディスクの
+        # 両方を「読込済み・遮断なし」にリセットする。
+        try:
+            os.remove(celestrak._BLOCK_FILE)
+        except OSError:
+            pass
+        self.c._load_block_state()
         self.c._COOLDOWN_UNTIL = 0.0
         self.c._FALLBACK_CACHE.clear()
         self.c._FALLBACK_DOWN_UNTIL.clear()

@@ -9,6 +9,7 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
+from .cache import TTL_SHORT, ttl_cache
 from .surface_map import (add_legend_band, draw_marker, draw_markers, fit_font_for_width,
                          graticule_view, image_view, marker_scan_radius, panel_placement,
                          surface_view, tile_failure_note, verify_marker, verify_markers)
@@ -202,8 +203,19 @@ def _horizons_state_single(cmd: str, center: str, jd: float) -> tuple:
     return x, y, z, vx, vy, vz
 
 
+@ttl_cache(TTL_SHORT, maxsize=256)
+def _horizons_state_cached(cmd: str, center: str, jd_minute: float) -> tuple:
+    return _horizons_state_single(cmd, center, jd_minute)
+
+
 def _horizons_state(cmd: str, center: str, jd: float) -> tuple:
-    return _horizons_state_single(cmd, center, jd)
+    """状態ベクトルを**1分単位に丸めたキー**でキャッシュする（規約6）。
+
+    Horizons の1リクエストは 0.8 秒前後（実測）。探査機は1分で数kmしか動かないので、
+    同じツールを続けて呼ぶ／並列に呼ぶ場合に分単位で使い回してよい。図の「現在位置」は
+    最大 30 秒古くなるが、全球地図の1画素より小さい差にしかならない。
+    """
+    return _horizons_state_cached(cmd, center, round(jd * 1440.0) / 1440.0)
 
 
 def _body_name(cmd: str) -> str:

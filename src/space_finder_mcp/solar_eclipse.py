@@ -119,22 +119,37 @@ def _resolve_place(place, lat, lon):
     return None
 
 
-def _geom(site, t, sun, moon):
-    """観測地・時刻で太陽・月の (視角半径deg, 角距離deg, 位置角PA) を返す。"""
-    s = site.at(t).observe(sun).apparent()
-    m = site.at(t).observe(moon).apparent()
-    sep = s.separation_from(m).degrees
-    rs = math.degrees(math.asin(_R_SUN / s.distance().km))
-    rm = math.degrees(math.asin(_R_MOON / m.distance().km))
+def _geom_many(site, times, sun, moon):
+    """観測地・複数時刻の (視角半径deg, 角距離deg, 位置角PA) を**まとめて**返す。
+
+    Skyfield は時刻の配列を受け取れる。1点ずつ計算すると、点の数だけ JPL 天体暦の
+    補間（spk.compute_and_differentiate）をやり直すことになる（実測: 日食探索の
+    5152点で 28秒・spk 呼び出し 129k 回）。配列で渡すと補間は1回にまとまり、
+    同じ式・同じ値のまま数秒で終わる。
+
+    戻り: (rs, rm, sep, pa) の numpy 配列（`times` と同じ長さ）。
+    """
+    import numpy as np
+    s = site.at(times).observe(sun).apparent()
+    m = site.at(times).observe(moon).apparent()
+    sep = np.atleast_1d(s.separation_from(m).degrees)
+    rs = np.degrees(np.arcsin(_R_SUN / np.atleast_1d(s.distance().km)))
+    rm = np.degrees(np.arcsin(_R_MOON / np.atleast_1d(m.distance().km)))
     # 位置角 PA(天の北=0 から東回り) で月が太陽のどちら側に見えるか
-    s_ra = s.radec()[0]; s_dec = s.radec()[1]
-    m_ra = m.radec()[0]; m_dec = m.radec()[1]
-    dra = math.radians((m_ra.hours - s_ra.hours) * 15.0)
-    sd = math.radians(s_dec.degrees); md = math.radians(m_dec.degrees)
-    pa = math.atan2(math.sin(dra),
-                    math.cos(sd) * math.tan(md) - math.sin(sd) * math.cos(dra))
-    pa = math.degrees(pa) % 360
+    s_ra, s_dec, _ = s.radec()
+    m_ra, m_dec, _ = m.radec()
+    dra = np.radians((np.atleast_1d(m_ra.hours) - np.atleast_1d(s_ra.hours)) * 15.0)
+    sd = np.radians(np.atleast_1d(s_dec.degrees))
+    md = np.radians(np.atleast_1d(m_dec.degrees))
+    pa = np.degrees(np.arctan2(np.sin(dra),
+                               np.cos(sd) * np.tan(md) - np.sin(sd) * np.cos(dra))) % 360.0
     return rs, rm, sep, pa
+
+
+def _sun_alt_many(site, times, sun):
+    """複数時刻の太陽高度(deg)をまとめて返す（太陽が地平線下なら食は見えない）。"""
+    import numpy as np
+    return np.atleast_1d((sun - site).at(times).altaz()[0].degrees)
 
 
 def _eclipse_type(mag, rs, rm):
@@ -160,27 +175,28 @@ def _scan_day(eph, ts, site, sun, moon, y, mo, d, jst_offset):
     # まず30分刻み（73点）で走査して「食が起きている時間帯」だけを特定する。食は2〜3時間
     # 続くので30分刻みでも取りこぼさない。食の無い日はここで終わる（実測: 全36時間を2分
     # 刻みで舐めると ~5秒/日、30分刻みなら ~0.3秒/日。探索では食の無い日を何日も調べる）。
-    span = []
-    for i in range(36 * 2 + 1):
-        jd = jd_start + i * 30 / 1440.0
-        tt = ts.tt_jd(jd)
-        rs, rm, sep, pa = _geom(site, tt, sun, moon)
-        if sep < (rs + rm):
-            span.append(jd)
+    import numpy as np
+    jds = jd_start + np.arange(36 * 2 + 1) * (30 / 1440.0)
+    rs_a, rm_a, sep_a, _pa_a = _geom_many(site, ts.tt_jd(jds), sun, moon)
+    span = [float(jd) for jd, rs, rm, sep in zip(jds, rs_a, rm_a, sep_a)
+            if sep < (rs + rm)]
     if not span:
         return None
     # 食の時間帯（前後40分の余裕）だけ 2分刻みで精密走査する（最大食分の分解能を確保）
-    occ = []
+    fine = []
     jd = span[0] - 40 / 1440.0
     while jd <= span[-1] + 40 / 1440.0:
-        tt = ts.tt_jd(jd)
-        rs, rm, sep, pa = _geom(site, tt, sun, moon)
-        if sep < (rs + rm):
-            # 高度は食の時間帯だけ計算する（全36時間分ではコストが高い）
-            alt, _az, _ = (sun - site).at(tt).altaz()
-            occ.append({"jd": jd, "rs": rs, "rm": rm, "sep": sep, "pa": pa,
-                        "alt": float(alt.degrees)})
+        fine.append(jd)
         jd += 2 / 1440.0
+    tt_fine = ts.tt_jd(fine)
+    rs_a, rm_a, sep_a, pa_a = _geom_many(site, tt_fine, sun, moon)
+    # 高度は食の時間帯だけ計算する（全36時間分ではコストが高い）
+    alt_a = _sun_alt_many(site, tt_fine, sun)
+    occ = []
+    for jd, rs, rm, sep, pa, alt in zip(fine, rs_a, rm_a, sep_a, pa_a, alt_a):
+        if sep < (rs + rm):
+            occ.append({"jd": float(jd), "rs": float(rs), "rm": float(rm),
+                        "sep": float(sep), "pa": float(pa), "alt": float(alt)})
     if not occ:
         return None
     vis = [o for o in occ if o["alt"] > 0.0]
@@ -198,17 +214,18 @@ def _scan_day(eph, ts, site, sun, moon, y, mo, d, jst_offset):
         return None
     duration = max(0.05, last_jd - first_jd)
     fracs = [0.0, 0.15, 0.35, 0.5, 0.65, 0.85, 1.0]
+    jds_fr = [first_jd + duration * f for f in fracs]
+    tt_fr = ts.tt_jd(jds_fr)
+    rs_a, rm_a, sep_a, pa_a = _geom_many(site, tt_fr, sun, moon)
+    alt_a = _sun_alt_many(site, tt_fr, sun)
     frames = []
-    for f in fracs:
-        jd_f = first_jd + duration * f
-        tt = ts.tt_jd(jd_f)
-        rs_f, rm_f, sep_f, pa_f = _geom(site, tt, sun, moon)
-        alt_f, _az_f, _ = (sun - site).at(tt).altaz()
-        ud = tt.utc_datetime() + datetime.timedelta(hours=jst_offset)
+    for jd_f, rs_f, rm_f, sep_f, pa_f, alt_f in zip(jds_fr, rs_a, rm_a, sep_a, pa_a, alt_a):
+        ud = ts.tt_jd(jd_f).utc_datetime() + datetime.timedelta(hours=jst_offset)
         mag_f = max(0.0, (rs_f + rm_f - sep_f) / (2 * rs_f))
-        frames.append({"jd": jd_f, "jst": ud.strftime("%H:%M"),
-                       "rs": rs_f, "rm": rm_f, "sep": sep_f, "pa": pa_f,
-                       "mag": mag_f, "alt": round(float(alt_f.degrees), 1)})
+        frames.append({"jd": float(jd_f), "jst": ud.strftime("%H:%M"),
+                       "rs": float(rs_f), "rm": float(rm_f), "sep": float(sep_f),
+                       "pa": float(pa_f), "mag": float(mag_f),
+                       "alt": round(float(alt_f), 1)})
     return {"jd_center": best["jd"], "max_mag": mag, "kind": kind, "rs": best["rs"],
             "rm": best["rm"], "pa_center": best["pa"], "frames": frames,
             "start_jd": first_jd, "end_jd": last_jd, "visible": True,
@@ -635,12 +652,11 @@ def _next_eclipse_date(eph, ts, site, start_date, days=800, jst_offset=9.0):
         # 高速判定: 前後6時間 15分刻み（最小離角の時刻 best_tt も記録する）。
         # 15分刻みのサンプリング誤差は最大 7.5分 ≒ 離角 0.07°（月の相対運動 ~0.55°/h）
         # なので、食の可能性の判定は touch に余裕（_SCREEN_MARGIN_DEG）を足して行う。
-        best, best_tt = 9e9, None
-        for k in range(-24, 25):
-            tt2 = ts.tt_jd(jd + k * 15 / 1440.0)
-            rs, rm, sep, pa = _geom(site, tt2, sun, moon)
-            if sep < best:
-                best, best_tt = sep, tt2
+        import numpy as np
+        jds_nm = jd + np.arange(-24, 25) * (15 / 1440.0)
+        _rs_nm, _rm_nm, sep_nm, _pa_nm = _geom_many(site, ts.tt_jd(jds_nm), sun, moon)
+        k_best = int(np.argmin(sep_nm))
+        best, best_tt = float(sep_nm[k_best]), ts.tt_jd(float(jds_nm[k_best]))
         if best < touch + _SCREEN_MARGIN_DEG:
             # 食の恐れ → 精密スキャン。新月時刻ではなく「最小離角（≒最大食）の現地日付」を
             # 起点にすることで、食の無い日を無駄に精密計算しない（実測: 1400日探索で
