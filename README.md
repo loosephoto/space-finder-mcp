@@ -99,7 +99,7 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 
 ## 📝 更新履歴
 
-各バージョンの変更内容は **[GitHub Releases](https://github.com/loosephoto/space-finder-mcp/releases)** に記載しています（最新: [v0.39.6](https://github.com/loosephoto/space-finder-mcp/releases/tag/v0.39.6)）。
+各バージョンの変更内容は **[GitHub Releases](https://github.com/loosephoto/space-finder-mcp/releases)** に記載しています（最新: [v0.41.3](https://github.com/loosephoto/space-finder-mcp/releases/tag/v0.41.3)）。
 
 **README では履歴を二重管理しません** — 同じ内容を2か所に書くと必ず片方が古くなるため、変更点はリリース時に GitHub Releases の本文へ書きます（手順は [`CLAUDE.md`](CLAUDE.md) の「リリース手順」）。
 
@@ -869,7 +869,7 @@ ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカ�
 
 #### 🪨 フォボス（MMX / IDEFIX）— 着陸地点の公表に備えた表示
 
-JAXA の **MMX**（2026-10-19 打ち上げ）と、その前身降低成本の小型ローバー **IDEFIX**（DLR/CNES 製造）は 2028 年度末〜2029 年頭にフォボスへ着陸します（本体は 2030 年頃に着陸して 10 g の試料を持ち帰る）。**着陸地点は 2027〜2028 年に選定されるため現時点では未公表**なので、次の 3 通りに対応しています。
+JAXA の **MMX**（2026-10-20 04:41 JST 打ち上げ）と、**MMX のコスト削減のために特別に設計された**小型ローバー **IDEFIX**（DLR/CNES 製造）は 2028 年度末〜2029 年頭にフォボスへ着陸します（MMX 本体は 2030 年頃に着陸して 10 g の試料を採取し、2031 年に地球へ持ち帰ります）。**着陸地点は 2027〜2028 年に選定されるため現時点では未公表**なので、次の 3 通りに対応しています。
 
 | 指定 | 描かれるもの |
 |:--|:--|

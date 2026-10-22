@@ -11,9 +11,11 @@
 月面ローバー等の現役位置データは公開されていない。そのため実データは火星ローバー
 （Perseverance / Curiosity）のみ。構造は天体・データ源を追加可能な汎用設計にしている。
 
-MMX（フォボス探査）: 2026-10-19 に打ち上げられた JAXA の MMX 探査機と、
-DLR/CNES が開発する小型ローバー **IDEFIX（イデフィクス）** は 2028 年度末〜2029 年頭に
-フォボスへ着陸する（公開予定）。着陸地点は 2027〜2028 年に選定されるため**未公表**。
+MMX（フォボス探査）: 2026-10-20（JST）に打ち上げられた JAXA の MMX 探査機と、
+DLR/CNES が **MMX のコスト削減のために特別に設計した**小型ローバー
+**IDEFIX（イデフィクス）**。IDEFIX は 2028 年度末〜2029 年頭にフォボスへ着陸する
+（MMX 本体は 2030 年頃に着陸して 10 g の試料を採取し、2031 年に地球へ持ち帰る）。
+着陸地点は 2027〜2028 年に選定されるため**未公表**。
 そのため本モジュールは
   - 「着陸地点の公表値を待つ」のではなく `site_lat`/`site_lon`（または `site_lon_w`）で
     任意の地点の座標を**着陸予定点として**描けるようにし、
@@ -346,7 +348,7 @@ def _lunar_rover_result(site: dict, rv: str, rover_ja: str, body_cfg: dict,
 
     fig = figure_payload(
         kind="ground_track_map",
-        title="{}の月面遺跡マップ（{}）".format(site.get("ja", rv), body_tiles["attrib"]),
+        title="{} の月面遺跡マップ（{}）".format(site.get("ja", rv), body_tiles["attrib"]),
         view=view_spec("body_surface", "equirectangular",
                        "左: 月面地図（等角図法）に着陸地点と近隣の着陸地点。"
                        "右: 一次情報が公開する距離＋方位から求めた局地サイトプラン（m・北が上）",
@@ -873,7 +875,7 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
 
     fig = figure_payload(
         kind="ground_track_map",
-        title=f"{rover_ja}の{body_cfg['ja']}位置マップ（{attrib}）",
+        title=f"{rover_ja} の{body_cfg['ja']}位置マップ（{attrib}）",
         view=view_spec("body_surface", "equirectangular",
                        f"{body_cfg['ja']}面の地図（等角図法）に着陸地点・走行経路・現在地を合成",
                        why="移動の履歴を地図上で見るための図。天体の形や軌道は描いていない"),
