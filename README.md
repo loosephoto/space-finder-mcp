@@ -99,7 +99,7 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 
 ## 📝 更新履歴
 
-各バージョンの変更内容は **[GitHub Releases](https://github.com/loosephoto/space-finder-mcp/releases)** に記載しています（最新: [v0.41.3](https://github.com/loosephoto/space-finder-mcp/releases/tag/v0.41.3)）。
+各バージョンの変更内容は **[GitHub Releases](https://github.com/loosephoto/space-finder-mcp/releases)** に記載しています（最新: [v0.41.4](https://github.com/loosephoto/space-finder-mcp/releases/tag/v0.41.4)）。
 
 **README では履歴を二重管理しません** — 同じ内容を2か所に書くと必ず片方が古くなるため、変更点はリリース時に GitHub Releases の本文へ書きます（手順は [`CLAUDE.md`](CLAUDE.md) の「リリース手順」）。
 
@@ -286,7 +286,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `uk_stac_collections` | 英国EO DataHubのコレクション一覧 | UK EO DataHub STAC | 不要 |
 | `uk_stac_search` | 英国EO DataHubの衛星・気候データをSTAC検索 | UK EO DataHub STAC | 不要 |
 | `cnes_status` | フランスCNESのポータル（THEIA/GEODES）到達状態・概要 | CNES THEIA/GEODES | 不要(ダウンロードは要登録) |
-| `astronomy_weather` | 天体観測に最適な夜間の時間帯を予報（雲量・視程・風速・降水・**月相・月明かり**から判断）。**日本国内の地点では気象庁の雨雲・降水画像（解析雨量・降水短時間予報パネル＋ナウキャスト、雷の有無も確認）を画像で同時に返す**（`include_rain=false` で無効化） | Open-Meteo + 気象庁（ナウキャスト・解析雨量） | 不要 |
+| `astronomy_weather` | 天体観測に最適な**暗い**時間帯を予報（**薄明＝太陽高度**（`sun_alt_max` 既定 -15°）・雲量・視程・風速・降水・**月相・月明かり**から判断）。**日本国内の地点では気象庁の雨雲・降水画像（解析雨量・降水短時間予報パネル＋ナウキャスト、雷の有無も確認）を画像で同時に返す**（`include_rain=false` で無効化） | Open-Meteo + 気象庁（ナウキャスト・解析雨量） | 不要 |
 | `constellation_now` | 指定地点・時刻で太陽・月・惑星の高度・方位・星座を計算（観測可否判断） | Skyfield + JPL de421 | 不要 |
 | `astronomy_news` | 最新の天文ニュース・「今週の星空ガイド」を取得（観測/ニュース絞込可）。取得不可時は他ソースへ自動フォールバック | Sky & Telescope / Universe Today / NASA / Phys.org RSS | 不要 |
 | `mars_rover_status` | 火星探査ローバー（キュリオシティ等）の現在の状況・天気・ソルを表示 | NASA Mars Weather | 不要 |
@@ -547,12 +547,14 @@ A: cnes_status() → THEIA / GEODES の状態と概要
 
 ### 🔭 `astronomy_weather` — 天体観測用天気（Open-Meteo ＋ 気象庁の雨雲・降水画像）
 
-[Open-Meteo](https://open-meteo.com)（認証不要・無料・全世界対応）から、指定地点の今後数日間で**天体観測に適した夜間の時間帯**を自動抽出します。雲量・視程・風速・降水確率・昼夜判定を総合して判断し、AIからのアドバイスを返します。
+[Open-Meteo](https://open-meteo.com)（認証不要・無料・全世界対応）から、指定地点の今後数日間で**天体観測に適した暗い時間帯**を自動抽出します。**薄明（太陽高度）**・雲量・視程・風速・降水確率・月相・月明かりを総合して判断し、AIからのアドバイスを返します。
 
 - 場所は緯度経度（`latitude`/`longitude`）または地名（`place`）で指定
 - 富士山・マウナケア・アタカマ・阿智村などの**著名観測地は正確な緯度経度を内蔵**
 - `max_cloud` で観測可否の雲量基準を調整可能（既定 40%）
-- `structuredContent` に各時間帯の雲量・視程・風速・降水確率をJSONで返す
+- `sun_alt_max` で「暗い」とみなす**太陽高度**を調整可能（既定 -15°。`-18` で天文薄明＝完全な暗夜のみ、`-6` なら市民薄明が終わった後から）。Open-Meteo は hourly に太陽高度を返さない（`sun_elevation` は 400 で拒否）ため、日付・経度・UTCオフセットから**解析的に推定**します（Skyfield/DE421 との実測差は 4地点×3日×48点で最大 0.41°・薄明の交差時刻は ±1 分）。極昼・極夜など推定できない地点は `is_day` のみで判定し、どちらを使ったかを `structuredContent.sun_alt_source` に返します
+- **「今夜の月の入り」は日没より後の最初の月没**を選びます（Open-Meteo の `daily.moonset` は暦日単位なので、日没前に終わった「その日未明の月没」が混ざります。実測: 東京 2026-10-23 の `daily.moonset[0]` は 02:26 で、今夜の月没は翌日 03:30）。**照度は太陽との離角から計算**します（`moon_phase` は朔望月の進み具合であって照度そのものではありません）
+- `structuredContent` に各時間帯の雲量・視程・風速・降水確率・**太陽高度**をJSONで返す
 
 ```text
 Q: マウナケアで今夜天体観測できる?
@@ -1079,7 +1081,7 @@ src/space_finder_mcp/
 ├── celestrak.py         # sat_tle（CelesTrak 全衛星軌道TLE）
 ├── uk_datahub.py        # uk_stac_collections / uk_stac_search（英国 EO DataHub）
 ├── cnes.py              # cnes_status（フランス CNES THEIA/GEODES）
-├── weather_astro.py     # astronomy_weather（天体観測用天気, Open-Meteo, 月相＋気象庁雨雲画像）
+├── weather_astro.py     # astronomy_weather（天体観測用天気, Open-Meteo, 薄明=太陽高度＋月相＋気象庁雨雲画像）
 ├── jma_rain.py          # 気象庁の雨雲・降水画像の合成（解析雨量・降水予報＋ナウキャスト/雷）
 ├── weather_sat.py       # weather_satellite_now（GEO/LEO気象衛星の公開画像, 19機＋理由コード）
 ├── power.py             # power_climate（NASA POWER 気候・太陽エネルギー統計）

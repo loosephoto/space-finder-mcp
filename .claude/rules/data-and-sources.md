@@ -21,7 +21,7 @@
 | IAU/U.S. Gazetteer（地名 feed） | `asc-planetarynames-data.s3.us-west-2.amazonaws.com/<TARGET>_nomenclature_center_pts.kmz`（zip 内 KML）。**`center_lon` は 0〜360 の東向き正**（Stickney=311 は 49°W・IAU Feature 5707 と一致）。種別は英字の `type` 文字列で判別する（"Landing Site" を含むものが着陸地点）。座標系は `GCS_<body>_2000` |
 | 月面遺跡の図（局地サイトプラン） | 等角図法の天体面地図は 1px 数百 m〜20 km なので月面機材は 1 画素に収まらない＝**位置図（等角図法）と局地プラン（m 単位）の 2 段構え**にする。**凡例・見出しは図体と重ならない帯**に置く（重なると機材が「消えて」見える。実測: A12 の ALSEP が実際にその状態になった）。**Trek の月面タイルは 1 タイル 0.703125°** なので画角 0.05° だと地形が潰れる＝ズームは画角から決める。隣接する着陸地点（例: サーベイヤー3号とアポロ12号の LM は約 0.4 km）を含めるなら画角をその距離に合わせて広げる。**近傍の判定に自分自身を含めると画角が 0 に潰れる**ので必ず除外する |
 | Sky & Telescope ほかRSS | Cloudflare がブラウザ偽装UAを弾く（curl/Wget系UAは許可）。`astronomy_news` は**複数フィードのフォールバック連鎖** |
-| Open-Meteo / Nominatim | Open-Meteo は都市名（英語強め・ja→enエイリアス付き）。Nominatim は識別可能なUA必須（403 になるUAあり）。結果は 24時間キャッシュ |
+| Open-Meteo / Nominatim | Open-Meteo は都市名（英語強め・ja→enエイリアス付き）。Nominatim は識別可能なUA必須（403 になるUAあり）。結果は 24時間キャッシュ。**hourly に太陽高度は無い**（`sun_elevation` は 400 「Cannot initialize … from invalid String value」）ので、薄明の判定は日付・経度・`utc_offset_seconds` から自前で解析計算する（`weather_astro.sun_altitude_deg`）。`daily.moon_phase` は**朔望月の進み具合**（0=新月, 0.5=満月）で照度ではない＝照度は `(1-cos(2πp))/2`（実測 2026-10-23: p=0.391 → 88.7%。timeanddate 88.6%）。`daily.moonrise/moonset` は**暦日単位**なので日没前の値を「今夜の月没」として使わない（東京 2026-10-23 の `moonset[0]` は 02:26、今夜の月没は翌日 03:30） |
 | Wikidata SPARQL | 「初・記録」の回答は SPARQL の結果に基づく（記憶から捏造しない）。必ず Wikipedia 記事を引用する |
 | WMO OSCAR | 衛星カタログは約1000件・取得が重い（実測50秒）→ 24時間キャッシュ |
 | DLR EOC STAC | `POST /search` は `numberMatched` を返す。**`filter`（CQL2）は 400・`sortby` は無視**（実測）＝雲量の絞り込みは取得後にクライアント側で行い、`excluded_by_cloud` / `without_cloud_info` を分けて返す。ライセンスはコレクションごとの申告値（CC-BY-4.0 / CC-BY-NC-4.0 / proprietary 混在）なので利用条件を明示する |

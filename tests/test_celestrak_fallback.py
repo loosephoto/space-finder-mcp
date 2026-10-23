@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import unittest
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -15,6 +16,23 @@ sys.path.insert(0, "src")
 
 TLE1 = "1 29479U 06041A   26265.61027173  .00000358  00000+0  69728-4 0  9991"
 TLE2 = "2 29479  98.0550 280.3324 0016952 343.4387  16.6263 14.68726603 69177"
+
+
+def tle_line1_days_ago(template: str, days_ago: int = 1) -> str:
+    """1行目のエポック(YYDDD.DDDDDDDD)を「days_ago 日前」に差し替え、チェックサムを計算し直す。
+
+    **固定のエポックを「新しい TLE」としてテストに埋めると、実時間が経つだけで
+    その TLE が古くなり、期待値（何件が古いか）が日付に依存して壊れる**（実測:
+    TLE1 のエポック 26265 = 2026-09-22 は 2026-10-23 に 31 日前となり
+    `FALLBACK_STALE_DAYS=30` を超えて、既存テストが失敗した）。
+    """
+    now = datetime.now(timezone.utc) - timedelta(days=days_ago)
+    doy = now.timetuple().tm_yday
+    frac = int((now.hour * 3600 + now.minute * 60 + now.second) / 86400 * 1e8)
+    epoch = "{:02d}{:03d}.{:08d}".format(now.year % 100, doy, frac)
+    body = template[:18] + epoch + template[32:-1]
+    checksum = sum(int(c) if c.isdigit() else (1 if c == "-" else 0) for c in body) % 10
+    return body + str(checksum)
 
 
 class FakeResp:
@@ -230,10 +248,11 @@ class CelestrakFallbackTests(unittest.TestCase):
     def test_mirror_name_search_warns_about_stale_epochs(self):
         """代替源の名前検索は古いエポックを混ぜることがあるので、件数を数えて注記する。"""
         old_tle1 = "1 44713U 19074A   23361.79593842  .00010000  00000+0  15000-3 0  9990"
+        fresh_tle1 = tle_line1_days_ago(TLE1, days_ago=1)   # 「新しい TLE」は実行時に作る
         self._patch(celestrak=requests.ConnectionError("blackhole"),
                     mirror=FakeResp(payload={"member": [
                         {"name": "STARLINK-1007", "line1": old_tle1, "line2": TLE2},
-                        {"name": "STARLINK-3093", "line1": TLE1, "line2": TLE2},
+                        {"name": "STARLINK-3093", "line1": fresh_tle1, "line2": TLE2},
                     ]}))
         res = self._tool_fn("sat_tle")(name="starlink")
         text = res.content[0].text
@@ -241,7 +260,7 @@ class CelestrakFallbackTests(unittest.TestCase):
         self.assertIn("2 件中 1 件", text)
         self.assertIn("古いエポック", res.structuredContent.get("note", ""))
         # 新しい方だけの検索結果では注記を出さない
-        records = [{"epoch": self.c.tle_epoch_iso(TLE1)}]
+        records = [{"epoch": self.c.tle_epoch_iso(fresh_tle1)}]
         self.assertEqual(self.c.stale_epoch_note(records), "")
 
     def test_fetch_tle_ex_does_not_leak_exception_shape(self):
