@@ -364,16 +364,27 @@ def _pole_W(body: dict, jd: float) -> tuple:
 
 
 def _j2000_to_body(body: dict, x, y, z, jd) -> tuple:
+    """ICRF(J2000) の位置ベクトルを天体固定座標へ回す（IAU/WGCCRE の自転モデル）。
+
+    r_body = Rz(W) · Rx(90° − δ) · Rz(α + 90°) · r_ICRF（α・δ・W は `_pole_W()`）。
+    Rz(θ)=[[c,s,0],[-s,c,0],[0,0,1]] / Rx(θ)=[[1,0,0],[0,c,s],[0,-s,c]]（レポートの行列）。
+
+    旧実装は `Rz(W)·Ry(δ−90°)·Rz(α)` で、**標準式と経度が +90.00° ずれていた**（実測
+    2026-10-24: 月・火星・水星・ガニメデの4天体すべてで 経度の差 +90.00°・緯度の差 0.00°）。
+    どちらが正しいかは物理と公表値で決まる: 月の地球直下の経度は光学秤動（±7.9°）の中に
+    入る必要があり **−5.63°（旧 +84.37°）**／同期回転のガニメデでは木星直下の経度がほぼ 0 に
+    なる必要があり **−2.63°（旧 +87.37°）**／Juno PJ34（2021-06-07 16:56:08）の公表値
+    「探査機 56.8°W・太陽 318°W」に対し **57.90°W・41.31°E（旧 32.10°E・131.31°E）**。
+    """
     a, d, W = _pole_W(body, jd)
-    A, D, Wr = math.radians(a), math.radians(d), math.radians(W)
-    x1 = x * math.cos(A) + y * math.sin(A)
+    A, D, Wr = math.radians(a + 90.0), math.radians(90.0 - d), math.radians(W)
+    x1 = x * math.cos(A) + y * math.sin(A)          # Rz(α + 90°)
     y1 = -x * math.sin(A) + y * math.cos(A)
     z1 = z
-    t = D - math.pi / 2
-    x2 = x1 * math.cos(t) + z1 * math.sin(t)
-    y2 = y1
-    z2 = -x1 * math.sin(t) + z1 * math.cos(t)
-    x3 = x2 * math.cos(Wr) + y2 * math.sin(Wr)
+    x2 = x1                                        # Rx(90° − δ)
+    y2 = y1 * math.cos(D) + z1 * math.sin(D)
+    z2 = -y1 * math.sin(D) + z1 * math.cos(D)
+    x3 = x2 * math.cos(Wr) + y2 * math.sin(Wr)     # Rz(W)
     y3 = -x2 * math.sin(Wr) + y2 * math.cos(Wr)
     z3 = z2
     return x3, y3, z3
