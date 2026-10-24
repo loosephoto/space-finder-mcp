@@ -79,6 +79,33 @@ BODIES = {
                  "{z}/{row}/{col}.jpg"),
         "maxzoom": 7, "attrib": "NASA Trek Dawn FC",
     },
+    # ---- ガリレオ衛星（木星の4大衛星）: フライバイの対象になる本体 ----
+    # 自転モデルは IAU（NAIF pck00011.tpc の POLE_RA / POLE_DEC / PM を実測で取得）。
+    # 極の歳差は -0.009°/世紀（赤経）・+0.003°/世紀（赤緯）、自転は同期回転。
+    # ベースマップは Trek にタイルが無いので MAP_BODIES の全球画像（Voyager + Galileo のモザイク）を使う。
+    "io": {
+        "ja": "イオ", "en": "Io", "basemap": "image", "center": "@501", "radius": 1821.5,
+        "a0": 268.05, "da": -0.009, "d0": 64.50, "dd": 0.003,
+        "W0": 200.39, "Wd": 203.4889538, "maxzoom": 1,
+    },
+    "europa": {
+        "ja": "エウロパ", "en": "Europa", "basemap": "image", "center": "@502",
+        "radius": 1560.8,
+        "a0": 268.08, "da": -0.009, "d0": 64.51, "dd": 0.003,
+        "W0": 36.022, "Wd": 101.3747235, "maxzoom": 1,
+    },
+    "ganymede": {
+        "ja": "ガニメデ", "en": "Ganymede", "basemap": "image", "center": "@503",
+        "radius": 2631.2,
+        "a0": 268.20, "da": -0.009, "d0": 64.57, "dd": 0.003,
+        "W0": 44.064, "Wd": 50.3176081, "maxzoom": 1,
+    },
+    "callisto": {
+        "ja": "カリスト", "en": "Callisto", "basemap": "image", "center": "@504",
+        "radius": 2410.3,
+        "a0": 268.72, "da": -0.009, "d0": 64.83, "dd": 0.003,
+        "W0": 259.51, "Wd": 21.5710715, "maxzoom": 1,
+    },
 }
 
 ORBITERS = {
@@ -99,6 +126,85 @@ _KAGUYA_IMPACT = {
     "source": "JAXA プレスリリース 2009-06-11「月周回衛星『かぐや（SELENE）』の制御落下結果について」"
               "／同プロジェクトサイト（落下前の地形カメラ画像に星印で落下地点を掲載）",
 }
+# 接近通過（フライバイ）・スイングバイを行う探査機。名前 → JPL Horizons の天体ID。
+# 「周回機」（ORBITERS）と違い**対象天体に縛られない**（同じ機体が地球・金星・水星…へ順に接近する）。
+# events は JPL Horizons の OBJ_DATA ヘッダ（実測・2026-10-24 時点）と各機関の公表値。
+SPACECRAFT: dict = {
+    "europa clipper": {
+        "id": "-159", "ja": "エウロパ・クリッパー", "en": "Europa Clipper",
+        "aliases": ["エウロパクリッパー", "エウロパ・クリッパー", "europa-clipper", "europaclipper"],
+        "events": "火星スイングバイ 2025-03-01 ／ 地球スイングバイ 2026-12-03 ／ 木星到着 2030-04-11",
+        "note": "木星圏でエウロパを49回フライバイ（2030-2034・高度 25 km まで）",
+    },
+    "juice": {
+        "id": "-28", "ja": "JUICE", "en": "JUICE",
+        "aliases": ["ジュース", "juice spacecraft", "jupiter icy moons explorer"],
+        "events": "地球-月 2024-08-20 ／ 金星 2025-08-31 ／ 地球#2 2026-09-28 ／ 地球#3 2029-01-18",
+        "note": "木星到着 2031-07。ガニメデ・エウロパ・カリストをフライバイし 2034-12 にガニメデ周回へ",
+    },
+    "bepicolombo": {
+        "id": "-121", "ja": "ベピコロンボ（みお）", "en": "BepiColombo",
+        "aliases": ["ベピコロンボ", "ベピ・コロンボ", "みお", "mio", "bepi colombo"],
+        "events": "水星フライバイ6回（2021-10-01〜2025-01-08）／ 水星到着 2026-11",
+        "note": "地球 2020-04-10・金星 2020-10-15/2021-08-11 のスイングバイを経て水星へ",
+    },
+    "hera": {
+        "id": "-91", "ja": "ヘラ", "en": "Hera",
+        "aliases": ["ヘラ"],
+        "events": "火星フライバイ 2025-03（火星から約 6000 km・ダイモスから約 1000 km）／ ディディモス到着 2026-12",
+        "note": "DART が衝突した小惑星ディディモスの調査ミッション（ESA）",
+    },
+    "psyche": {
+        "id": "-255", "ja": "サイキ（プシケ）", "en": "Psyche",
+        "aliases": ["サイキ", "プシケ", "psyche spacecraft"],
+        "events": "火星スイングバイ 2026-05 ／ 小惑星プシケ到着 2029-08",
+        "note": "金属質小惑星 16 Psyche の周回探査（NASA）",
+    },
+    "lucy": {
+        "id": "-49", "ja": "ルーシー", "en": "Lucy",
+        "aliases": ["ルーシー"],
+        "events": "地球スイングバイ 2024-12-13 ／ トロヤ群フライバイ 2027-08 以降",
+        "note": "木星トロヤ群の小惑星を次々にフライバイ（NASA）",
+    },
+    "new horizons": {
+        "id": "-98", "ja": "ニュー・ホライズンズ", "en": "New Horizons",
+        "aliases": ["ニューホライズンズ", "ニュー・ホライズンズ", "ニューホライズン"],
+        "events": "木星 2007-02-28 ／ 冥王星 2015-07-14 ／ アロコス 2019-01-01",
+        "note": "現在は星間空間へ向かう（太陽圏外）",
+    },
+    "hayabusa 2": {
+        "id": "-37", "ja": "はやぶさ2", "en": "Hayabusa2",
+        "aliases": ["はやぶさ2", "はやぶさ", "hayabusa2", "hayabusa 2"],
+        "events": "地球スイングバイ 2025-06 ／ 1998 KY26 到着 2031-07",
+        "note": "リュウグウの試料を回収（2020-12）後の拡張ミッション",
+    },
+    "juno": {
+        "id": "-61", "ja": "ジュノー", "en": "Juno",
+        "aliases": ["ジュノー", "juno spacecraft"],
+        "events": "地球 2013-10-09 ／ 木星到着 2016-07-04 ／ ガニメデ 2021-06 ／ エウロパ 2022-09 ／ イオ 2023-2024",
+        "note": "木星周回機。衛星フライバイで「真下の点」の航路が使える代表例",
+    },
+    "parker solar probe": {
+        "id": "-96", "ja": "パーカー・ソーラー・プローブ", "en": "Parker Solar Probe",
+        "aliases": ["パーカーソーラープローブ", "パーカー・ソーラー・プローブ", "parker"],
+        "events": "金星フライバイ7回（2018-10-03〜2024-11-06・最後）",
+        "note": "太陽に最接近する探査機（NASA）。金星スイングバイで軌道を落とす",
+    },
+    "solar orbiter": {
+        "id": "-144", "ja": "ソーラー・オービター", "en": "Solar Orbiter",
+        "aliases": ["ソーラーオービター", "ソーラー・オービター", "soloorbiter"],
+        "events": "金星フライバイ・地球フライバイを繰り返し（ESA/NASA）",
+        "note": "黄道面から外れた軌道で太陽極域を観測",
+    },
+    "mmx": {
+        "id": "-239", "ja": "MMX（火星衛星探査計画）", "en": "Martian Moons eXploration",
+        "aliases": ["mmx", "火星衛星探査計画"],
+        "events": "打上げ 2026-10-19 19:41 UTC（JST 2026-10-20 04:41）／ 火星圏到着 2027-08",
+        "note": "フォボスを周回・着陸し、2029-2030 にダイモスを連続フライバイ（JAXA）",
+    },
+}
+
+
 PAST = {
     "kaguya": {"body": "moon", "ja": "かぐや（SELENE）", "en": "Kaguya (SELENE)",
                "note": "2009年に月面へ制御落下（運用終了）", "impact": _KAGUYA_IMPACT},
@@ -219,11 +325,29 @@ def _horizons_state(cmd: str, center: str, jd: float) -> tuple:
 
 
 def _body_name(cmd: str) -> str:
-    params = {"format": "text", "COMMAND": "'" + cmd + "'", "MAKE_EPHEM": "'NO'"}
+    """Horizons の天体IDから名前を引く（宇宙機 -159 → "Europa Clipper" 等）。
+
+    `MAKE_EPHEM='NO'` だけでは Horizons が "No output possible for request."（実測 162 バイト）を
+    返して名前が取れず、**ID がそのまま図の題名に出ていた**（実測: `orbiter="-159"` →
+    「-159 の火星面位置」）。OBJ_DATA='YES' を付けて "Revised:" 行を解析する。
+    宇宙機は `Revised: Sep 30, 2026  Europa Clipper (Spacecraft) / (Sun, Jupiter)   -159`、
+    惑星は `Revised: June 02, 2025    Mars     499 / 4` の形。
+    """
+    params = {"format": "text", "COMMAND": "'" + cmd + "'", "OBJ_DATA": "'YES'",
+              "MAKE_EPHEM": "'NO'"}
     try:
         r = requests.get("https://ssd.jpl.nasa.gov/api/horizons.api", params=params,
                          headers=UA, timeout=(30, 30))
-        m = re.search(r"Revised:.*?([A-Za-z0-9 /().\-']+?)\s*\((-?[0-9]+)\)", r.text)
+        line = next((l for l in r.text.splitlines() if l.strip().startswith("Revised:")), "")
+        if line:
+            s = line.strip()[len("Revised:"):].strip()
+            s = re.sub(r"^[A-Z][a-z]+\s+\d{1,2},\s+\d{4}\s*", "", s)      # 日付を落とす
+            s = re.sub(r"\s+-?\d+\s*(/\s*\d+)?\s*$", "", s).strip()      # 末尾の天体IDを落とす
+            s = s.split(" / ")[0].strip()                                      # 中心天体の併記を落とす
+            s = re.sub(r"\s*\((?:Spacecraft|spacecraft)\)\s*$", "", s).strip()
+            if s:
+                return s
+        m = re.search(r"Target body name:\s*(.+?)\s*\{", r.text)
         if m:
             return m.group(1).strip()
     except requests.RequestException:
@@ -263,6 +387,143 @@ def _body_to_latlon(body: dict, xb, yb, zb):
         lon -= 360
     alt = r - body["radius"]
     return lat, lon, alt
+
+
+# Horizons の数値時刻は **TDB** として解釈される（実測 2026-10-24: 数値JD 2460683.750000 と
+# 暦文字列 '2025-01-08 06:00' が同一の状態ベクトルを返し、その見出しは
+# 「A.D. 2025-Jan-08 06:00:00.0000 TDB」。同じ数値を TIME_TYPE='UT' で送ると水星中心距離が
+# 9.8 km 変わる＝解釈が切り替わる）。このモジュールは UTC の暦から JD を作るので、そのまま
+# 送ると **69.184 秒（TT−UTC）ずれる**。接近通過では 69 秒 × 相対速度 6 km/s ≒ 400 km の
+# 位置ずれになり、最接近時刻も 69 秒ずれる（実測: BepiColombo 第6水星フライバイで
+# 補正前 05:58:52 の 69 秒のずれが消え ESA 公表値と一致した）。
+_TT_MINUS_UTC_S = 69.184
+_JD_EPOCH = datetime.datetime(2000, 1, 1, 12, tzinfo=datetime.timezone.utc)
+
+
+def _jd_from_utc(t: datetime.datetime) -> float:
+    """UTC の datetime → Horizons に渡す数値JD（TDB）。"""
+    return 2451545.0 + (t - _JD_EPOCH).total_seconds() / 86400.0 + _TT_MINUS_UTC_S / 86400.0
+
+
+def _jd_to_utc_datetime(jd_tdb: float) -> datetime.datetime:
+    """Horizons に渡した数値JD（TDB）→ UTC の datetime（表示・注記用）。"""
+    return _JD_EPOCH + datetime.timedelta(seconds=(jd_tdb - 2451545.0) * 86400.0 - _TT_MINUS_UTC_S)
+
+
+def _name_candidates(value) -> list:
+    """入力の表記ゆれ（和名・別名）を展開した候補トークン（小文字）を返す。"""
+    cands: list = []
+    raw = str(value or "").strip()
+    if raw:
+        cands.append(raw.lower())
+    try:
+        from .name_common import expand_terms, name_variants
+        for t in list(expand_terms(raw)) + list(name_variants(raw)):
+            tl = str(t).strip().lower()
+            if tl and tl not in cands:
+                cands.append(tl)
+    except Exception:            # 名前解決の失敗でツールを落とさない（英名だけで続行）
+        pass
+    return cands
+
+
+def _spacecraft_pick(cands: list) -> Optional[str]:
+    """候補トークンから SPACECRAFT のキーを探す（和名・別名も見る）。"""
+    for c in cands:
+        if c in SPACECRAFT:
+            return c
+    for key, v in SPACECRAFT.items():
+        al = {str(a).strip().lower() for a in (v.get("aliases") or [])}
+        for c in cands:
+            if c in al:
+                return key
+    return None
+
+
+def _image_basemap(body_key: str) -> dict:
+    """画像1枚のベースマップ定義（MAP_BODIES の image）を返す。"""
+    img = ((MAP_BODIES.get(body_key) or {}).get("image"))
+    if not img:
+        raise ValueError("天体 '{}' には全球画像のベースマップ定義がありません".format(body_key))
+    return img
+
+
+def _basemap_attrib(body_cfg: dict, body_key: str) -> str:
+    """図に出す地図の出典（Trek タイルなら attrib、画像なら credit）。"""
+    if body_cfg.get("tile"):
+        return body_cfg.get("attrib") or "NASA Trek"
+    try:
+        return _image_basemap(body_key).get("credit") or body_cfg.get("attrib") or ""
+    except ValueError:
+        return body_cfg.get("attrib") or ""
+
+
+def _basemap_view(body_cfg: dict, body_key: str, lon: float, lat: float, span_deg: float,
+                  zoom: int, out_px: int) -> dict:
+    """天体のベースマップ（Trek のタイル or 全球画像1枚）で地図ビューを作る。
+
+    Trek にタイルが無い天体（ガリレオ衛星など）は MAP_BODIES の全球画像を使う。
+    どちらも同じ投影契約（img / g2px / inv）を返すので、描画と検証は共通のまま。
+    """
+    if body_cfg.get("tile"):
+        # タイル取得・切り出し・投影は共通ルーチン（surface_map）。投影と検証が
+        # 2か所にあると必ず食い違うため、地図の上に描く処理はここに集約する。
+        return surface_view(body_cfg, lon, lat, span_deg, zoom, out_px,
+                            whole_dim=0.75, regional_dim=0.7)
+    img = _image_basemap(body_key)
+    return image_view(img["url"], lon, lat, span_deg, out_px,
+                      credit=img.get("credit", ""), subdir="basemap",
+                      headers=BASEMAP_UA, whole_dim=0.75, regional_dim=0.7,
+                      left_edge_lon=img.get("left_edge_lon"), crop=img.get("crop"))
+
+
+def _states_many(body_cfg: dict, cmd: str, jds: list) -> list:
+    """複数時刻の天体面状態（緯度経度・高度・速度・中心距離）を1バッチで返す。"""
+    out = []
+    for jd, (x, y, z, vx, vy, vz) in zip(jds, _horizons_states(cmd, body_cfg["center"], jds)):
+        out.append(_vec_to_state(body_cfg, x, y, z, vx, vy, vz, jd))
+    return out
+
+
+def _closest_approach(body_cfg: dict, cmd: str, jd0: float, half_days: float,
+                      coarse_min: float = 30.0) -> dict:
+    """jd0 を中心に ±half_days を走査して最接近（CA）を求める。
+
+    粗い走査（既定30分刻み・最大約 200 点を1リクエストの TLIST バッチで送る）で最小点を
+    見つけ、その前後を1分刻みで取り直し、最後に3点の放物線フィットで極小時刻を秒精度へ
+    詰める（距離の時間変化は極小の近くで滑らかなので2次近似で十分）。
+    最小点が走査範囲の端に落ちたときは `edge=True`（真の最接近は範囲外の可能性）。
+    """
+    n = int(max(8, min(200, round(2.0 * half_days * 1440.0 / max(1.0, coarse_min)))))
+    jds = [jd0 - half_days + (2.0 * half_days) * i / n for i in range(n + 1)]
+    st = _states_many(body_cfg, cmd, jds)
+    i = min(range(len(st)), key=lambda k: st[k]["dist_km"])
+    edge = i in (0, len(st) - 1)
+    lo = jds[max(0, i - 1)]
+    hi = jds[min(len(jds) - 1, i + 1)]
+    m = 40
+    fine = [lo + (hi - lo) * k / m for k in range(m + 1)]
+    fs = _states_many(body_cfg, cmd, fine)
+    j = min(range(len(fs)), key=lambda k: fs[k]["dist_km"])
+    jd_c, dist_c = fine[j], fs[j]["dist_km"]
+    step_d = (hi - lo) / m
+    if 0 < j < len(fine) - 1:                     # 3点放物線の頂点（秒精度へ）
+        d1, d0, d2 = fs[j - 1]["dist_km"], dist_c, fs[j + 1]["dist_km"]
+        den = d1 - 2.0 * d0 + d2
+        if abs(den) > 1e-12:
+            jd_c = jd_c + step_d * (d1 - d2) / (2.0 * den)
+    # 確定した時刻の状態は **1分丸めのキャッシュを通さず**に取り直す（秒精度を保つ）
+    best = _vec_to_state(body_cfg, *_horizons_state_single(cmd, body_cfg["center"], jd_c), jd_c)
+    # 「接近通過（フライバイ）」と言えるのは天体の近くまで来たときだけ。窓のなかの最小距離が
+    # 天体半径の 50 倍より遠いなら**単なる窓内の最小**であって接近通過ではない（実測:
+    # Europa Clipper の 2030-06 の窓では最小でも 1,512 万 km＝フライバイではない）。
+    thr = 50.0 * float(body_cfg["radius"])
+    return dict(ok=True, jd=jd_c, edge=bool(edge), dist_km=best["dist_km"],
+                alt_km=best["alt_km"], speed_kms=best["speed_kms"],
+                lat=best["lat"], lon=best["lon"],
+                encounter=bool(best["dist_km"] < thr), encounter_threshold_km=thr,
+                coarse_points=len(jds), fine_points=len(fine),
+                coarse_min=coarse_min, half_days=half_days)
 
 
 def _state(body: dict, cmd: str, jd: float) -> dict:
@@ -1250,36 +1511,54 @@ def _sites_result(body: str, key, out_px: int = 1000):
 
 def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
                             when: Optional[str] = None,
-                            minutes: int = 90, step: int = 5,
+                            minutes: int = 90, step: Optional[float] = None,
                             zoom: Optional[int] = None, span_deg: float = 120.0,
                             out_px: int = 900,
-                            sites: Optional[str] = None) -> CallToolResult:
-    '''任意の天体（月・火星・水星・タイタン等）を周回する探査機の現在位置と軌道を、その天体の地図にプロットした画像を返す。
+                            sites: Optional[str] = None,
+                            flyby: bool = False, ca_hours: float = 48.0) -> CallToolResult:
+    '''任意の天体（月・火星・水星・タイタン等）を周回する探査機、または接近通過（フライバイ）・スイングバイする探査機の現在位置と航路を、その天体の地図にプロットした画像を返す。`flyby=True` で最接近（CA）を自動探索し、最接近時刻・高度・相対速度・最接近点を出す（軌道表示の対象は月・火星・水星・タイタン・ベスタ・ケレス＋ガリレオ衛星）。
 
-    例:「LROの現在位置を月面地図で」「MROの火星での現在地」「火星周回機の位置」
+    例:「LROの現在位置を月面地図で」「MROの火星での現在地」「火星周回機の位置」「BepiColombo の水星接近通過（フライバイ）の航路」「ジュノーのエウロパフライバイ」「エウロパ・クリッパーの火星スイングバイ」
     「かぐやの月面落下地点は？」（過去機は運用終了を案内し、落点が公表されていれば
     その地点を月面図にマーカーで示した図を返す）
     「アポロの着陸地点を月面図で」「アポロ11号の着陸地点は？」（sites 指定＝地点マーカー図）
     「月に出来た一番新しいクレーターの位置は？」（sites="newcrater"＝新クレーター2地点）
+    **接近通過（フライバイ）対応**: `orbiter` には Horizons の負の天体IDだけでなく
+    **ミッション名**も指定できます（"europa clipper"／"juice"／"bepicolombo"／"hera"／
+    "psyche"／"lucy"／"new horizons"／"はやぶさ2"／"juno"／"parker solar probe"／
+    "solar orbiter"／"mmx" と和名・別名。`SPACECRAFT` 表）。`flyby=True` では
+    **最接近（CA）を自動探索**し、表示時刻と地図の中心を CA に置き直して、最接近時刻・
+    最接近高度・相対速度・最接近点の緯度経度を図と structuredContent に出します。
+    対象天体は月・火星・水星・タイタン・ベスタ・ケレスに加えて**イオ・エウロパ・
+    ガニメデ・カリスト**（木星の4大衛星＝フライバイの現場）に対応。Trek にタイルが無い
+    天体は MAP_BODIES の全球画像をベースマップに使います。
+
     JPL Horizons が返す中心天体の状態ベクトルを IAU 自転モデルで天体固定座標
     (緯度経度・高度) に変換し、NASA Trek の等角図法地図に重ねて描画。認証不要。
 
     全面表示にするには span_deg=360（既定 120）。zoom 省略時は全面(1)に自動設定。
 
     Args:
-        body: 天体名（moon, mars, mercury, venus, titan, vesta, ceres, io, europa,
-            ganymede, callisto, jupiter, saturn, uranus, neptune, pluto, bennu, ryugu）。
+        body: 天体名（和名も可。"エウロパ" → europa）。軌道表示は moon, mars, mercury,
+            titan, vesta, ceres, io, europa, ganymede, callisto の10天体
+            （Trek にタイルが無い天体は1枚の全球画像をベースマップに使う）。
             地点が登録されていない天体（ガス惑星・小天体）は sites="map" で全球図を返す。
-        orbiter: 周回機名（月: lro, gateway／火星: mro, odyssey）または
-            JPL Horizons の負の天体ID（例 "-74"）。和名（"かぐや"/"あかつき" 等）も可。
+        orbiter: 機体名。周回機（月: lro, gateway／火星: mro, odyssey）／接近通過する探査機
+            （ミッション名: "europa clipper"/"juice"/"bepicolombo"/"hera"/"psyche"/"lucy"/
+            "new horizons"/"はやぶさ2"/"juno"/"parker solar probe"/"solar orbiter"/"mmx"）／
+            JPL Horizons の負の天体ID（例 "-74"）。和名・別名も可（"かぐや"/"エウロパ・クリッパー" 等）。
             過去機（kaguya 等）は運用終了のため現在位置は返さず、**落点が公表されている
             機体（かぐや）は落点の緯度経度・時刻・出典を structuredContent.impact_site に返す**。
         when: 観測時刻 ISO8601（例 "2026-09-10T00:00:00Z"）。省略で現在。
         minutes: 現在位置の前後何分の軌道を表示するか（既定 90, 最大 1440）。
-        step: トレイルの時間刻み（分。既定 5, 最小 1）。
+        step: トレイルの時間刻み（分。既定: 通常 5／flyby=True では 1, 最小 1/60＝1秒）。
+        ca_hours: 最接近を探す範囲（指定時刻の前後。既定 48=±24時間, 最大 720=±30日）。
         zoom: 地図ズーム 1〜最大（既定: span_deg>=360 なら1=全面, それ未満は3）。
         span_deg: 表示する経度幅（度。360=天体全面, 既定 120, 最大 360）。
         out_px: 出力画像の長辺ピクセル（既定 900, 最大 1600）。
+        flyby: True で接近通過（フライバイ）モード。指定時刻の前後 ca_hours/2 時間を
+            走査して最接近（CA）を探し、**表示時刻と地図の中心を CA へ置き直す**
+            （トレイルは CA の前後 minutes 分。既定 False＝従来どおり指定時刻の位置）。
         sites: **地点マーカー図**にする場合の地点指定（例 "apollo"=アポロ6地点すべて、
             "apollo11"="apollo17"=個別、"map"=地図のみ、"newcrater"=月に新しくできた
             クレーター2点）。指定すると周回機の計算を行わず、公表座標にマーカーを置いた図を
@@ -1299,6 +1578,12 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
     from PIL import ImageDraw          # 画像の生成は surface_map 側で行う
 
     b = str(body).strip().lower()
+    if b not in BODIES and b not in MAP_BODIES:
+        # 和名・表記ゆれを展開してから判定する（"エウロパ" → "europa"、"月" → "moon"）
+        for t in _name_candidates(body):
+            if t in BODIES or t in MAP_BODIES:
+                b = t
+                break
     if sites and str(sites).strip():
         # 地点マーカー図（着陸地点・衝突地点など）。周回機の計算は行わない。
         # 全球画像を持たない天体（木星など）でも描けるよう MAP_BODIES で解決する。
@@ -1309,7 +1594,9 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
             content=[TextContent(type="text", text=f"不明な天体 '{body}'。対応: {', '.join(sorted(BODIES.keys()))}（地点マーカー図は sites= で MAP_BODIES の天体に対応）")],
             structuredContent={"error": "unknown body", "body": body, "known": sorted(BODIES.keys())},
         )
-    body_cfg = BODIES[b]
+    # モジュール表を書き換えないよう複製し、地図の出典（Trek タイル／全球画像）を解決する
+    body_cfg = dict(BODIES[b])
+    body_cfg["attrib"] = _basemap_attrib(body_cfg, b)
 
     ob = str(orbiter).strip().lower()
     # 和名・表記ゆれを展開してから判定する（「かぐや」→ kaguya、「あかつき」→ akatsuki）。
@@ -1363,9 +1650,18 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
                                "impact_site": imp, "input": orbiter},
         )
     live = _pick(ORBITERS)
+    craft = _spacecraft_pick(cands)
+    craft_events = ""
+    craft_note = ""
     if live:
         ob = live
-    if ob in ORBITERS:
+    if craft:
+        # フライバイ機・周回機をミッション名で指定（周回機と違い**対象天体に縛られない**）
+        cinfo = SPACECRAFT[craft]
+        cmd = cinfo["id"]; ja = cinfo["ja"]; en = cinfo["en"]
+        craft_events = cinfo.get("events", "")
+        craft_note = cinfo.get("note", "")
+    elif ob in ORBITERS:
         oinfo = ORBITERS[ob]
         if oinfo["body"] != b:
             return CallToolResult(
@@ -1377,23 +1673,28 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
         cmd = ob; ja = _body_name(cmd); en = ""
     else:
         return CallToolResult(
-            content=[TextContent(type="text", text="不明な周回機 '{}'。天体 {} の対応: {}（過去機: {}）"
-                                 "または JPL Horizons の負の天体ID".format(
+            content=[TextContent(type="text", text="不明な機体 '{}'。天体 {} の周回機: {}"
+                                 "（過去機: {}）／ ミッション名で指定できるフライバイ機: {}"
+                                 "／ または JPL Horizons の負の天体ID".format(
                                      orbiter, body_cfg["ja"],
                                      ", ".join(sorted([k for k, v in ORBITERS.items() if v["body"] == b])),
-                                     ", ".join(sorted([k for k, v in PAST.items() if v["body"] == b]))))],
+                                     ", ".join(sorted([k for k, v in PAST.items() if v["body"] == b])),
+                                     ", ".join(sorted(SPACECRAFT))))],
             structuredContent={"error": "unknown orbiter", "orbiter": orbiter, "body": body,
                                "known": sorted([k for k, v in ORBITERS.items() if v["body"] == b]),
-                               "past": sorted([k for k, v in PAST.items() if v["body"] == b])},
+                               "past": sorted([k for k, v in PAST.items() if v["body"] == b]),
+                               "spacecraft": sorted(SPACECRAFT)},
         )
 
     minutes = as_int(minutes, 90, 10, 1440)
-    step = as_float(step, 5, 1.0 / 60.0, 30.0)
+    step = as_float(step, 1.0 if flyby else 5, 1.0 / 60.0, 30.0)
     span_deg = as_float(span_deg, 120.0, 10.0, 360.0)
     whole = span_deg >= 360.0
     zoom = as_int(zoom, None, 1, body_cfg["maxzoom"])
     if zoom is None:
         zoom = 1 if whole else 3
+    if not body_cfg.get("tile"):
+        zoom = 1                       # 全球画像1枚のベースマップには拡大段階が無い
     out_px = as_int(out_px, 900, 400, 1600)
 
     when_s = "" if when is None else str(when).strip()
@@ -1412,11 +1713,33 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
             )
     else:
         t0 = datetime.datetime.now(datetime.timezone.utc)
-    jd_now = 2451545.0 + (t0 - datetime.datetime(2000, 1, 1, 12, tzinfo=datetime.timezone.utc)).total_seconds() / 86400.0
+    jd_now = _jd_from_utc(t0)      # Horizons は数値JD を TDB として解釈する（実測）ので UTC→TDB
     tstr = t0.strftime("%Y-%m-%d %H:%M UTC")
+    requested_tstr = tstr
+
+    # ---- 接近通過（フライバイ）: 最接近（CA）を探索し、表示時刻をそこへ置き直す ----
+    ca = None
+    ca_hours = as_float(ca_hours, 48.0, 1.0, 720.0)
+    is_ca = False
+    if flyby:
+        try:
+            ca = _closest_approach(body_cfg, cmd, jd_now, ca_hours / 24.0)
+        except Exception as e:
+            ca = {"ok": False, "error": str(e)[:150]}
+        if ca.get("ok") and ca.get("encounter") and not ca.get("edge"):
+            jd_now = ca["jd"]                          # 表示時刻＝最接近時刻
+            t0 = _jd_to_utc_datetime(jd_now)
+            tstr = t0.strftime("%Y-%m-%d %H:%M UTC")
+            is_ca = True
 
     try:
-        cur = _state(body_cfg, cmd, jd_now)
+        if is_ca:
+            # 接近通過では 1 分の丸めが高度・緯度経度に効く（例: 6 km/s で 1 分 ≒ 360 km）ので、
+            # キャッシュの分丸めを通さずに秒精度で取る
+            cur = _vec_to_state(body_cfg, *_horizons_state_single(cmd, body_cfg["center"], jd_now),
+                                jd_now)
+        else:
+            cur = _state(body_cfg, cmd, jd_now)
     except requests.RequestException as e:
         return CallToolResult(
             content=[TextContent(type="text", text=f"JPL Horizons からの状態ベクトル取得に失敗しました: {e}")],
@@ -1452,12 +1775,12 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
     try:
         # タイル取得・切り出し・投影は共通ルーチン（surface_map）。投影と検証が
         # 2か所にあると必ず食い違うため、地図の上に描く処理はここに集約する。
-        sv = surface_view(body_cfg, lon0, lat0, span_deg, zoom, out_px,
-                          whole_dim=0.75, regional_dim=0.7)
+        # Trek にタイルが無い天体（ガリレオ衛星など）は全球画像1枚のベースマップを使う。
+        sv = _basemap_view(body_cfg, b, lon0, lat0, span_deg, zoom, out_px)
     except Exception as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"{body_cfg['ja']}地図タイルの取得に失敗しました: {e}")],
-            structuredContent={"error": str(e), "source": "trek.nasa.gov"},
+            content=[TextContent(type="text", text=f"{body_cfg['ja']}の地図の取得に失敗しました: {e}")],
+            structuredContent={"error": str(e), "source": body_cfg["attrib"]},
         )
     img = sv["img"]
     g2px = sv["g2px"]
@@ -1478,6 +1801,18 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
                 outline_w=max(4, img.size[0] // 200), inner_ratio=0.5)
 
     iw, ih = img.size
+    # 接近通過モードの情報（CA が求まったときだけ入る）
+    ca_line = ""
+    ca_txt = ""
+    if ca and ca.get("ok") and ca.get("encounter"):
+        ca_utc = _jd_to_utc_datetime(ca["jd"]).strftime("%Y-%m-%d %H:%M:%S UTC")
+        ca_ns = "北緯" if ca["lat"] >= 0 else "南緯"
+        ca_ew = "東経" if ca["lon"] >= 0 else "西経"
+        ca_line = "🎯 最接近 {} ・ 高度 {:.1f} km ・ 相対速度 {:.2f} km/s".format(
+            ca_utc, ca["alt_km"], ca["speed_kms"])
+        ca_txt = "{} ・ {}中心から {:.1f} km（高度 {:.1f} km）・ 相対速度 {:.2f} km/s ・ 最接近点 {} {:.2f}° / {} {:.2f}°".format(
+            ca_utc, body_cfg["ja"], ca["dist_km"], ca["alt_km"], ca["speed_kms"],
+            ca_ns, abs(ca["lat"]), ca_ew, abs(ca["lon"]))
     # 旧 _font は常にメイリオ Bold 優先だったため bold=True で等価
     f_big = load_font(max(16, iw // 34), bold=True)
     f_mid = load_font(max(13, iw // 46), bold=True)
@@ -1489,22 +1824,27 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
     def _fh(font, text):
         bb = d.textbbox((0, 0), text, font=font)
         return bb[3] - bb[1]
-    line1 = f"🛰 {ja}（{en}）"
+    line1 = f"🛰 {ja}（{en}）" if en else f"🛰 {ja}"
     line2 = f"{body_cfg['ja']}面: {ns} {abs(lat0):.2f}° / {ew} {abs(lon0):.2f}°  高度 {alt0:.1f} km"
     line3 = f"速度 {spd} ・ 時刻 {tstr}"
+    line4 = ca_line
     # 情報パネルは現在位置マーカーを隠さない位置へ（隠れると画素検査が落ちる）
     panel_w = int(iw * 0.72)
-    panel_h = (_fh(f_big, line1) + pad) + (_fh(f_mid, line2) + pad) + _fh(f_sm, line3) + 28
+    panel_h = ((_fh(f_big, line1) + pad) + (_fh(f_mid, line2) + pad) + _fh(f_sm, line3)
+               + ((_fh(f_sm, line4) + pad) if line4 else 0) + 28)
     px0, py0, panel_hidden = panel_placement(iw, ih, panel_w, panel_h,
                                              avoid=[(cx, cy)], margin=12, gap=r + 6)
     y1 = py0 + 8
     y2 = y1 + _fh(f_big, line1) + pad
     y3 = y2 + _fh(f_mid, line2) + pad
-    panel_bottom = y3 + _fh(f_sm, line3) + 16
+    y4 = y3 + _fh(f_sm, line3) + pad
+    panel_bottom = (y4 + _fh(f_sm, line4) + 16) if line4 else (y3 + _fh(f_sm, line3) + 16)
     d.rounded_rectangle([px0, py0, px0 + panel_w, panel_bottom], radius=12, fill=(0, 0, 0, 210))
     d.text((px0 + 12, y1), line1, font=f_big, fill=(255, 255, 255))
     d.text((px0 + 12, y2), line2, font=f_mid, fill=(225, 228, 248))
     d.text((px0 + 12, y3), line3, font=f_sm, fill=(200, 210, 240))
+    if line4:
+        d.text((px0 + 12, y4), line4, font=f_sm, fill=(190, 240, 255))
     if panel_hidden:
         # どの隅でも重なる小さな図では、隠れるマーカーをパネルの上に描き直す
         draw_marker(d, (cx, cy), r, fill=(255, 60, 30),
@@ -1519,11 +1859,18 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
         lx, ly = cx - lab_w // 2, cy + margin
     ly = max(10, min(ly, ih - lab_h - 10))
     d.rounded_rectangle([lx, ly, lx + lab_w, ly + lab_h], radius=8, fill=(200, 0, 0, 235))
-    d.text((lx + 8, ly + 5), f"{ja} 現在位置", font=f_mid, fill=(255, 255, 255))
+    marker_label = f"{ja} 最接近（CA）" if is_ca else f"{ja} 現在位置"
+    # ミッション名が長い機体（"パーカー・ソーラー・プローブ 最接近（CA）" 等）でも札に収める
+    lab_font = fit_font_for_width(lab_w, [marker_label],
+                                  [f_mid.size, f_sm.size, 11, 9], margin=16)
+    _bb = d.textbbox((0, 0), marker_label, font=lab_font)
+    d.text((lx + 8, ly + max(2, (lab_h - (_bb[3] - _bb[1])) // 2)), marker_label,
+           font=lab_font, fill=(255, 255, 255))
 
     jpeg = encode_jpeg(img)   # 3.5MB 超は縮小して再エンコード（img_common）
     imgc = ImageContent(type="image", data=base64.b64encode(jpeg).decode("ascii"),
-                        mimeType="image/jpeg", altText=f"{ja} の{body_cfg['ja']}面位置")
+                        mimeType="image/jpeg",
+                        altText=f"{ja} の{body_cfg['ja']}面" + ("航路（最接近付近）" if is_ca else "位置"))
     # インライン画像を描けないハーネス向け: 保存してリンクを先頭に出す
     out_path = save_output(jpeg, "planetary_orbiter_track", "jpg")
 
@@ -1548,36 +1895,76 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
                              note="天体面の地図なので主天体は図の中心に置いていない"),
         scale=scale_spec("linear", to_scale=True, unit="deg",
                          exaggerated=["現在位置マーカー（実寸ではない）"]),
-        markers=[{"id": "current", "label": f"{ja} 現在位置", "lat": round(lat0, 4),
-                  "lon": round(lon0, 4), "altitude_km": round(alt0, 2),
-                  "px": [round(cx), round(cy)]}],
+        markers=[{"id": "closest_approach" if is_ca else "current", "label": marker_label,
+                  "lat": round(lat0, 4), "lon": round(lon0, 4),
+                  "altitude_km": round(alt0, 2), "px": [round(cx), round(cy)]}],
         notes=figure_notes(extra=[
-            f"オレンジ線は指定時刻の前後 {minutes} 分の{body_cfg['ja']}面軌道＝真下の点の軌跡。"
-            "3Dの軌道の形ではない",
+            f"オレンジ線は{'最接近時刻' if is_ca else '指定時刻'}の前後 {minutes} 分の"
+            f"{body_cfg['ja']}面軌道＝真下の点の軌跡。3Dの軌道の形ではない",
             "等角図法のため高緯度ほど東西方向が圧縮されて見える",
-            f"表示は「{view}」（span_deg={span_deg:g}）。地図は NASA Trek の{body_cfg['attrib']}",
-            f"マーカーは指定時刻の真下の点。高度 {alt0:.1f} km・{body_cfg['ja']}中心距離 "
-            f"{cur['dist_km']:.1f} km・速度 {spd}",
+            f"表示は「{view}」（span_deg={span_deg:g}）。地図: {body_cfg['attrib']}",
+            f"マーカーは{'最接近（CA）の' if is_ca else '指定時刻の'}真下の点。高度 {alt0:.1f} km・"
+            f"{body_cfg['ja']}中心距離 {cur['dist_km']:.1f} km・速度 {spd}",
             "過去の探査機（かぐや等）は運用終了済みで、位置は軌道要素からの外挿になる場合がある",
             (f"トレイル {len(trail_errors)} 点の計算に失敗しました。該当部分は表示されていません。"
              if trail_errors else ""),
             ("" if (px0, py0) == (12, 12) and not panel_hidden else
-             "情報パネルは現在位置マーカー（cx={:.0f}, cy={:.0f}px）と重ならない隅に配置した".format(cx, cy)),
+             "情報パネルは位置マーカー（cx={:.0f}, cy={:.0f}px）と重ならない隅に配置した".format(cx, cy)),
             ("" if not panel_hidden else
              "図が小さくパネルと重なるため、現在位置マーカーはパネルの上に描き直した"),
+            (f"最接近（CA）: {ca_txt}" if ca_txt else ""),
+            (("⚠️ この期間（前後 {:.0f} 時間）に接近通過は見つからなかった。窓内の最小距離は"
+              "{:.0f} km（高度 {:.0f} km・{:s}）で、天体半径の {:.0f} 倍より遠いので"
+              "フライバイとは言えない。接近通過の時期に合わせて when を指定するか、"
+              "ca_hours を広げてほしい").format(
+                 ca_hours / 2, ca["dist_km"], ca["alt_km"],
+                 _jd_to_utc_datetime(ca["jd"]).strftime("%Y-%m-%d %H:%M UTC"),
+                 ca["dist_km"] / float(body_cfg["radius"]))
+             if (ca and ca.get("ok") and not ca.get("encounter")) else ""),
+            (f"最接近の探索: 指定時刻の前後 {ca_hours / 2:.0f} 時間（±{ca['half_days']:.2f} 日）を"
+             f"{ca['coarse_min']:.0f} 分刻み {ca['coarse_points']} 点 → 1分刻み {ca['fine_points']} 点 → "
+             f"3点放物線フィットで秒精度まで詰めた（JPL Horizons の状態ベクトル）"
+             if (ca and ca.get("ok")) else ""),
+            ("" if not (ca and ca.get("ok") and ca.get("edge")) else
+             "⚠️ 最接近は探索範囲（前後 {:.0f} 時間）の端にある。真の最接近は範囲外の可能性が"
+             "あるので ca_hours を広げて再実行してほしい".format(ca_hours / 2)),
+            (f"⚠️ 最接近の探索に失敗した（{ca.get('error')}）。指定時刻の位置だけを示している"
+             if (ca and not ca.get("ok")) else ""),
+            ("接近通過（flyby=True）: 表示時刻と地図の中心を最接近時刻に置き直している"
+             "（要求時刻ではない）" if (flyby and is_ca) else ""),
+            ("" if body_cfg.get("tile") else
+             "この天体は全球画像1枚をベースマップに使うため zoom（拡大段階）は指定できない"),
             tile_failure_note(sv),
         ]),
         caption=f"{ja} の{body_cfg['ja']}面位置（{tstr}）。真下の点は {ns} {abs(lat0):.2f}° / "
-                f"{ew} {abs(lon0):.2f}°、高度 {alt0:.1f} km。",
+                f"{ew} {abs(lon0):.2f}°、高度 {alt0:.1f} km。"
+                + (f" 最接近（CA）は {ca_txt}。" if ca_txt else ""),
         verify=mv,
     )
     lines = [
         media_link_line(f"{ja} の{body_cfg['ja']}面軌道マップ",
                         path=out_path, kind="figure"),
-        f"🛰 **{ja}** の{body_cfg['ja']}面位置（{tstr}）:",
+        f"🛰 **{ja}** の{body_cfg['ja']}面位置（{tstr}）"
+        + ("＝最接近（CA）" if is_ca else "") + ":",
         f"📍 {body_cfg['ja']}面: {ns} {abs(lat0):.2f}° / {ew} {abs(lon0):.2f}°",
         f"🛰 高度 {alt0:.1f} km ・ {body_cfg['ja']}中心距離 {cur['dist_km']:.1f} km ・ 速度 {spd}",
         f"🛤 軌道トレイル: 前後 {minutes} 分（{step_disp} 刻み）。オレンジ線=軌道。表示: {view}",
+        (f"🎯 **最接近（CA）**: {ca_txt}" if ca_txt else ""),
+        (("⚠️ この期間（前後 {:.0f} 時間）に接近通過は見つかりませんでした（窓内の最小距離 "
+          "{:,.0f} km・高度 {:,.0f} km・{}）。表示時刻は指定どおりのままです。"
+          "接近通過の時期に when を合わせるか ca_hours を広げてください。").format(
+             ca_hours / 2, ca["dist_km"], ca["alt_km"],
+             _jd_to_utc_datetime(ca["jd"]).strftime("%Y-%m-%d %H:%M UTC"))
+         if (ca and ca.get("ok") and not ca.get("encounter")) else ""),
+        (f"🕒 flyby=True のため**表示時刻を最接近時刻へ置き直しました**（指定 {requested_tstr} → {tstr}）"
+         if (is_ca and requested_tstr != tstr) else ""),
+        ("" if not (ca and ca.get("ok") and ca.get("edge")) else
+         f"⚠️ 最接近は探索範囲（前後 {ca_hours / 2:.0f} 時間）の端にあります。"
+         "真の最接近は範囲外の可能性があるため ca_hours を広げて再実行してください。"),
+        (f"⚠️ 最接近の探索に失敗しました（{ca.get('error')}）。指定時刻の位置だけを示しています。"
+         if (ca and not ca.get("ok")) else ""),
+        (f"📋 {craft_events}" if craft_events else ""),
+        (f"📝 {craft_note}" if craft_note else ""),
         (f"⚠️ トレイル {len(trail_errors)} 点の計算に失敗しました。該当部分は表示されていません。"
          if trail_errors else ""),
         "",
@@ -1588,7 +1975,28 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
         content=[TextContent(type="text", text="\n".join(lines)), imgc],
         structuredContent={
             "body": b, "spacecraft": ob, "name_ja": ja, "name_en": en, "horizons_id": cmd,
-            "time_utc": tstr,
+            "time_utc": tstr,          # 従来のキー（flyby では表示時刻＝最接近時刻）
+            "flyby": bool(flyby),
+            "name_source": ("SPACECRAFT（ミッション名から解決）" if craft else
+                            ("ORBITERS" if (live and ob in ORBITERS) else
+                             ("JPL Horizons" if (_body_name(cmd) != cmd) else "no_name"))),
+            "closest_approach": (dict(
+                utc=_jd_to_utc_datetime(ca["jd"]).strftime("%Y-%m-%d %H:%M:%S UTC"),
+                jd=round(ca["jd"], 6), altitude_km=round(ca["alt_km"], 3),
+                dist_from_center_km=round(ca["dist_km"], 2),
+                speed_kms=round(ca["speed_kms"], 4),
+                latitude=round(ca["lat"], 4), longitude=round(ca["lon"], 4),
+                edge=bool(ca.get("edge")), encounter=bool(ca.get("encounter")),
+                encounter_threshold_km=round(ca["encounter_threshold_km"], 1),
+                window_hours=ca_hours,
+                coarse_min=ca["coarse_min"], coarse_points=ca["coarse_points"],
+                fine_points=ca["fine_points"],
+                method="Horizons 状態ベクトルの粗走査→1分刻み→3点放物線フィット")
+                if (ca and ca.get("ok")) else ca),
+            "display_time_utc": tstr,
+            "requested_time_utc": requested_tstr,
+            "spacecraft_events": craft_events or None,
+            "spacecraft_note": craft_note or None,
             "latitude": round(lat0, 4), "longitude": round(lon0, 4),
             "altitude_km": round(alt0, 2), "speed_kms": round(speed_kms, 4) if speed_kms else None,
             "dist_from_body_center_km": round(cur["dist_km"], 1),
