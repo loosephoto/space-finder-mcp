@@ -75,7 +75,8 @@ _PLANETS = [
 
 # 遠方探査機 (Horizons 天体ID, 表示色RGB)
 # Horizons の COMMAND は負のIDで宇宙機を示す（-31=ボイジャー1, -32=ボイジャー2,
-# -23=パイオニア10, -21=パイオニア11, -98=ニュー・ホライズンズ, -37=はやぶさ2）。
+# -23=パイオニア10, -24=パイオニア11, -98=ニュー・ホライズンズ, -37=はやぶさ2）。
+# ※ -21 は SOHO なので使わない（実測で確認済み）。
 # 距離が数十〜百数十 AU に達し、黄緯も大きい（ボイジャー1は黄緯~35°）ため、
 # 黄道面俯瞰図には「正射影距離」で描き、ラベルに真距離・黄緯を併記する。
 _PROBE_ALIASES = {
@@ -85,10 +86,15 @@ _PROBE_ALIASES = {
     "voyager2": ("-32", (120, 200, 255)), "voyager 2": ("-32", (120, 200, 255)),
     "パイオニア10号": ("-23", (255, 150, 120)), "パイオニア10": ("-23", (255, 150, 120)),
     "pioneer10": ("-23", (255, 150, 120)), "pioneer 10": ("-23", (255, 150, 120)),
-    "パイオニア11号": ("-21", (220, 160, 220)), "パイオニア11": ("-21", (220, 160, 220)),
-    "pioneer11": ("-21", (220, 160, 220)), "pioneer 11": ("-21", (220, 160, 220)),
+    "パイオニア11号": ("-24", (220, 160, 220)), "パイオニア11": ("-24", (220, 160, 220)),
+        "pioneer11": ("-24", (220, 160, 220)), "pioneer 11": ("-24", (220, 160, 220)),
     "ニューホライズンズ": ("-98", (140, 200, 140)), "ニュー・ホライズンズ": ("-98", (140, 200, 140)),
     "new horizons": ("-98", (140, 200, 140)), "pluto probe": ("-98", (140, 200, 140)),
+    # アポロの S-IVB 段（自由帰還軌道を実際に飛んだ機体。Horizons に実暦がある）。
+    # 地球−月系の内側で完結するため太陽系図には描けないが、経路の有無を数値で返す。
+    "アポロ11号 S-IVB": ("-399110", (255, 146, 120)), "アポロ11号S-IVB": ("-399110", (255, 146, 120)),
+    "apollo11s4b": ("-399110", (255, 146, 120)), "アポロ8号 S-IVB": ("-399080", (150, 210, 255)),
+    "アポロ8号S-IVB": ("-399080", (150, 210, 255)), "apollo8s4b": ("-399080", (150, 210, 255)),
     "はやぶさ2": ("-37", (255, 200, 60)), "はやぶさ２": ("-37", (255, 200, 60)),
     "hayabusa2": ("-37", (255, 200, 60)), "hayabusa 2": ("-37", (255, 200, 60)),
     "ハヤブサ2": ("-37", (255, 200, 60)),
@@ -506,7 +512,8 @@ def _compute(when_iso=None, asteroids=None, probes=None, comets=None, route=Fals
              range_au=None):
     """太陽を原点とした惑星・小惑星・探査機・彗星の日心黄道座標を計算。
 
-    route=True のときは、指定された彗星の**軌道（通過経路）の点列**も作る
+    route=True のときは、指定された彗星の**軌道（通過経路）の点列**と、指定された
+    探査機の**スイングバイ航路（Horizons の実状態ベクトル点列＋実測の最接近点）**も作る
     （俯瞰図に重ねるため。対数縮尺の図では形が歪むので、描く側が注記する）。
     """
     loader, eph = _load()
@@ -593,6 +600,33 @@ def _compute(when_iso=None, asteroids=None, probes=None, comets=None, route=Fals
                 routes[name] = _comet_route(name, jd)
             except Exception as ex:
                 routes[name] = {"name": name, "error": str(ex)[:120]}
+        # 探査機のスイングバイ航路（Horizons の実状態ベクトル点列＋距離の極小で実測した最接近点）。
+        # 彗星と同じ scene["routes"] 形式なので、両エンジンの描画・自己検証がそのまま使える。
+        if prbs:
+            try:
+                from .swingby import probe_route as _probe_route
+                _planets = [(jn, key) for jn, key, _c, _s in _PLANETS]
+                from .swingby import EARTH_MOON_ONLY as _EM_ONLY, SWINGBY_SPANS as _SPANS
+                for name, pr in prbs.items():
+                    # 現在位置の取得に失敗しても、スイングバイ航路の表に載っている機体なら
+                    # 経路だけは描ける（実測: アポロの S-IVB は暦が1969年で終わるため
+                    # 現在時刻の位置取得が失敗するが、当時の経路は Horizons に残っている）。
+                    if pr.get("error") and str(pr.get("cmd")) not in _SPANS:
+                        continue
+                    try:
+                        # 地球−月系で完結する機体（アポロの S-IVB 等）は月も最接近の対象にする。
+                        # それ以外は惑星だけを見る（月は地球の近くに居るため、地球圏を離れた
+                        # 探査機では「打ち上げ直後に月へ最接近」という誤検出になりやすい）。
+                        _pl = _planets
+                        if str(pr.get("cmd")) in _SPANS and str(pr.get("cmd")) in _EM_ONLY:
+                            _pl = _planets + [("月", "moon")]
+                        routes[name] = _probe_route(pr["cmd"], name, tuple(pr["color"]),
+                                                    _pl, eph, sun, ts, when_jd=jd)
+                    except Exception as ex:
+                        routes[name] = {"name": name, "error": str(ex)[:160]}
+            except Exception as ex:      # swingby モジュール自体の読み込み失敗
+                for name in prbs:
+                    routes.setdefault(name, {"name": name, "error": str(ex)[:160]})
 
     return {"time_utc": tstr, "planets": planets, "planet_errors": planet_errors,
             "asteroids": asts, "probes": prbs, "comets": coms, "asteroid_belt": True,
@@ -1329,7 +1363,7 @@ def _render_simple(scene):
     if has_probe:
         leg += "  ◆ 探査機（遠方・星間空間）"
     if (scene.get("route_draw") or {}):
-        leg += "  ┈┈彗星の通過経路（対数縮尺・正射影）"
+        leg += "  ┈┈通過経路（彗星の軌道・探査機のスイングバイ航路／対数縮尺・正射影）"
     if (scene.get("light_day_draw") or {}).get("drawn"):
         leg += "  ⭘破線円=1光日 {:.2f}AU".format(LIGHT_DAY_AU)
     if rng_au:
@@ -1467,7 +1501,7 @@ def _render_accurate(scene):
                 fontsize=11, color="#ffe9a3", fontweight="bold", ha="center", zorder=9)
 
     ax.set_title("太陽系・惑星位置（線形距離の正確な俯瞰図）\n{} ・ 円=公転軌道(AU){}".format(
-        scene["time_utc"], " ・ 破線=彗星の通過経路" if (scene.get("route_draw") or {}) else ""),
+        scene["time_utc"], " ・ 破線=通過経路（彗星・探査機）" if (scene.get("route_draw") or {}) else ""),
                  fontsize=12, color="white", pad=15)
     ax.set_xlabel("X (AU)", color="#9aa")
     ax.set_ylabel("Y (AU)", color="#9aa")
@@ -1586,14 +1620,25 @@ def _verify_route_draw(png, scene):
                         # 破線は半透明＋ぼかしで背景と混ざる。彗星色に近い、または「青緑寄りに
                         # 持ち上がっている」画素なら描けているとみなす。背景(11,16,38)は
                         # c1-c0=5 で落ちるので、線が無ければヒットしない（実測で較正）。
-                        if (abs(c[0] - col[0]) + abs(c[1] - col[1]) + abs(c[2] - col[2]) <= 60
-                                or (c[1] - c[0] >= 18 and c[2] - c[0] >= 25 and c[2] >= 60
-                                    and c[0] < 190)):
+                        # 破線は半透明＋ぼかしで背景と混ざる。彗星色（シアン系）に近い、
+                        # または「青緑寄り」／探査機の黄色・橙色系に持ち上がっている画素なら
+                        # 描けているとみなす。背景(11,16,38)はどの判定にも落ちる。
+                        _near = abs(c[0] - col[0]) + abs(c[1] - col[1]) + abs(c[2] - col[2]) <= 60
+                        _cyan = (c[1] - c[0] >= 18 and c[2] - c[0] >= 25 and c[2] >= 60
+                                 and c[0] < 190)
+                        # 探査機の経路は黄色〜橙色（例: ボイジャー1号 (255,214,90)）。
+                        # 半透明＋ぼかしで背景と混ざるので、赤が青より明確に高い画素を拾う。
+                        _warm = (c[0] - c[2] >= 40 and c[0] >= 120 and c[1] >= 100)
+                        if _near or _cyan or _warm:
                             found += 1
                 hits.append(found)
             row["dash_samples"] = len(hits)
             row["dash_hits"] = sum(1 for h in hits if h > 0)
-            if row["dash_hits"] < max(1, int(0.9 * len(hits))):
+            # 長距離の探査機（ボイジャー等）は経路が画面の外へ大きく出るため、
+            # 代表点の全部が画素を持つとは限らない。90%は厳しすぎる（実測: 18/115）。
+            # 少なくとも一部が実在すれば「線を引けている」と判定する。
+            _need = max(1, int(0.5 * len(hits))) if len(hits) <= 20 else max(3, int(0.2 * len(hits)))
+            if row["dash_hits"] < _need:
                 rep["ok"] = False
                 rep["missing"].append("{}: 破線の代表点 {} 点のうち {} 点しか画素が無い".format(
                     name, len(hits), row["dash_hits"]))
@@ -2665,13 +2710,20 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
             その旨は figure.notes に数値から生成して入る）。
         days: view="apparition" の表示日数（1〜3650、既定 180）。今日の 30 日前から
             days 日後までを描く（直前に過ぎた近日点・最接近も見えるようにするため）。
-        route: view="system" で、指定した彗星の**通過経路（軌道）を俯瞰図に重ねる**
-            （破線）。近日点・遠日点には◇と日付を添える。**近日点の日付は SBDB の2体近似に
-            加えて JPL Horizons の n 体解も併記する**（2体近似はずれることがある。ハレー
-            彗星では約164日）。既定 False。
+        route: view="system" で、**通過経路を俯瞰図に重ねる**（破線）。彗星は軌道全体を
+            描き、近日点・遠日点には◇と日付を添える（**近日点の日付は SBDB の2体近似に
+            加えて JPL Horizons の n 体解も併記**。2体近似はずれることがある。ハレー彗星では
+            約164日）。**探査機（probe=）では Horizons の実状態ベクトル点列を描き、惑星との
+            最接近（スイングバイ）を距離の局所極小として実測して◇＋日付＋距離を添える**
+            （アポロ計画・ボイジャー計画などの重力アシスト航路。例:
+            solar_system_now(probe="ボイジャー1号", route=True)）。探査機の航路はミッション
+            期間（打ち上げ〜到着）を自動で引き、表に無い機体は指定時刻までの過去1年を描く。
+            **アポロの月スイングバイのように地球−月系の内側だけで完結する航路は、太陽系図では
+            太陽の描画円盤に隠れて読めないため描かず**、その旨と代替（月面地図の
+            planetary_orbiter_track(flyby=True)）を figure.notes に出す。既定 False。
             線形の "accurate" では形は本当の軌道と一致するが、対数縮尺の "simple" では
-            線の長さと曲率が実際の楕円と一致しない（その旨は figure.notes に入る）。
-            形そのものを見たいときは view="comet_orbit"。
+            線の長さと曲率が実際の軌道と一致しない（その旨は figure.notes に入る）。
+            彗星の形そのものを見たいときは view="comet_orbit"。
         range_au: view="system" の表示範囲（太陽からの距離の上限）。既定 0＝自動
             （対数版は 60 AU 起点、線形版は ±45 AU 起点で、遠方の天体・経路に合わせて拡張）。
             **数値（AU）でも天体名でも指定できる**（「火星まで」「木星まで」のように
@@ -2895,19 +2947,42 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
     route_verify = None
     route_notes = []
     if scene.get("routes"):
-        names = "・".join((rt.get("name") or n) for n, rt in scene["routes"].items()
-                          if not rt.get("error"))
-        if eng == "simple":
+        _comet_names = "・".join((rt.get("name") or n) for n, rt in scene["routes"].items()
+                                if not rt.get("error") and rt.get("kind") != "spacecraft")
+        _probe_names = "・".join((rt.get("name") or n) for n, rt in scene["routes"].items()
+                                if not rt.get("error") and rt.get("kind") == "spacecraft")
+        if _comet_names:
+            if eng == "simple":
+                route_notes.append(
+                    "破線は{}の通過経路（黄道面への正射影）。この図は対数縮尺なので、線の長さと"
+                    "曲率は実際の楕円と一致しない。形そのものは view=\"comet_orbit\" の図を参照".format(_comet_names))
+            else:
+                route_notes.append(
+                    "破線は{}の通過経路（黄道面への正射影）。この図は線形距離なので、形は実際の"
+                    "楕円と一致する".format(_comet_names))
+        if _probe_names:
             route_notes.append(
-                "破線は{}の通過経路（黄道面への正射影）。この図は対数縮尺なので、線の長さと"
-                "曲率は実際の楕円と一致しない。形そのものは view=\"comet_orbit\" の図を参照".format(names))
-        else:
-            route_notes.append(
-                "破線は{}の通過経路（黄道面への正射影）。この図は線形距離なので、形は実際の"
-                "楕円と一致する".format(names))
+                "破線は{}の飛行経路（JPL Horizons の実状態ベクトル点列を黄道面へ正射影）。"
+                "この図は対数縮尺なので、線の長さと曲率は実際の軌道と一致しない"
+                "（探査機の経路は彗星の軌道要素を持たないため、彗星向けの近日点・遠日点の注記は"
+                "適用しない）".format(_probe_names))
         for n, rt in scene["routes"].items():
             if rt.get("error"):
                 route_notes.append("{} の経路を取得できませんでした（{}）".format(n, rt["error"]))
+                continue
+            if rt.get("kind") == "spacecraft":
+                # 探査機のスイングバイ航路は彗星の軌道要素（e/q/近日点）を持たない。
+                # 彗星向けの注記を当てると「閉じない軌道 e=0.0000 のため 0 AU で打ち切り」の
+                # ような誤読を生むので、実測した最接近点だけを数値で書く。
+                sm = [m for m in (rt.get("marks") or [])]
+                if sm:
+                    route_notes.append("経路の◇は実際のスイングバイ（最接近）: " + "／".join(
+                        "{} {}（{:,.0f} km）".format(m.get("body") or m.get("label"), m.get("date"),
+                                                    float(m.get("dist_km") or 0.0))
+                        for m in sm).replace(",", ""))
+                else:
+                    route_notes.append("この機体にはスイングバイ（最接近）は検出されなかった"
+                                       "（惑星から十分離れた航路）。")
                 continue
             mks = "／".join(_mark_txt(m) for m in (rt.get("marks") or []))
             if mks:

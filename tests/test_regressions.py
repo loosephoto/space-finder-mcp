@@ -922,6 +922,41 @@ class OrbitRouteTests(unittest.TestCase):
         self.assertTrue(any("誇張した太陽マーカー" in n for n in fig.get("notes", [])))
 
 
+    def test_probe_route_draws_real_ephemeris_and_swingbys(self):
+        # probe + route=True で探査機の実飛行経路（JPL Horizons の実状態ベクトル）を
+        # 破線で重ね、実際のスイングバイを◇＋日付＋距離で出す回帰テスト。
+        # ボイジャー1号: 木星 1979-03-05 348,132 km / 土星 1980-11-13 184,382 km。
+        from space_finder_mcp.solar_system import solar_system_now
+
+        r = solar_system_now(probe="ボイジャー1号", route=True)
+        sc = r.structuredContent or {}
+        self.assertNotIn("error", sc)
+        fig = sc.get("figure") or {}
+        v = fig.get("verify") or {}
+        self.assertTrue(v.get("ok"), v.get("missing"))
+        routes = v.get("routes") or []
+        self.assertTrue(routes, "経路の描画記録が無い")
+        # 破線の線分が実際に引かれていること（線分0は「線を引けていない」）
+        self.assertGreater(routes[0]["segments"], 0)
+        # スイングバイ（最接近）の目印が実在し、日付と距離が入っていること。
+        # 生の marks は comet_routes 側（verify 側は画素検証用に絞られている）。
+        rt = (sc.get("comet_routes") or {}).get("ボイジャー1号") or {}
+        marks = {m["body"]: m for m in (rt.get("marks") or [])}
+        self.assertIn("木星", marks)
+        self.assertIn("土星", marks)
+        self.assertEqual(marks["木星"]["date"], "1979-03-05")
+        self.assertEqual(marks["土星"]["date"], "1980-11-13")
+        self.assertEqual(marks["木星"]["dist_km"], 348132)      # 実測の最接近距離
+        self.assertEqual(marks["土星"]["dist_km"], 184382)
+        self.assertFalse(rt.get("closed"))                     # 彗星の閉じた軌道ではない
+        self.assertNotIn("points", rt)                         # 点列は structuredContent に入れない
+        # 注記に経路の存在とスイングバイの実測値が入っている
+        notes = " ".join(fig.get("notes") or [])
+        self.assertIn("飛行経路", notes)
+        self.assertIn("木星", notes)
+        self.assertIn("348132", notes)
+
+
 class OrbitRouteNbodyPerihelionTests(unittest.TestCase):
     """通過経路の近日点日付は SBDB の2体近似だけでは足りない（n 体解を併記する）回帰テスト。
 
