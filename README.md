@@ -99,7 +99,7 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 
 ## 📝 更新履歴
 
-各バージョンの変更内容は **[GitHub Releases](https://github.com/loosephoto/space-finder-mcp/releases)** に記載しています（最新: [v0.41.4](https://github.com/loosephoto/space-finder-mcp/releases/tag/v0.41.4)）。
+各バージョンの変更内容は **[GitHub Releases](https://github.com/loosephoto/space-finder-mcp/releases)** に記載しています（最新: [v0.41.5](https://github.com/loosephoto/space-finder-mcp/releases/tag/v0.41.5)）。
 
 **README では履歴を二重管理しません** — 同じ内容を2か所に書くと必ず片方が古くなるため、変更点はリリース時に GitHub Releases の本文へ書きます（手順は [`CLAUDE.md`](CLAUDE.md) の「リリース手順」）。
 

@@ -29,6 +29,7 @@
 - **TLE 未取得を「地平線下」と書かない**（旧実装は取得失敗を無言で落とし、仰角48°の
   静止衛星について地平線下と言い切っていた）
 - **ツールの出力契約**（メディアのリンク先行・image_path の実在・figure/1 の注記と検証）
+- **名札はキャンバス内に収める**（旧実装は `x+12` に置くだけで右端のクランプが無く、狭い視野で名札が切れていた。実測: W=444 で「M31 アンドロメダ銀河」が 191px、W=333 で「月（照度 96%）」が 50px はみ出し。右に置けなければ左へ回し、どちらも狭ければ縮小する）
 """
 import io
 import math
@@ -540,6 +541,94 @@ def _scene(planets=None, satellites=None, when=(2026, 10, 10, 12, 0, 0)):
                 sun=dict(alt=-30.0, az=200.0, rising=False), satellites=satellites or {},
                 dso_alt=np.array([10.0]), dso_az=np.array([100.0]),
                 lat=35.68, lon=139.69, t=ts.utc(*when), when_utc=when)
+
+
+class LabelFitTests(unittest.TestCase):
+    """名札（惑星・恒星）をキャンバス内に収める純関数の仕様。"""
+
+    def _dr(self):
+        from PIL import Image, ImageDraw
+        return ImageDraw.Draw(Image.new("RGB", (1, 1)))
+
+    def _fit(self, text, x, W, dx=11, dy=8, size=19, bold=False):
+        return gv._fit_label(self._dr(), text, float(x), float(x), W, dx, dy, size, bold)
+
+    def test_fits_on_the_right_when_there_is_room(self):
+        """右に余白があれば従来どおり x+dx に左揃え（見た目を変えない）。"""
+        tx, _ty, font, anc = self._fit("土星", 100.0, 400)
+        self.assertEqual(anc, "la")
+        self.assertEqual(tx, 111.0)
+        self.assertEqual(font.size, 19)
+
+    def test_flips_to_the_right_aligned_left_of_the_marker(self):
+        """右端ぎりぎりでは左へ回して右揃えにする。"""
+        text = "M31 アンドロメダ銀河"
+        tx, _ty, font, anc = self._fit(text, 420.0, 444)
+        self.assertEqual(anc, "ra")
+        self.assertEqual(tx, 409.0)
+        self.assertGreaterEqual(tx - self._dr().textlength(text, font=font), gv.LABEL_PAD)
+
+    def test_shrinks_when_neither_side_has_room(self):
+        """どちらも狭ければ余裕のある側でフォントを縮め、必ず内側に収める。"""
+        text = "月（照度 96%）"
+        tx, _ty, font, anc = self._fit(text, 166.5, 333, dx=12, dy=-22, size=26, bold=True)
+        self.assertLess(font.size, 26)
+        w = self._dr().textlength(text, font=font)
+        left = tx - w if anc == "ra" else tx
+        self.assertGreaterEqual(left, gv.LABEL_PAD)
+        self.assertLessEqual(left + w, 333 - gv.LABEL_PAD)
+
+    def test_returns_none_when_nothing_fits(self):
+        """まったく入らないときは描かない（はみ出した名札を残さない）。"""
+        self.assertIsNone(self._fit("月（照度 96%）", 10.0, 40, dx=12, dy=-22, size=26, bold=True))
+
+
+class LabelFitRenderTests(unittest.TestCase):
+    """実際の描画で名札がキャンバス内に収まる（描いた箱を info から見る）。"""
+
+    def _render(self, span, az0, moon_az, dso_az):
+        scene = _scene(planets={"月": dict(alt=45.0, az=moon_az, illum=0.96, dist_km=384400.0),
+                                "土星": dict(alt=40.0, az=moon_az - 6.0)})
+        scene["dso_alt"] = np.array([35.0, 50.0])
+        scene["dso_az"] = np.array([dso_az, 5.0])
+        return gv.render(scene, span=span, az0=az0, sky_h=1000, lp=gv._set_lp("suburb"))
+
+    def test_labels_stay_inside_the_canvas(self):
+        for span, az0, moon_az, dso_az in ((120.0, 0.0, 60.0, 175.0),
+                                           (30.0, 165.0, 180.0, 196.0),
+                                           (40.0, 165.0, 172.0, 202.8)):
+            _img, info = self._render(span, az0, moon_az, dso_az)
+            W = info["size"][0]
+            self.assertTrue(info["label_boxes"], "名札が 1 枚も描かれていない: {}".format((span, az0)))
+            for b in info["label_boxes"]:
+                self.assertGreaterEqual(b["x0"], 0.0, (span, az0, b))
+                self.assertLessEqual(b["x1"], W, (span, az0, b))
+
+    def test_wide_canvas_keeps_the_old_offsets(self):
+        """余白がある図では位置・サイズを変えない（回帰しない）。"""
+        _img, info = self._render(120.0, 0.0, 60.0, 175.0)
+        raw = {nm: x for nm, x, _y, _v in info["labels"]}
+        boxes = {b["text"]: b for b in info["label_boxes"]}
+        moon = boxes["月（照度 96%）"]
+        self.assertAlmostEqual(moon["x0"], raw["月（照度 96%）"] + 12.0, places=1)
+        self.assertEqual(moon["size"], 26)
+        self.assertEqual(moon["anchor"], "la")
+
+    def test_narrow_canvas_shrinks_instead_of_clipping(self):
+        """旧ルール（x+12）では 333px の図で名札が 50px はみ出していた配置。"""
+        _img, info = self._render(30.0, 165.0, 180.0, 196.0)
+        W = info["size"][0]
+        boxes = {b["text"]: b for b in info["label_boxes"]}
+        moon = boxes["月（照度 96%）"]
+        self.assertLess(moon["size"], 26)
+        self.assertLessEqual(moon["x1"], W - gv.LABEL_PAD)
+
+    def test_dso_label_near_the_right_edge_is_flipped(self):
+        """右端の恒星・銀河の名札は左へ回す（旧実装は 191px はみ出していた）。"""
+        _img, info = self._render(40.0, 165.0, 172.0, 202.8)
+        b = {x["text"]: x for x in info["label_boxes"]}["M31 アンドロメダ銀河"]
+        self.assertEqual(b["anchor"], "ra")
+        self.assertLessEqual(b["x1"], info["size"][0] - gv.LABEL_PAD)
 
 
 if __name__ == "__main__":

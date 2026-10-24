@@ -429,6 +429,46 @@ def _fit_font(dr, text, size, bold, max_w, min_size=12):
     return load_font(int(min_size), bold)
 
 
+LABEL_PAD = 6          # 名札と図の端に残す余白（px）
+LABEL_MIN_SIZE = 13    # 名札を縮めるときの下限サイズ
+
+
+def _fit_label(dr, text, x, y, W, dx, dy, size, bold, pad=LABEL_PAD, min_size=LABEL_MIN_SIZE):
+    """名札（惑星・恒星・銀河）をキャンバス内に収める描画位置・フォント・アンカーを返す。
+
+    マーカーの右に置けないときは左へ回して右揃えにし、どちらも狭ければ余裕のある側で
+    フォントを縮める。どこにも入らないときは None（描かない）。
+    旧実装は x+12 に置くだけで右端のクランプが無く、狭い視野で名札が切れていた
+    （実測: W=444・span=40 で「フォーマルハウト」が 122px、W=333・span=30 で
+    「月（照度 96%）」が 52px はみ出し）。
+    """
+    font = load_font(int(size), bold)
+    tw = dr.textlength(text, font=font)
+    if x + dx + tw <= W - pad:                    # 既定: マーカーの右に左揃え
+        return (x + dx, y + dy, font, "la")
+    if x - dx - tw >= pad:                        # 右が狭い → 左へ回して右揃え
+        return (x - dx, y + dy, font, "ra")
+    room_r = W - pad - (x + dx)                   # どちらも狭い → 余裕のある側で縮小
+    room_l = x - dx - pad
+    room = max(room_r, room_l)
+    if room < 24:                                 # 縮めても読めない幅しかない
+        return None
+    small = _fit_font(dr, text, size, bold, room, min_size=min_size)
+    if dr.textlength(text, font=small) > room:    # 下限サイズでも入らない
+        return None
+    if room_r >= room_l:
+        return (x + dx, y + dy, small, "la")
+    return (x - dx, y + dy, small, "ra")
+
+
+def _label_box(text, tx, ty, font, anchor, dr):
+    """描いた名札の占有範囲（画素検証・回帰テスト用）。"""
+    w = float(dr.textlength(text, font=font))
+    x0 = float(tx) if anchor == "la" else float(tx) - w
+    return dict(text=text, x0=round(x0, 1), x1=round(x0 + w, 1), y=round(float(ty), 1),
+                size=int(getattr(font, "size", 0)), anchor=anchor)
+
+
 def _wrap_to_width(dr, text, font, max_w):
     """max_w に収まるよう「／」で折り返す。それでも入らない部分は文字単位で折る。"""
     def _hard(s):
@@ -1083,6 +1123,7 @@ def render(scene, *, span, az0, sky_h, seed=20261010, label="", focus=None, lp=N
         return y > float(occl[min(max(int(x), 0), W - 1)]) - 4.0
 
     dr = ImageDraw.Draw(img)
+    label_boxes = []                                             # 描いた名札の箱（画素検証用）
     if mw_guide:                                                 # 天の川（銀河面）の位置ガイド
         mixv = float(np.clip(st["mw"], 0.0, 1.0))
         lc = np.array([205, 218, 244], np.float32) * mixv + np.array([34, 42, 70], np.float32) * (1 - mixv)
@@ -1098,25 +1139,41 @@ def render(scene, *, span, az0, sky_h, seed=20261010, label="", focus=None, lp=N
                     dr.line([prev[0], prev[1], p[0], p[1]], fill=col, width=2 if j == 0 else 1)
                 prev = p
         for p in mw_guide[0]:
-            if p and 60 < p[0] < W - 60:
-                dr.text((p[0] + 10, p[1] - 32), "天の川（銀河面）", font=f_s,
-                        fill=tuple(int(v) for v in lc),
-                        stroke_width=3, stroke_fill=(255, 255, 255) if mixv < 0.5 else (0, 0, 0))
-                break
+            if not p or not (60 < p[0] < W - 60):
+                continue
+            box = _fit_label(dr, "天の川（銀河面）", p[0], p[1], W, 10, -32, 19, False)
+            if box is None:
+                continue
+            tx, ty, fnt, anc = box
+            dr.text((tx, ty), "天の川（銀河面）", font=fnt, fill=tuple(int(v) for v in lc),
+                    anchor=anc, stroke_width=3,
+                    stroke_fill=(255, 255, 255) if mixv < 0.5 else (0, 0, 0))
+            label_boxes.append(_label_box("天の川（銀河面）", tx, ty, fnt, anc, dr))
+            break
     for nm, x, y, vis in labels:                                 # 月・惑星の名札
         if x < 10 or x > W - 10 or _hidden(x, y):
             continue
-        dr.text((x + 12, y - 22), nm, font=f_m,
+        box = _fit_label(dr, nm, x, y, W, 12, -22, 26, True)
+        if box is None:
+            continue
+        tx, ty, fnt, anc = box
+        dr.text((tx, ty), nm, font=fnt, anchor=anc,
                 fill=(255, 250, 214) if vis else (198, 210, 234),
                 stroke_width=3, stroke_fill=(0, 0, 0))
+        label_boxes.append(_label_box(nm, tx, ty, fnt, anc, dr))
     for nm, x, y, vis, kind in focus_labels:                     # 主要恒星・銀河の名札
         if x < 10 or x > W - 10 or _hidden(x, y):
             continue
         col = (216, 226, 252) if kind == "star" else _DSO_COLOR[kind]
         if not vis:
             col = tuple(int(v * 0.78) for v in col)
-        dr.text((x + 11, y + 8), nm, font=f_s, fill=col,
+        box = _fit_label(dr, nm, x, y, W, 11, 8, 19, False)
+        if box is None:
+            continue
+        tx, ty, fnt, anc = box
+        dr.text((tx, ty), nm, font=fnt, fill=col, anchor=anc,
                 stroke_width=3, stroke_fill=(0, 0, 0))
+        label_boxes.append(_label_box(nm, tx, ty, fnt, anc, dr))
 
     dr.rectangle([0, 0, W, header], fill=HDR_BG)
     for hx, hy, htext, hfont, hcol, hanchor in hdr_items:
@@ -1132,7 +1189,8 @@ def render(scene, *, span, az0, sky_h, seed=20261010, label="", focus=None, lp=N
                 planet_markers=planet_markers,
                 focus=dict(visible=[n for n, _x, _y, v, _k in focus_labels if v],
                            position_only=[n for n, _x, _y, v, _k in focus_labels if not v]),
-                occl=occl, focus_labels=focus_labels, labels=labels, satellite_px=sat_pts)
+                occl=occl, focus_labels=focus_labels, labels=labels, satellite_px=sat_pts,
+                label_boxes=label_boxes)
     return buf.getvalue(), info
 
 
