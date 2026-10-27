@@ -799,6 +799,91 @@ class CometApparitionTests(unittest.TestCase):
         self.assertIn("error", r2.structuredContent or {})
 
 
+    # ---------- 極値ラベルの配置（曲線・文字に重ねない / 落とさない） ----------
+    @staticmethod
+    def _apparition_scene(n=61):
+        """鋭い山（曲線が平らでない極値）を持つ合成シーン（ネット不要・日付非依存）。
+
+        実測（2026-10-27・ハレー彗星 days=400）では、太陽離角の極大がパネル上端の近くに来て、
+        凡例（曲線色で描かれる）と曲線の両方が 12 個の固定候補を全部塞ぎ、極値ラベルが 1 枚
+        落ちていた（labels_drawn=3 / skipped=1）。この形（なだらかな山・山頂がパネル上端の
+        すぐ下）を合成で作り、同じ落ち方を再現する: 旧実装は 12 候補すべてがヒットして
+        「最大」ラベルを落とし、新実装は 4 枚すべてを配置する（実測）。
+        """
+        k = n // 2
+        series = []
+        for i in range(n):
+            series.append({"jd": 2461000.5 + i, "utc": "2026-01-01 00:00",
+                           "r_au": 5.0 + 0.02 * abs(i - k),
+                           "delta_au": 4.0 + 0.03 * abs(i - k),
+                           "elong_deg": 163.0 - 65.0 * (abs(i - k) / float(k)) ** 0.6,
+                           "mag": 20.0 + 0.05 * abs(i - k)})
+        return {"series": series, "idx_d": k, "idx_r": k, "idx_e": k, "idx_m": k,
+                "has_mag": True, "edge_d": False, "edge_r": False,
+                "jd_now": series[0]["jd"], "nel": {"fullname": "試験彗星"},
+                "m1": 10.0, "k1": 4.0, "jd0": series[0]["jd"], "jd1": series[-1]["jd"],
+                "now_str": "2026-01-01 00:00 UTC", "days": n - 1, "before": 0,
+                "samples": n, "peri_prev": None, "peri_next": None,
+                "pos_src": "horizons", "next_ca": (series[-1]["jd"] + 10.0, 4.0)}
+
+    def _draw_scene(self):
+        from space_finder_mcp import comet_apparition as ca
+
+        d = self._apparition_scene()
+        panels = ca._apparition_panels(d)
+        info = {"jd0": d["jd0"], "jd1": d["jd1"], "title": "試験彗星 の見え方",
+                "sub": "距離・光度・太陽離角の推移（合成シーン）",
+                "sub2": "現在 2026-01-01 00:00 UTC", "panels": panels,
+                "marks": ca._apparition_marks(d), "footer": "出典: 試験（合成シーン）"}
+        draw = ca._draw_chart(d["series"], info)
+        verify = ca._verify_chart(
+            draw["img"], draw["checks"], draw["label_boxes"],
+            [c["color"] for p in panels for c in p["series"]]
+            + [m["color"] for m in info["marks"]],
+            marker_pixels=draw["marker_pixels"], skipped=draw["skipped_labels"],
+            mark_same_day=draw["mark_same_day"])
+        return ca, draw, verify
+
+    def test_apparition_labels_all_placed_on_sharp_peak(self):
+        """鋭い極値でも極値ラベルを全部置き、曲線と重ねない（実測で 1 枚落ちていた）。"""
+        _ca, draw, verify = self._draw_scene()
+        self.assertEqual(draw["skipped_labels"], [], "置けなかったラベルがある")
+        self.assertEqual(len(draw["label_boxes"]), 4)
+        self.assertEqual(verify["label_overlap_px"], 0)
+        self.assertTrue(verify["ok"], verify)
+
+    def test_apparition_labels_do_not_overlap_each_other(self):
+        """複数の極値ラベルが同じ位置に重ならない（先に置いた矩形を避ける）。"""
+        _ca, draw, _verify = self._draw_scene()
+        boxes = draw["label_boxes"]
+        for i, a in enumerate(boxes):
+            for b in boxes[i + 1:]:
+                self.assertFalse(a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3],
+                                 "ラベル矩形が重なっている: {} と {}".format(a, b))
+
+    def test_apparition_labels_stay_inside_their_panel(self):
+        """ラベルは自パネルの中（最終パネル以外は下の隙間まで）に収まる（はみ出しは描かない）。"""
+        ca, draw, _verify = self._draw_scene()
+        img = draw["img"]
+        for box in draw["label_boxes"]:
+            self.assertGreaterEqual(box[0], 0)
+            self.assertGreaterEqual(box[1], 0)
+            self.assertLessEqual(box[2], img.size[0])
+            self.assertLessEqual(box[3], img.size[1])
+            # 3 パネルぶんの帯（_HDR から最終パネル下端まで）のどこかに入っている
+            self.assertLess(box[3], ca._HDR + 3 * (ca._PH + ca._GAP))
+
+    def test_label_mask_marks_drawn_ink_but_not_background(self):
+        """障害物マスク（線＋文字）を実測で確かめる: 地は 0、タイトル/凡例の行は >0。"""
+        ca, draw, _verify = self._draw_scene()
+        m = ca._label_mask(draw["img"], clear_px=0)
+        # 右余白（パネル矩形の外側）は地＝0（ここに置ける＝空きがあることの確認）
+        self.assertEqual(ca._mask_hits(m, (ca._W - ca._MR + 4, 200, ca._W - 10, 216)), 0)
+        # パネル見出し（タイトル＋凡例）の行は文字＝>0
+        self.assertGreater(
+            ca._mask_hits(m, (ca._ML + 4, ca._HDR + 6, ca._W - ca._MR, ca._HDR + 30)), 0)
+
+
 class OrbitRouteTests(unittest.TestCase):
     """太陽系俯瞰図に重ねる彗星の通過経路（orbit_path_xyz / route=True）の回帰テスト。"""
 

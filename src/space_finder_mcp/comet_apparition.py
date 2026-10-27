@@ -252,27 +252,94 @@ def _pixel_near(img, box, colors, tol: int = 60) -> int:
     return n
 
 
-def _place_label(img, dd, xy, text: str, font, fill, curve_colors,
-                 tries=((0, -30), (0, 10), (-90, -30), (14, 10), (-150, 10), (0, -52),
-                        (-60, -52), (20, -52), (-40, 10), (0, 26), (10, 26), (-110, 26))):
-    """曲線に重ならない位置へラベルを置く。どこにも置けなければ描かず None を返す。
+# ---------- ラベルの障害物（曲線＋文字）と余白 ----------
+# ラベルは「曲線に重ならない」だけでなく「凡例・軸ラベル・フッターのような文字にも重ならない」
+# 位置へ置く（文字の上に文字を描くと読めなくなる）。判定は曲線色の照合ではなく「背景・パネル地・
+# 目盛のどれにも近くない画素＝描かれた線と文字」で行い、そのマスクを _LABEL_CLEAR_PX px
+# 膨張させて余白を確保する。膨張は PIL の MaxFilter（C 実装）なので画素数によらず速い。
+_LABEL_CLEAR_PX = 2            # ラベル矩形と障害物の間に確保する余白（px）
+_LABEL_BG_TOL = 40             # 背景色との差（R+G+B）がこれ以下なら「地」
+_LABEL_RADII = tuple(range(10, 217, 10))       # 探索半径（点から近い順）
+_LABEL_ANGLES = (0, 12, -12, 24, -24, 36, -36, 48, -48, 60, -60, 72, -72, 84, -84,
+                 96, -96, 108, -108, 120, -120, 132, -132, 144, -144, 156, -156,
+                 168, -168, 180)               # 0°＝真上。時計回りに振る
+
+
+def _label_mask(img, bgs=(_BG, _PANEL_BG, _GRID), clear_px: int = _LABEL_CLEAR_PX):
+    """描かれた線と文字（背景・パネル地・目盛に近くない画素）を 255 にした L 画像を返す。
+
+    `clear_px` px 膨張させるので、このマスクが 0 の矩形は「線や文字から clear_px 以上
+    離れている」ことを意味する。曲線色の照合だけでは凡例・軸ラベル・フッターの文字を
+    障害物にできない（実測: 太陽離角パネルの凡例は曲線色で描かれ、曲線だけを避ける実装では
+    その下へ置けず、ハレー彗星 days=400 で「最大 163°」のラベルが 1 枚落ちていた）。
+    """
+    from PIL import Image, ImageChops, ImageFilter
+    near = None
+    for c in bgs:                       # 地の色に一番近い差分（小さいほど「地」）
+        d = ImageChops.difference(img, Image.new("RGB", img.size, tuple(c)))
+        r, g, b = d.split()
+        s = ImageChops.add(ImageChops.add(r, g), b)
+        near = s if near is None else ImageChops.darker(near, s)
+    m = near.point(lambda v: 255 if v > _LABEL_BG_TOL else 0, mode="L")
+    return m.filter(ImageFilter.MaxFilter(2 * clear_px + 1)) if clear_px > 0 else m
+
+
+def _mask_hits(mask, box) -> int:
+    """マスクの矩形内に 255 の画素がいくつあるか（PIL の C 実装。`_pixel_near` と同値）。"""
+    x0, y0, x1, y1 = [int(round(v)) for v in box]
+    x0, y0 = max(0, x0), max(0, y0)
+    x1, y1 = min(mask.size[0], x1), min(mask.size[1], y1)
+    if x1 <= x0 or y1 <= y0:
+        return 0
+    return mask.crop((x0, y0, x1, y1)).histogram()[255]
+
+
+def _rects_overlap(a, b, gap: float = 4.0) -> bool:
+    """矩形 a と b が（gap px の間隔を空けても）重なるか。"""
+    return a[0] - gap < b[2] and b[0] - gap < a[2] and a[1] - gap < b[3] and b[1] - gap < a[3]
+
+
+def _label_candidates(x: float, y: float, bw: float, bh: float, bounds):
+    """点の周りの候補矩形を「点から近い順」に列挙する（同じ矩形は 1 回だけ）。
+
+    候補位置は矩形が `bounds` に収まる範囲へ寄せる（＝はみ出す矩形は描かない。規約12）。
+    端では寄せた結果が同じ矩形になる候補が多数出るので、重複は除外して無駄な画素走査を省く。
+    """
+    bx0, by0, bx1, by1 = bounds
+    seen, out = set(), []
+    for r in _LABEL_RADII:
+        for a in _LABEL_ANGLES:
+            rad = math.radians(a)
+            bx = max(bx0, min(x + r * math.sin(rad), bx1 - bw))
+            by = max(by0, min(y - r * math.cos(rad), by1 - bh))
+            key = (round(bx), round(by))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append((bx, by, bx + bw, by + bh))
+    return out
+
+
+def _place_label(img, dd, xy, text: str, font, fill, obstacle, bounds=None, avoid=()):
+    """障害物（曲線・文字）に重ならない位置へラベルを置く。どこにも置けなければ None。
 
     重ねて描くと「図と注記が食い違う」ので、置けなかったラベルは呼び出し側が
-    skipped_labels として注記に出す（AGENTS 規約12）。
+    skipped_labels として注記に出す（AGENTS 規約12）。`avoid` の矩形（先に置いたラベル）へは、
+    他に置き場が無いときだけ重ねる。
     """
     w = dd.textlength(text, font=font)
-    x0, y0 = xy
-    best = None
-    for ddx, ddy in tries:
-        box = (x0 + ddx, y0 + ddy, x0 + ddx + w + 6, y0 + ddy + font.size + 4)
-        if not (0 <= box[0] and box[2] < img.size[0] and 0 <= box[1] and box[3] < img.size[1]):
-            continue
-        hit = _pixel_near(img, box, curve_colors)
-        if hit == 0:
-            dd.text((x0 + ddx + 3, y0 + ddy + 2), text, font=font, fill=fill)
+    bw, bh = w + 6, font.size + 4
+    if bounds is None:
+        bounds = (2, 2, img.size[0] - 2, img.size[1] - 2)
+    boxes = _label_candidates(float(xy[0]), float(xy[1]), bw, bh, bounds)
+    for strict in ((True, False) if avoid else (False,)):
+        for box in boxes:
+            if _mask_hits(obstacle, box) != 0:
+                continue
+            if strict and any(_rects_overlap(box, b) for b in avoid):
+                continue
+            dd.text((box[0] + 3, box[1] + 2), text, font=font, fill=fill)
             return box
-        if best is None or hit < best[0]:
-            best = (hit, box)
     return None
 
 
@@ -373,18 +440,28 @@ def _draw_chart(series: Sequence[dict], info: dict) -> dict:
             for cc in p["series"]:
                 if cc is not c and tgt.get(cc["key"]) is not None and                         abs(tgt[cc["key"]] - tgt[c["key"]]) <= tol_v:
                     ok_colors.append(cc["color"])
-            placed.append((c, p, tgt, x, y, ok_colors))
+            placed.append((i, c, p, tgt, x, y, ok_colors))
 
-    for c, p, tgt, x, y, ok_colors in placed:
+    # ラベルの障害物（曲線＋文字）のマスクは、曲線・マーカー・極値の点を描き終えてから
+    # 1 枚だけ作る（ラベル自身は含めない＝自分の文字で自分の置き場が塞がらない）。
+    obstacle = _label_mask(img)
+
+    for i, c, p, tgt, x, y, ok_colors in placed:
         txt = "{} {} {}".format(c.get("short", c["label"]), p["fmt"].format(tgt[c["key"]]),
                                 p["unit"])
         # ラベルの文字色は曲線色にせず白系にする（同じ色だと「ラベルが曲線に重なって
         # いる」と画素検査が誤検出し、自己検証が偽になる）
-        # 避ける対象は「全パネルの曲線色＋マーカー線の色」。マーカー線はラベルより先に
-        # 描かれるので、ここで含めておけばラベルが線に重ならない（実測で1px 重なった）。
-        box = _place_label(img, dd, (x, y), txt, f_m, _TEXT,
-                           [cc["color"] for pp in panels for cc in pp["series"]]
-                           + [m["color"] for m in info["marks"]])
+        # 障害物は「曲線＋文字」（_label_mask）。曲線色を避けるだけでは凡例・軸ラベルの
+        # 文字の上にラベルが乗る（実測: 太陽離角パネルの凡例が曲線色で、その下へ置けず
+        # 極値ラベルが 1 枚落ちていた）。
+        # ラベルは自パネルの中へ置く（最終パネル以外はパネル間の隙間まで）。パネルを
+        # またぐと、どの点の値なのか分からなくなる。
+        py0 = _HDR + i * (_PH + _GAP)
+        plot0, plot1 = py0 + 30, py0 + _PH - 16
+        slack = 4 if i == len(panels) - 1 else _GAP - 6
+        box = _place_label(img, dd, (x, y), txt, f_m, _TEXT, obstacle,
+                           bounds=(x0 + 4, plot0, x1 - 4, plot1 + slack),
+                           avoid=label_boxes)
         if box:
             label_boxes.append(box)
         else:
@@ -665,7 +742,8 @@ def _apparition_notes(d: dict, verify: dict, skipped: Sequence[str]) -> List[str
         "描いた極値の座標に曲線色の画素があるかを画素から測り直して自己検証している"
         "（{} 点を検査・最大ずれ {} px・許容 {} px）".format(
             verify["checked_points"], verify["worst_px_error"], verify["tolerance_px"]),
-        "曲線に重なる位置にはラベルを描いていない" + (
+        "ラベルは曲線や凡例・軸ラベルの文字に重ならない位置（線から {}px 以上の余白）へ"
+        "置いている".format(_LABEL_CLEAR_PX) + (
             "。置けなかったラベル: " + " / ".join(skipped) if skipped else "（この図では全て配置できた）"),
         "出典: " + _src_of(d),
     ]

@@ -347,8 +347,12 @@ FIGURES_EXTRA_CALLS = (
      {"comet": "169P", "view": "apparition", "days": 120}, {"figure_kind": "comet_apparition"}),
     # 期間の端で r が最小（＝近日点ではなく期間内の最小）になる経路: マーカーを
     # 「近日点」と呼ばず、注記も「期間の端」を明示する（ハレー彗星は 2061 年まで近づく）
+    #   基準時刻は固定する。この経路の構図（曲線とラベルの位置関係）は「今日」に依存し、
+    #   日が変わると極値ラベルの置き場所が変わる。2026 年 10 月の実測では 1px のラベル重なりで
+    #   ゲートが落ちた（日付依存の化粧ずれ）。他の 2 経路は now 経路を覆うため固定しない。
     ("solar_system_now[apparition/期間の端]", "solar_system_now",
-     {"comet": "ハレー彗星", "view": "apparition", "days": 400}, {"figure_kind": "comet_apparition"}),
+     {"comet": "ハレー彗星", "view": "apparition", "days": 400,
+      "when": "2026-10-27T00:00:00+09:00"}, {"figure_kind": "comet_apparition"}),
     # 双曲線彗星（e>1・閉じない・次回の近日点は無い）
     ("solar_system_now[apparition/双曲線]", "solar_system_now",
      {"comet": "C/2023 A3", "view": "apparition", "days": 120}, {"figure_kind": "comet_apparition"}),
