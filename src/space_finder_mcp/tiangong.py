@@ -105,7 +105,7 @@ def tiangong_now() -> CallToolResult:
         content=[TextContent(type="text", text="\n".join(lines))],
         structuredContent={"norad_id": TIANGONG_NORAD, "name": "Tiangong",
                            "epoch_utc": epoch, "position": pos,
-                           "tle_source": tle_source,
+                           "tle_source": tle_source, "source": source_label(tle_source),
                            "google_maps": f"https://www.google.com/maps?q={lat},{lon}&z=3"},
     )
 

@@ -12,22 +12,37 @@ from __future__ import annotations
 
 
 def as_int(value, default=None, minimum=None, maximum=None):
-    """整数へ防御的に変換する（失敗・None・空文字は default）。"""
+    """整数へ防御的に変換する（失敗・None・空文字・NaN・無限大は default）。"""
     n = None
     if isinstance(value, bool):
         n = int(value)
     elif isinstance(value, int):
         n = value
+    elif isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            n = None
+        else:
+            try:
+                n = int(value)
+            except (TypeError, ValueError, OverflowError):
+                n = None
     else:
         try:
-            n = int(float(str(value).strip()))
-        except (TypeError, ValueError):
+            f = float(str(value).strip())
+            if f != f or f in (float("inf"), float("-inf")):
+                n = None
+            else:
+                n = int(f)
+        except (TypeError, ValueError, OverflowError):
             n = None
     if n is None:
         n = default
     if n is None:
         return None
-    n = int(n)
+    try:
+        n = int(n)
+    except (TypeError, ValueError, OverflowError):
+        return default
     if minimum is not None:
         n = max(int(minimum), n)
     if maximum is not None:

@@ -105,6 +105,8 @@ def surface_view(body: dict, lon: float, lat: float, span_deg: float, zoom: int,
         half = span_px / 2.0
         left = int(gx0 - half); top = int(gy0 - half)
         side = int(2 * half)
+        if side < 1:
+            side = 1
         right = left + side; bottom = top + side
         if left < 0: left, right = 0, side
         if top < 0: top, bottom = 0, side
@@ -348,6 +350,8 @@ def _regional_view(src, tl, gx, gy, W, H, span_deg, out_px, dim):
     half = span_px / 2.0
     left = int(gx - half); top = int(gy - half)
     side = int(2 * half)
+    if side < 1:
+        side = 1
     right = left + side; bottom = top + side
     if left < 0: left, right = 0, side
     if top < 0: top, bottom = 0, side

@@ -79,7 +79,7 @@ IMAGES_API = "https://images-api.nasa.gov"
 UA = {"User-Agent": "space-finder-mcp/0.1 (MCP media search)"}
 
 
-@ttl_cache(TTL_FORECAST, maxsize=64)
+@ttl_cache(TTL_FORECAST, maxsize=64, skip_if=lambda v: isinstance(v, dict) and (bool(v.get("error")) or not v.get("collection")))
 def _search(q: str, media_type: str, limit: int) -> dict:
     """NASA Image & Video Library を検索する。失敗時は例外を送出する（呼び出し側で処理）。
 

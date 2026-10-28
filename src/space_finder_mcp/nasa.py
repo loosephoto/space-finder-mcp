@@ -72,7 +72,12 @@ def apod(key: str, date: Optional[str] = None) -> CallToolResult:
         key: NASA Open API キー（DEMO_KEY または無料開発者キー）。
         date: YYYY-MM-DD。省略時は今日（未公開なら前日）。
     """
-    today = datetime.date.today()
+    try:
+        import zoneinfo
+        _tz = zoneinfo.ZoneInfo("America/New_York")
+    except Exception:
+        _tz = datetime.timezone(datetime.timedelta(hours=-5))
+    today = datetime.datetime.now(_tz).date()
     candidates = [str(date)] if date else [
         today.isoformat(), (today - datetime.timedelta(days=1)).isoformat()]
     d = None
@@ -132,7 +137,7 @@ def neo_today(key: str) -> CallToolResult:
     Args:
         key: NASA Open API キー。
     """
-    today = datetime.date.today().isoformat()
+    today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
     try:
         d = _get("neo/rest/v1/feed", key, {"start_date": today, "end_date": today})
     except requests.RequestException as e:

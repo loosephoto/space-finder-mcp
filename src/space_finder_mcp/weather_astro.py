@@ -351,7 +351,7 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
 
     # 気象庁の雨雲・降水画像（日本国内のみ・取得失敗時は省略）
     image_blocks = []
-    image_sc = {}
+    image_sc = {"source": "open-meteo.com (CC BY 4.0)"}
     if include_rain:
         _obs = [w["start"] for w in windows[:6]] if windows else []
         _ri = rain_images(lat, lon, name, _obs)
@@ -377,6 +377,9 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
             image_sc["images"] = [{"id": i["id"], "label": i["label"],
                                    "path": i.get("path"), "page_url": i.get("page_url")}
                                   for i in _ri["images"]]
+            if image_sc["images"]:
+                image_sc["image_path"] = image_sc["images"][0].get("path")
+            image_sc.setdefault("source", "open-meteo.com (CC BY 4.0) + JMA")
 
     # 月相・月の出没（観測可否の月明かり判断に使用。月没は日没後の最初の値を選ぶ）
     moon = _night_moon(daily)

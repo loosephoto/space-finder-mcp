@@ -188,7 +188,7 @@ _EXT_ALIAS={"ひまわり":"himawari9","ひまわり9号":"himawari9","gk2a":"gk
 def _ext_canon(v):
  s=" ".join(str(v or "").lower().strip().split()).replace("号","").replace("_","-").replace(" ","");return {"goes-19":"goes19","goes-18":"goes18","noaa-20":"noaa20","noaa-21":"noaa21","snpp":"snpp","metop-b":"metopb","metop-c":"metopc","fy-3d":"fy3d","fy-3f":"fy3f","fy-4b":"fy4b","earth-care":"earthcare"}.get(s,_EXT_ALIAS.get(s,s))
 def _ext_get(u,timeout=60):
- r=requests.get(u,headers=_UA,timeout=timeout);return (u,r.content) if r.status_code==200 and "image" in r.headers.get("Content-Type","") and r.content else None
+ r=requests.get(u,headers=_UA,timeout=(10,timeout));return (u,r.content) if r.status_code==200 and "image" in r.headers.get("Content-Type","") and r.content else None
 def _ext_gibs(layer,size=1000):
  now=datetime.datetime.now(datetime.timezone.utc)
  for back in range(4):

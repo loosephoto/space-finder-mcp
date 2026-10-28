@@ -531,8 +531,11 @@ def _verify_chart(img, checks: Sequence[dict], label_boxes: Sequence[Tuple],
     drawn = [k for k, v in marks.items() if v > 0]
     overlapped = set()
     for pair in (mark_same_day or []):           # 重なった線は正常（後に描いた方が残る）
-        if any(p_ in drawn for p_ in pair):
-            overlapped.update(pair)
+        drawn_in_pair = [p_ for p_ in pair if marks.get(p_, 0) > 0]
+        if drawn_in_pair:
+            for p_ in pair:
+                if marks.get(p_, 0) == 0:
+                    overlapped.add(p_)
     empty_marks = [k for k, v in marks.items() if v == 0 and k not in overlapped]
     coincident = [ck["what"] for ck in checks if len(ck["colors"]) > 1]
     return {"ok": bool(not missing and overlap == 0 and not empty_marks),

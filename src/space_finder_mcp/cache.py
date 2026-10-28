@@ -103,13 +103,14 @@ def ttl_cache(seconds: float, maxsize: int = 128,
                 # **保存してから待機を解く**（順序が逆だと、起きた後続がまだ空の store を見て
                 # 自分でも実行してしまう＝二重に API を叩く）
                 if skip_if is None or not skip_if(value):
-                    with _is_lock:
-                        if len(store) >= maxsize:
-                            for k in [k for k, v in store.items() if v[0] <= now]:
-                                store.pop(k, None)
+                    if maxsize and maxsize > 0:
+                        with _is_lock:
                             if len(store) >= maxsize:
-                                store.pop(min(store, key=lambda k: store[k][0]), None)
-                        store[key] = (now + seconds, value)
+                                for k in [k for k, v in store.items() if v[0] <= now]:
+                                    store.pop(k, None)
+                                if len(store) >= maxsize:
+                                    store.pop(min(store, key=lambda k: store[k][0]), None)
+                            store[key] = (now + seconds, value)
             finally:
                 with _is_lock:
                     inflight.pop(key, None)
@@ -137,7 +138,7 @@ def disk_cache_path(key: str, subdir: str = "asset") -> str:
 
 
 def disk_get(url: str, *, subdir: str = "asset", ttl: float = TTL_ASSET,
-             timeout: int = 30, headers: Optional[dict] = None,
+             timeout: tuple = (10, 30), headers: Optional[dict] = None,
              max_bytes: int = 0) -> Optional[bytes]:
     """バイナリ資産をディスクキャッシュ経由で取得する。戻り: bytes / None。
 

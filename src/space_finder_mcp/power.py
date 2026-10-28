@@ -89,7 +89,7 @@ def power_climate(latitude: float, longitude: float,
             structuredContent={"error": "location required"},
         )
     # 日付のデフォルト（過去1年分）
-    today = dt.date.today()
+    today = dt.datetime.now(dt.timezone.utc).date()
     if end:
         try:
             end_d = dt.date.fromisoformat(end)

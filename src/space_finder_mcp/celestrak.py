@@ -266,7 +266,7 @@ def tle_epoch_iso(line1: str) -> str:
         year = 2000 + yy if yy < 57 else 1900 + yy
         dt = datetime(year, 1, 1, tzinfo=timezone.utc) + timedelta(days=doy - 1.0)
         return dt.strftime("%Y-%m-%d %H:%M:%S")
-    except (ValueError, IndexError, TypeError):
+    except (ValueError, IndexError, TypeError, OverflowError):
         return ""
 
 
@@ -431,6 +431,9 @@ def _fetch_tle_cached(params_tuple: tuple) -> tuple:
     p = dict(params_tuple)
     p["FORMAT"] = "JSON"
     data = _get(p).json()
+    if isinstance(data, dict) and (data.get("Error") or data.get("error")):
+        raise requests.RequestException(
+            "CelesTrak がエラー応答を返しました: {}".format(data))
     if not isinstance(data, list):
         return ()
     return tuple(d for d in data if isinstance(d, dict))
@@ -447,7 +450,10 @@ def _tle_text_cached(params_tuple: tuple) -> tuple:
     """生 TLE テキスト行を取得（FORMAT=TLE。JSON は TLE 2行を返さないため）。"""
     p = dict(params_tuple)
     p["FORMAT"] = "TLE"
-    return tuple(_get(p).text.splitlines())
+    text = _get(p).text
+    if not text.strip():
+        raise requests.RequestException("CelesTrak が空の応答を返しました")
+    return tuple(text.splitlines())
 
 
 def fetch_tle_text(**params) -> list[str]:

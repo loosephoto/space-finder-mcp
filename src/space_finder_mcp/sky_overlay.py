@@ -695,6 +695,7 @@ def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,
                                         for nm, s in scene["satellites"].items()])
                 if not use_acc else
                 {"ok": True, "engine": "accurate (matplotlib)",
+                 "checked": False,
                  "note": "極座標版は投影が異なるため配置検査は対象外（注記のみ）"}),
     )
     lines.append("")

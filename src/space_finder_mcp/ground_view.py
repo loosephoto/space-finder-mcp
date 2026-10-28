@@ -465,8 +465,11 @@ def _label_box(text, tx, ty, font, anchor, dr):
     """描いた名札の占有範囲（画素検証・回帰テスト用）。"""
     w = float(dr.textlength(text, font=font))
     x0 = float(tx) if anchor == "la" else float(tx) - w
-    return dict(text=text, x0=round(x0, 1), x1=round(x0 + w, 1), y=round(float(ty), 1),
-                size=int(getattr(font, "size", 0)), anchor=anchor)
+    size_px = int(getattr(font, "size", 0))
+    return dict(text=text, x0=round(x0, 1), x1=round(x0 + w, 1),
+                y=round(float(ty), 1),
+                y0=round(float(ty) - size_px, 1), y1=round(float(ty), 1),
+                size=size_px, anchor=anchor)
 
 
 def _wrap_to_width(dr, text, font, max_w):

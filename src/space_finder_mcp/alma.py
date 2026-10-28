@@ -82,7 +82,7 @@ def _sql_str(v) -> str:
 
 # 天体名の表記ゆれ（空白 / アンダースコア / 連結 / 大小）は name_common に集約した。
 # アーカイブの target_name は観測者の入力そのままで "HL Tau"/"HL_Tau"/"HLTau" が併存する。
-@ttl_cache(TTL_DAILY, maxsize=128, skip_if=is_error_result)
+@ttl_cache(TTL_DAILY, maxsize=128, skip_if=lambda v: not v)
 def _datalink_products(access_url: str, max_items: int = 12) -> list:
     """datalink（obscore の access_url）から実データ製品の一覧を取る。
 
