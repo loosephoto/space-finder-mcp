@@ -257,7 +257,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 
 ## 🛠️ ツール一覧
 
-登録ツールは **66本**（宇宙・天文イベントカレンダー 4本（`space_calendar` / `calendar_events` / `calendar_event_add` / `calendar_event_remove`）＋ロケット打ち上げ・逆引き 4本＋NASA日次・宇宙天気 3本＋メディア 3本＋各国宇宙機関・地球観測 18本＋衛星・軌道 6本＋天体位置・画像合成 7本＋観測支援・天文データ 13本（うち**天体カタログ 2本**（`object_lookup` / `catalog_search`）・**系外惑星 1本**（`exoplanet_search`））＋気象衛星リアルタイム画像 1本＋天体異常系 3本＋**学術文献 2本**）。全66ツールを実呼び出しで検証済みです（外部APIの障害・レート制限時は、例外ではなく CallToolResult のエラーとして返します）。
+登録ツールは **66本**（宇宙・天文イベントカレンダー 4本（`space_calendar` / `calendar_events` / `calendar_event_add` / `calendar_event_remove`）＋ロケット打ち上げ・逆引き 4本＋NASA日次・宇宙天気 3本＋メディア 3本＋各国宇宙機関・地球観測 20本（うち **AWS Earth Search 2本**（`stac_collections` / `stac_search`））＋衛星・軌道 6本＋天体位置・画像合成 7本＋観測支援・天文データ 13本（うち**天体カタログ 2本**（`object_lookup` / `catalog_search`）・**系外惑星 1本**（`exoplanet_search`））＋気象衛星リアルタイム画像 1本＋天体異常系 3本＋**学術文献 2本**）。全66ツールを実呼び出しで検証済みです（外部APIの障害・レート制限時は、例外ではなく CallToolResult のエラーとして返します）。
 
 | ツール | できること | データ源 | 認証 |
 |--------|-----------|---------|------|
@@ -303,7 +303,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `planetary_evidence` | **天体（惑星・衛星・小天体・探査機）の文献的な裏づけをまとめて返す**。①名前解決（Sesame/CDS で和名→英語名→座標）と、②その天体の文献を**英語圏＋日本語の両方**から集めて提示（既定は被引用数順。**惑星科学概念で絞った OpenAlex を上位に置く**＝実測「火星」で MOLA / OMEGA-Mars Express / ALH84001 が上位に来る）。⚠️ 太陽系天体は時刻で位置が変わるため固定座標を持たない旨を `caveats` に明記 | OpenAlex / Crossref / NASA NTRS / JAXAリポジトリ / J-STAGE / CiNii ＋ Sesame/CDS | 不要 |
 | `radio_sources_now` | TART オープン電波望遠鏡が「いま観測できる電波源」（GNSS・静止衛星等）を仰角順に表示 | TART source catalog (NZ) | 不要 |
 | `sky_map_with_satellites` | 指定地の空を**地上から見上げた**画像（既定=地上視点パノラマ: Hipparcos実星表の恒星・天の川・街並み・方位目盛り・惑星・人工衛星。太陽高度で昼/夕方/朝焼け/薄明/夜の空色が変わり、**今は見えない天体は○で位置を示す**。`span`/`az0` で視野、`lp` で光害、`show` で依頼表示を指定。従来の天頂中心図は `engine="simple"`(Pillow) / `"accurate"`(matplotlib)） | JPL de421+Skyfield / Hipparcos(VizieR) / CelesTrak+SGP4 | 不要 |
-| `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示）。**`projection="oblique"` を指定すると、黄道面を斜め上（仰角34°・方位28°・弱い透視）から見た俯瞰に切り替わる**（奥行きで線の太さと明度を変え、手前が明るい。画面上の距離はAUに比例しないので距離は数値を使う。`figure.view.projection="oblique"`・`figure.verify.method="oblique_expected_px+marker_core"`。既定は `"oblique"`（`projection="top"` で従来の真上図）。`engine="accurate"`（matplotlib・線形距離）を明示したときはそちらを優先し、斜め俯瞰は使わない＝その旨を `figure.notes` に出す）。`view="comet_orbit"` で彗星の軌道面ビュー（太陽＝焦点の楕円／e≥1 は双曲線の枝）、`view="asteroid_orbit"` で指定した小惑星（`asteroid`）の楕円全体と現在位置を表示（SBDB要素のケプラー二体伝播・1天体ずつ）。**`comet` にカンマ区切りで複数（または `comet2`、最大4天体）指定すると 1彗星=1パネルで1枚に並べる**（パネルごとに軌道面と縮尺が違う旨は `figure.notes` に自動生成）。`view="apparition"` で彗星の**見え方チャート**（地心距離・日心距離・予想光度・太陽離角の時系列、`days` で期間指定。1天体ずつ）。`route=True` で**彗星の通過経路（軌道）を俯瞰図に破線で重ねる**（近日点・遠日点は◇＋日付。**近日点の日付は SBDB の2体近似と JPL Horizons の n 体解を併記**し、差を日数で注記。対数縮尺では線の形は実際の楕円と一致しない旨を注記に自動生成し、線形版は形が本当の軌道）。**`probe` を併用した `route=True` では探査機の実際の飛行経路（JPL Horizons の実状態ベクトル）を破線で重ね、実際のスイングバイを◇＋日付＋距離で示す**（詳細は下の「探査機のスイングバイ経路」）。**`range_au` で表示範囲（太陽からの距離の上限 AU）を指定でき、`range_au=10` なら土星(9.5 AU)より内側だけを表示して内惑星を大きく見せられる**（`2`=火星まで／`5.2`=木星まで／`30`=海王星まで。**範囲外の天体・目印・軌道の円は描かず**、`figure.notes` と `structuredContent.out_of_range` に数値付きで列挙。0.5 AU 未満はエラー）。**`probe` 指定時は「1光日」（173.1446 AU＝25,902,068,371 km）を破線の円で描き、1光日に達していない探査機**ごとに**投影での1光日リング・到達時の方向（◇）・到達予測日（日心距離ベースの線形外挿＝`probes[].light_day_eta_date`）を出す（`light_day.projected_rings` と `figure.verify.light_day.rings` に各リングを列挙）**） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
+| `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示）。**`projection` で視点を選べる（既定 `"oblique"`＝黄道面を斜め上・仰角34°・方位28°・弱い透視から見た俯瞰、`"top"`＝従来の真上図）**。斜め俯瞰は奥行きで線の太さと明度を変え（手前が明るい）、画面上の距離はAUに比例しないので距離は数値を使う（`figure.view.projection`・`figure.verify.method="oblique_expected_px+marker_core"`）。`engine="accurate"`（matplotlib・線形距離）を明示したときはそちらを優先し、斜め俯瞰は使わない＝その旨を `figure.notes` に出す。`view="comet_orbit"` で彗星の軌道面ビュー（太陽＝焦点の楕円／e≥1 は双曲線の枝）、`view="asteroid_orbit"` で指定した小惑星（`asteroid`）の楕円全体と現在位置を表示（SBDB要素のケプラー二体伝播・1天体ずつ）。**`comet` にカンマ区切りで複数（または `comet2`、最大4天体）指定すると 1彗星=1パネルで1枚に並べる**（パネルごとに軌道面と縮尺が違う旨は `figure.notes` に自動生成）。`view="apparition"` で彗星の**見え方チャート**（地心距離・日心距離・予想光度・太陽離角の時系列、`days` で期間指定。1天体ずつ）。`route=True` で**彗星の通過経路（軌道）を俯瞰図に破線で重ねる**（近日点・遠日点は◇＋日付。**近日点の日付は SBDB の2体近似と JPL Horizons の n 体解を併記**し、差を日数で注記。対数縮尺では線の形は実際の楕円と一致しない旨を注記に自動生成し、線形版は形が本当の軌道）。**`probe` を併用した `route=True` では探査機の実際の飛行経路（JPL Horizons の実状態ベクトル）を破線で重ね、実際のスイングバイを◇＋日付＋距離で示す**（詳細は下の「探査機のスイングバイ経路」）。**`range_au` で表示範囲（太陽からの距離の上限 AU）を指定でき、`range_au=10` なら土星(9.5 AU)より内側だけを表示して内惑星を大きく見せられる**（`2`=火星まで／`5.2`=木星まで／`30`=海王星まで。**範囲外の天体・目印・軌道の円は描かず**、`figure.notes` と `structuredContent.out_of_range` に数値付きで列挙。0.5 AU 未満はエラー）。**`probe` 指定時は「1光日」（173.1446 AU＝25,902,068,371 km）を破線の円で描き、1光日に達していない探査機**ごとに**投影での1光日リング・到達時の方向（◇）・到達予測日（日心距離ベースの線形外挿＝`probes[].light_day_eta_date`）を出す（`light_day.projected_rings` と `figure.verify.light_day.rings` に各リングを列挙）**） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
 | `solar_eclipse_series` | 日食（太陽が月に欠ける過程）の時系列パネル画像（7枚・食分と太陽高度・次回日食の自動検索=約4年(1400日)先まで・max_magnitude対応。**地平線下で見えない食は返さない**） | JPL DE421+Skyfield | 不要 |
 | `moon_phase_map` | **月齢マップ**（月の満ち欠け）。`layout="calendar"`（既定）で1か月の日別格子（日月火水木金土・月齢・照度・月相）、`layout="lunation"` で1朔望月（朔→朔）の時系列パネル。輝面の向きは太陽の位置角から計算（月齢からの決め打ちをしない）。朔・望・上弦・下弦の時刻を現地時間で併記 | JPL DE421+Skyfield | 不要 |
 | `eodashboard_collections` | EO Dashboard（NASA×ESA×JAXA共同）の173データセットをテーマ・機関・キーワードで検索 | EO Dashboard (GitHub catalog) | 不要 |
@@ -748,7 +748,7 @@ ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカ�
 
 ### ☀️ `solar_system_now` — 太陽系俯瞰図（太陽中心の惑星・小惑星・探査機・彗星位置）
 
-「太陽系を上から見た図」「今の惑星の位置」「イトカワの今の位置を図で」「ベンヌの楕円軌道を表示して」などに応答。太陽を中心とした黄道面俯瞰図を画像化し、惑星(8惑星＋冥王星)は **JPL DE421 暦表 + Skyfield** で日心黄道座標を計算。任意の小惑星は **JPL SBDB API** の軌道要素を取得し**ケプラー2体問題**で日心位置へ伝播する（`asteroid`/`asteroid2` で複数指定可）。
+「太陽系を上から見た図」「今の惑星の位置」「イトカワの今の位置を図で」「ベンヌの楕円軌道を表示して」などに応答。**既定は斜め俯瞰**（黄道面を仰角34°・方位28°から見た構図。`projection="top"` で従来の真上図に切り替わる）。**位置の扱い**: マーカーは日心位置（距離・黄経・黄緯）を 3D で置き、その投影で描く。以下の説明にある「黄道面への正射影」は `projection="top"`（真上図）での言い方で、斜め俯瞰では同じ 3D 位置を斜めから見た投影になる（どちらの投影でも画面上の距離は AU に比例しないので、距離は数値を使う）。太陽を中心とした黄道面俯瞰図を画像化し、惑星(8惑星＋冥王星)は **JPL DE421 暦表 + Skyfield** で日心黄道座標を計算。任意の小惑星は **JPL SBDB API** の軌道要素を取得し**ケプラー2体問題**で日心位置へ伝播する（`asteroid`/`asteroid2` で複数指定可）。
 
 - 距離が 0.4〜40 AU と2桁超のため、**Pillow版(既定)は対数縮尺**で全天体を一枚に表示。惑星を実物色アイコン＋距離ラベル、小惑星を**緑の十字マーカー**＋緑軌道リングで強調。惑星軌道円・小惑星帯(2.0-3.4AU目安)も併記。学生・観賞向けに視認性優先。
 - `engine="accurate"` で **matplotlib 版**（線形距離の正確な相対距離俯瞰図）も選択可。科学的な相対距離比較用途向け。
@@ -1096,6 +1096,7 @@ src/space_finder_mcp/
 ├── ssd.py               # fireball_reports / neo_close_approach / impact_risk（JPL CNEOS, 認証不要）
 ├── stac_search.py       # stac_collections / stac_search（AWS Earth Search STAC）
 ├── iss.py               # iss_now（ISS 現在位置, Open Notify）
+├── qzss.py              # qzss_status（みちびき QZSS の公開アーカイブ API）
 ├── oscar.py             # satellite_status（WMO OSCAR 衛星カタログ）
 ├── cnsa.py              # cnsa_status（中国 CNSA 系衛星データポータル到達状態）
 ├── tiangong.py          # tiangong_now（天宮 中国宇宙ステーション位置, CelesTrak TLE + SGP4）
@@ -1107,14 +1108,21 @@ src/space_finder_mcp/
 ├── alma.py              # alma_search（ALMA 電波観測データ, Science Archive TAP）
 ├── tart.py              # radio_sources_now（TART オープン電波望遠鏡 可視電波源）
 ├── skyfield_pos.py      # constellation_now（天体位置・星座, Skyfield）
+├── cds.py               # object_lookup / catalog_search（CDS SIMBAD・VizieR の天体カタログ検索）
+├── exoplanet.py         # exoplanet_search（NASA Exoplanet Archive TAP・ADQL）
 ├── news.py               # astronomy_news（Sky & Telescope 天文ニュース）
 ├── sky_overlay.py        # sky_map_with_satellites（星図+人工衛星, 天頂中心の円形図 / matplotlib+Pillow）
 ├── ground_view.py        # sky_map_with_satellites(engine="ground") 地上視点パノラマ（実星表・天の川・街並み・方位目盛り）
 ├── solar_system.py        # solar_system_now（太陽系俯瞰図, JPL DE421+SBDB / matplotlib+Pillow）
+├── comet_apparition.py   # 彗星の見え方チャート（solar_system_now view="apparition"）
+├── swingby.py            # スイングバイ航路の実測（Horizons 状態ベクトル＋最接近探索）
 ├── orbit_view.py          # 斜め俯瞰の投影・円錐曲線サンプリング・深度・描画部品（正射影/弱い透視・対数動径）
 ├── solar_eclipse.py       # solar_eclipse_series（日食の時系列パネル, JPL DE421+Skyfield）
 ├── moon_phase.py          # moon_phase_map（月齢マップ: 月齢カレンダー/朔望月パネル, JPL DE421+Skyfield）
 ├── mars_rover.py         # mars_rover_status（火星ローバー状況・天気）
+├── site_plan.py         # 月面遺跡の局地サイトプラン描画と一次情報データ
+├── tool_docs.py         # tools/list の description 圧縮・スキーマ整形
+├── http_retry.py        # 一時的な接続失敗だけを再試行する HTTP ラッパ
 ├── surface_map.py        # 天体面地図の共通描画（タイル合成・等角投影・地点マーカー・画素検証）
 ├── planetary_map.py      # planetary_orbiter_track（汎用・天体周回機マップ／落点マップ）
 ├── calendar_store.py     # 蓄積ストア（正規化レコード＋来歴／ユーザー予定・原子書き込み・月別TTL・prune）
