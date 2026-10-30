@@ -1,6 +1,6 @@
 # Space Finder MCP Server — Claude Code 用プロジェクトガイド
 
-宇宙・天文・地球観測の公開データを **66ツール**で横断検索する MCP サーバー（Python / uv 管理）です。NASA・ESA Copernicus・JAXA・ISRO・CSA・INPE・UK EO DataHub・DLR EOC・Roscosmos・CNSA・CelesTrak・JPL（DE421/SBDB/Horizons）・Wikidata・Open-Meteo などを統合し、衛星画像・軌道マップ・日食パネル・月齢マップを**画像で返しつつ**、LLM向けに構造化JSONも同時に返します。
+宇宙・天文・地球観測の公開データを **67ツール**で横断検索する MCP サーバー（Python / uv 管理）です。NASA・ESA Copernicus・JAXA・ISRO・CSA・INPE・UK EO DataHub・DLR EOC・Roscosmos・CNSA・CelesTrak・JPL（DE421/SBDB/Horizons）・Wikidata・Open-Meteo などを統合し、衛星画像・軌道マップ・日食パネル・月齢マップを**画像で返しつつ**、LLM向けに構造化JSONも同時に返します。
 
 **開発規約は分割ルールにあります**: `.claude/rules/`（コーディング規約・検証ゲート・データ出典）を参照してください。
 
@@ -39,7 +39,7 @@ claude mcp list   # 確認
 
 - `-s project` はリポジトリ直下に `.mcp.json` を作ります（チーム共有向け）。個人利用だけで済ませるなら `-s user`（全プロジェクトで有効）を使います。
 
-検証済みの代替コマンド（いずれも 66ツールを返して起動します）:
+検証済みの代替コマンド（いずれも 67ツールを返して起動します）:
 
 ```bash
 uv --directory /abs/path/to/space-finder-mcp run space-finder-mcp
@@ -80,7 +80,7 @@ ISSの現在位置を地球地図で →  mcp__space-finder__sat_ground_track
 | 天体異常系 | 3 |
 | 学術文献 | 2 |
 
-合計 66 ツール。エージェント向け仕様は `SKILL.md` を参照。
+合計 67 ツール。エージェント向け仕様は `SKILL.md` を参照。
 
 ## 利用パターン（ハマりどころ）
 
@@ -106,7 +106,7 @@ uv run python scripts/check-tools.py --fonts          # 日本語フォントの
 uv run python scripts/check-tools.py --concurrency    # 並列実行（single-flight・スレッド逃がし・例外漏れ）
 uv run python scripts/check-tools.py --stdio          # 実クライアント経路(stdio)で代表ツールが応答するか
 uv run python -m unittest discover -s tests          # 回帰テスト（対応済みの実バグの再発防止）
-uv run python scripts/check-tools.py                  # 全66ツール実呼び出し（数分）
+uv run python scripts/check-tools.py                  # 全67ツール実呼び出し（数分）
 uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールのみ
 ```
 
@@ -132,7 +132,7 @@ uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールの�
 1. `README.md` のツール表と `SKILL.md` を**同一変更内で**更新（ツール追加/削除/仕様変更時）
 2. **変更内容（直近の更新内容）は README に書かず、GitHub Releases に記載する** — README は履歴を持たず、最新リリースへのリンク（`## 📝 更新履歴` 節）だけを置きます。**`SKILL.md` の `## 更新履歴` は LLM 向けの要約として残します**（エージェントが読む履歴なので Releases へは飛ばさない）
 3. `pyproject.toml` の `version` を更新（`uv build` が `uv.lock` の版表記も書き換えるので、同じコミットに含める）
-4. `uv run python scripts/check-tools.py` で全66ツールが正常なことを確認
+4. `uv run python scripts/check-tools.py` で全67ツールが正常なことを確認
 5. `uv build` でパッケージ作成を確認 → `dist/` `build/` を削除
 6. コミット → `git push origin main` → `vX.Y.Z` タグを打ち、**同じ本文で GitHub Release を作成**する（本文＝要約・変更点の箇条書き・検証行・`**Full Changelog**` リンク。例: `gh release create vX.Y.Z --title "vX.Y.Z — <要約>" --notes-file <notes.md>`）
 

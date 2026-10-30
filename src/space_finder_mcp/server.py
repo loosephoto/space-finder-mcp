@@ -55,6 +55,7 @@ from . import solar_system as _solarsys
 from . import planetary_rover as _prover
 from . import planetary_map as _pmap
 from . import satellite_map as _satmap
+from . import obs_sheet as _osheet
 from . import weather_sat as _wsat
 from . import space_calendar as _calendar
 from . import literature as _lit
@@ -261,6 +262,9 @@ _reg(_cnes.cnes_status)
 
 # ---- 天体観測用天気 (Open-Meteo, 認証不要) ----
 _reg(_weather.astronomy_weather)
+
+# ---- 観測判断シート（判定＋雲量＋衛星＋雨雲の合成図, 認証不要）----
+_reg(_osheet.observing_sheet)
 
 
 # ---- EO Dashboard (NASA/ESA/JAXA 共同地球観測カタログ, 認証不要) ----

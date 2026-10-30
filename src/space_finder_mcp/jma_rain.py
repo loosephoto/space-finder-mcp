@@ -572,4 +572,34 @@ def rain_images(lat: float, lon: float, name: str,
                "page_url": _RAIN_PAGE, "verify": rain_verify}]
     if nowc_entry:
         images.append(nowc_entry)
+    # --- 2枚を1枚に積む（「実況→予報→60分先」を1枚で追えるようにする） -----------
+    # 画像を2枚並べると「どちらを先に見るか」「時刻がいつか」が読み手に委ねられる。
+    # 上段＝解析雨量＋降水短時間予報、下段＝ナウキャスト（実況／+60分）の順に積み、
+    # 先頭に「読み方」を1行置く。個別画像も残す（拡大して見たいとき用）。
+    if nowc_entry:
+        try:
+            from PIL import Image, ImageDraw
+            top = Image.open(io.BytesIO(rain_jpeg)).convert("RGB")
+            bot = Image.open(io.BytesIO(nowc_entry["bytes"])).convert("RGB")
+            w = max(top.width, bot.width)
+            head = 64
+            cv = Image.new("RGB", (w, head + top.height + 12 + bot.height), (12, 14, 22))
+            d = ImageDraw.Draw(cv)
+            d.text((18, 10), "雨雲の読み方: 上段＝実況と予報（+1〜+15時間）／下段＝ナウキャスト（実況→60分先）",
+                   font=load_font(19, True), fill=(236, 240, 250))
+            d.text((18, 36), "地点の十字マーカーが観測予定地。色は降水強度(mm/h)。降水は雲量そのものではない",
+                   font=load_font(15), fill=(150, 158, 176))
+            cv.paste(top, ((w - top.width) // 2, head))
+            cv.paste(bot, ((w - bot.width) // 2, head + top.height + 12))
+            buf = io.BytesIO()
+            cv.save(buf, format="JPEG", quality=82, optimize=True)
+            images.insert(0, {"id": "combined", "bytes": buf.getvalue(),
+                              "label": "気象庁 雨雲（実況・予報・ナウキャスト）",
+                              "alt": "気象庁の雨雲（実況と予報・{}付近）".format(name),
+                              "page_url": _RAIN_PAGE,
+                              "verify": {"ok": bool(rain_verify.get("ok")),
+                                         "stacked": 2,
+                                         "size": [cv.width, cv.height]}})
+        except Exception:
+            pass                       # 合成に失敗しても個別画像は返す（黙って落とさない）
     return {"images": images, "payload": payload, "figure": figure}
