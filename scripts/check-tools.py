@@ -103,7 +103,7 @@ def _is_error(result) -> bool:
 DRAWN_FIGURE_TOOLS = (
     "solar_system_now", "sat_ground_track", "planetary_orbiter_track",
     "planetary_rover_location_map", "sky_map_with_satellites", "solar_eclipse_series",
-    "astronomy_weather", "moon_phase_map", "space_calendar",
+    "astronomy_weather", "moon_phase_map", "space_calendar", "observing_sheet",
 )
 
 
@@ -446,6 +446,9 @@ FIGURES_EXTRA_CALLS = (
     # 雨雲・降水画像（日本国内のみ添付される）: figure.kind を検査
     ("astronomy_weather[雨雲・降水画像]", "astronomy_weather",
      {"place": "東京"}, {"figure_kind": "weather_rain_panels"}),
+    # 観測判断シート（判定＋雲量の予報＋衛星＋雨雲の合成）: 判定と地点マーカーの画素を見る
+    ("observing_sheet[判断シート]", "observing_sheet",
+     {"place": "東京"}, {"figure_kind": "observing_sheet"}),
     # 月齢マップ: 月齢カレンダー・朔の日（照度0で輝面を描かない経路）・朔望月パネル。
     ("moon_phase_map[月齢カレンダー]", "moon_phase_map",
      {"date": "2026-09", "place": "東京"}, {"figure_kind": "moon_phase_calendar"}),
