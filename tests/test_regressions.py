@@ -951,7 +951,7 @@ class OrbitRouteTests(unittest.TestCase):
         # route=True で通過経路を重ねた俯瞰図: 目印の画素・破線の実在まで検証して返す。
         from space_finder_mcp.solar_system import solar_system_now
 
-        r = solar_system_now(comet="エンケ彗星", route=True)
+        r = solar_system_now(comet="エンケ彗星", route=True, projection="top")
         sc = r.structuredContent or {}
         self.assertNotIn("error", sc)
         fig = sc.get("figure") or {}
@@ -972,7 +972,7 @@ class OrbitRouteTests(unittest.TestCase):
         # 注記に出す（描いていないのに描いたと言わない）。
         from space_finder_mcp.solar_system import solar_system_now
 
-        r = solar_system_now(comet="紫金山・アトラス彗星", route=True)
+        r = solar_system_now(comet="紫金山・アトラス彗星", route=True, projection="top")
         sc = r.structuredContent or {}
         self.assertNotIn("error", sc)
         v = (sc.get("figure") or {}).get("verify") or {}
@@ -1013,7 +1013,7 @@ class OrbitRouteTests(unittest.TestCase):
         # ボイジャー1号: 木星 1979-03-05 348,132 km / 土星 1980-11-13 184,382 km。
         from space_finder_mcp.solar_system import solar_system_now
 
-        r = solar_system_now(probe="ボイジャー1号", route=True)
+        r = solar_system_now(probe="ボイジャー1号", route=True, projection="top")
         sc = r.structuredContent or {}
         self.assertNotIn("error", sc)
         fig = sc.get("figure") or {}
@@ -1247,7 +1247,8 @@ class RangeAuTests(unittest.TestCase):
         from space_finder_mcp.solar_system import solar_system_now
 
         sc = solar_system_now(comet="ハレー彗星", route=True, range_au=5).structuredContent
-        self.assertTrue(sc["engine"].startswith("simple"), sc["engine"])
+        # 既定は oblique（対数動径）。どちらでも「対数版に落ちた」ことは満たす
+        self.assertTrue(sc["engine"].startswith(("simple", "oblique")), sc["engine"])
         joined = "\n".join(sc["figure"]["notes"])
         self.assertIn("表示範囲5 AU の外にあるため描いていない", joined)
         self.assertTrue(any(o.get("type") == "route_mark" for o in sc["out_of_range"]), sc["out_of_range"])

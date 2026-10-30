@@ -369,6 +369,15 @@ FIGURES_EXTRA_CALLS = (
      {"comet": "紫金山・アトラス彗星", "route": True}, {"figure_kind": "heliocentric_overview"}),
     # 表示範囲の指定（range_au）: 土星より内側だけを拡大して見せる経路。範囲外の天体・軌道の円は
     # 描かず、注記へ数値付きで列挙する分岐（黙って消さない）を両エンジンで固定する。
+    # 斜め俯瞰（projection="oblique"）: 弱い透視・対数動径。verify は期待 px を
+    # 描画と同じ投影から出してマーカーの白点を画素で確かめる（method=oblique_expected_px+marker_core）。
+    ("solar_system_now[oblique/惑星]", "solar_system_now",
+     {"projection": "oblique", "when": "2026-10-30T03:00:00Z"},
+     {"figure_kind": "heliocentric_overview"}),
+    ("solar_system_now[oblique/彗星+経路]", "solar_system_now",
+     {"projection": "oblique", "comet": "ハレー彗星", "route": True,
+      "when": "2026-10-30T03:00:00Z"},
+     {"figure_kind": "heliocentric_overview"}),
     ("solar_system_now[range_au=10/simple]", "solar_system_now",
      {"range_au": 10}, {"figure_kind": "heliocentric_overview"}),
     ("solar_system_now[range_au=10/accurate]", "solar_system_now",

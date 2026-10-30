@@ -1377,6 +1377,287 @@ def _render_simple(scene):
 
 
 
+# ---------------------------------------------------------------- 斜め俯瞰（oblique）
+# 黄道面を斜め上から見た構図。投影・円錐曲線・深度・描画は orbit_view に集約し、
+# ここでは scene（_compute の戻り値）を orbit_view の部品へ橋渡しするだけにする。
+OBLIQUE_W = 1500
+OBLIQUE_EL = 34.0
+OBLIQUE_AZ = 28.0
+OBLIQUE_DOLLY = 4.2          # カメラ距離 = dolly × 画面半径（弱い透視）
+
+
+def _oblique_hi(scene, w=OBLIQUE_W):
+    """表示範囲（太陽からの距離の上限 AU）。range_au があればそれに固定する。"""
+    rng = scene.get("range_au")
+    if rng:
+        return float(rng), min(0.30, float(rng) * 0.05)
+    hi = 60.0
+    for p in scene.get("planets", {}).values():
+        hi = max(hi, float(p.get("sma") or 0.0) * 1.05)
+    for group in ("asteroids", "probes", "comets"):
+        for d in scene.get(group, {}).values():
+            if not d.get("error") and d.get("au"):
+                hi = max(hi, float(d["au"]) * 1.12)
+    for rt in (scene.get("routes") or {}).values():
+        for pt in (rt.get("points") or []):
+            hi = max(hi, math.hypot(pt[0], pt[1]) * 1.02)
+    return hi, 0.30
+
+
+def _oblique_view(scene):
+    """scene → orbit_view.View（対数動径・弱い透視）。"""
+    from .orbit_view import Camera, RadialScale, View
+    hi, lo = _oblique_hi(scene)
+    return View(Camera(OBLIQUE_EL, OBLIQUE_AZ, OBLIQUE_DOLLY),
+                RadialScale("log", lo_au=lo, hi_au=hi, r_px=620.0),
+                OBLIQUE_W / 2.0, OBLIQUE_W / 2.0)
+
+
+def _xyz_from_au_lonlat(au, lon_deg, lat_deg):
+    """日心距離・黄経・黄緯 → 黄道 J2000 の直交座標 [AU]。"""
+    au = float(au)
+    lam, bet = math.radians(float(lon_deg)), math.radians(float(lat_deg))
+    return (au * math.cos(bet) * math.cos(lam),
+            au * math.cos(bet) * math.sin(lam),
+            au * math.sin(bet))
+
+
+def _render_oblique(scene):
+    """斜め俯瞰の俯瞰図（Pillow）。既存 _render_simple と同じ scene を受けて PNG bytes を返す。
+
+    描くもの: 星背景 / 惑星軌道（公転長半径の円）/ 惑星・小惑星・彗星・探査機の現在位置マーカーと
+    名札 / 通過経路（破線）/ 太陽 / 凡例・縮尺注記。
+    深度（カメラからの距離）で線の太さと明度を変え、手前を明るく描く。
+    """
+    import io
+    import random
+
+    from PIL import Image, ImageDraw
+
+    from .orbit_view import (depth_range, draw_marker, draw_orbit, draw_track,
+                             expected_px, orbit_segments)
+
+    view = _oblique_view(scene)
+    W = H = OBLIQUE_W
+    CX = CY = W // 2.0
+    hi, lo = float(view.scale.hi_au), float(view.scale.lo_au)
+
+    img = Image.new("RGB", (W, H), (3, 4, 12))
+    dr = ImageDraw.Draw(img, "RGBA")
+
+    # 星背景（固定シード＝同じ scene なら同じ図）
+    rnd = random.Random(20261030)
+    for _ in range(1400):
+        x, y = rnd.uniform(0, W), rnd.uniform(0, H)
+        m = rnd.random() ** 3.0
+        dr.ellipse([x, y, x + 0.6 + 1.4 * m, y + 0.6 + 1.4 * m],
+                   fill=(255, 255, 255, int(30 + 150 * m)))
+
+    # 惑星軌道（公転長半径の円。離心率は無視する＝既存 simple 版と同じ割り切り）
+    planet_orbits_drawn, orbits_skipped = 0, []
+    for name, p in scene.get("planets", {}).items():
+        sma = float(p.get("sma") or 0.0)
+        if sma <= 0:
+            continue
+        if not (lo <= sma <= hi):
+            orbits_skipped.append({"name": name, "sma_au": sma})
+            continue
+        el = {"a": sma, "e": 0.0, "i": 0.0, "om": 0.0, "w": 0.0, "q": sma}
+        segs = orbit_segments(el, view, hi)
+        dmin, dmax = depth_range(segs, view)
+        draw_orbit(dr, segs, view, body_rgb(name), base_width=1.0, kind="planet",
+                   dmin=dmin, dmax=dmax)
+        planet_orbits_drawn += 1
+
+    # 1光日リング（真距離の円を黄道面に描く）。枠内にあるときだけ。
+    light_day_drawn = False
+    if lo <= LIGHT_DAY_AU <= hi * 1.05:
+        el_ld = {"a": LIGHT_DAY_AU, "e": 0.0, "i": 0.0, "om": 0.0, "w": 0.0, "q": LIGHT_DAY_AU}
+        segs_ld = orbit_segments(el_ld, view, hi * 1.05)
+        for seg in segs_ld:
+            pts = [view.project(pt) for pt in seg]
+            for i in range(0, len(pts) - 1, 6):
+                if (i // 6) % 2:
+                    continue
+                dr.line([(pts[i][0], pts[i][1]), (pts[i + 1][0], pts[i + 1][1])],
+                        fill=(190, 205, 230, 120), width=2)
+        dr.text((CX + 20, CY + 40), "1光日 {:.2f} AU（破線円）".format(LIGHT_DAY_AU),
+                font=load_font(15), fill=(190, 205, 230, 220))
+        light_day_drawn = True
+
+    # マーカー＋名札（惑星→小惑星→彗星→探査機の順に上へ）
+    labels_placed = []
+    marks = []
+
+    def _add(kind, name, val, color):
+        if val.get("error"):
+            return
+        au = val.get("au")
+        if au is None or au <= 0 or not (lo <= float(au) <= hi * 1.2):
+            return
+        pos = _xyz_from_au_lonlat(au, val.get("eclLon") or 0.0, val.get("eclLat") or 0.0)
+        marks.append((kind, name, val, color, pos))
+
+    for name, p in scene.get("planets", {}).items():
+        _add("planet", name, p, body_rgb(name))
+    for name, a in scene.get("asteroids", {}).items():
+        _add("asteroid", name, a, symbol_rgb("asteroid"))
+    for name, c in scene.get("comets", {}).items():
+        _add("comet", name, c, _COMET_COLOR)
+    for name, pr in scene.get("probes", {}).items():
+        _add("probe", name, pr, tuple(pr.get("color") or (200, 200, 210)))
+
+    # 通過経路（彗星の軌道・探査機のスイングバイ航路）
+    routes_drawn = 0
+    for name, rt in (scene.get("routes") or {}).items():
+        if rt.get("error") or not rt.get("points"):
+            continue
+        col = tuple(rt.get("color") or _COMET_COLOR)
+        draw_track(dr, [tuple(pt) for pt in rt["points"]], view, col, base_width=2.0)
+        routes_drawn += 1
+
+    font = load_font(19, True)
+    font_s = load_font(16)
+    for kind, name, val, color, pos in marks:
+        px, py = draw_marker(dr, pos, view, color)
+        txt = "{} {:.2f}AU".format(name, float(val.get("au") or 0.0))
+        w_txt = dr.textlength(txt, font=font_s)
+        # 太陽から外向きの向きへ置き、画面外へはみ出す場合は内側へ寄せる
+        vx, vy = px - CX, py - CY
+        n = math.hypot(vx, vy) or 1.0
+        if kind == "comet":
+            # 彗星は尾が反太陽方向に出るので、名札は接線方向へ逃がす（箱が尾を覆わない）
+            vx, vy = -vy / n, vx / n
+        lx, ly = px + 22 * vx / n, py + 22 * vy / n
+        bx0 = lx if vx >= 0 else lx - w_txt
+        by0 = ly - 10
+        bx0 = min(max(8.0, bx0), W - w_txt - 8.0)
+        by0 = min(max(112.0, by0), H - 96.0)
+        dr.rectangle([bx0 - 3, by0 - 2, bx0 + w_txt + 3, by0 + 22], fill=(6, 9, 16, 190))
+        dr.text((bx0, by0), txt, font=font_s, fill=color + (255,))
+        labels_placed.append({"name": name, "box": [int(bx0), int(by0),
+                                                    int(bx0 + w_txt), int(by0 + 22)]})
+
+    # 彗星の尾（反太陽方向）。ラベル箱より後に描く（箱に隠れると尾が消える）。
+    for name, c in scene.get("comets", {}).items():
+        if c.get("error") or not c.get("au"):
+            continue
+        au = float(c["au"])
+        if not (lo <= au <= hi * 1.2):
+            continue
+        pos = _xyz_from_au_lonlat(au, c.get("eclLon") or 0.0, c.get("eclLat") or 0.0)
+        px, py, _d = view.project(pos)
+        vx, vy = px - CX, py - CY
+        n = math.hypot(vx, vy) or 1.0
+        ux, uy = vx / n, vy / n          # 太陽→彗星 = 反太陽方向
+        for k, (length, wid, alpha) in enumerate(((62, 4, 235), (46, 3, 200), (30, 2, 165))):
+            off = 3 + k * 2
+            dr.line([(px + ux * off, py + uy * off),
+                     (px + ux * (off + length), py + uy * (off + length))],
+                    fill=_COMET_COLOR + (alpha,), width=wid)
+
+    # 太陽
+    dr.ellipse([CX - 26, CY - 26, CX + 26, CY + 26], fill=(255, 204, 102, 30))
+    dr.ellipse([CX - 11, CY - 11, CX + 11, CY + 11], fill=(255, 212, 128, 70))
+    dr.ellipse([CX - 5, CY - 5, CX + 5, CY + 5], fill=(255, 243, 208, 255))
+    dr.text((CX + 12, CY + 14), "太陽", font=font_s, fill=(255, 233, 184, 230))
+
+    # ヘッダ
+    dr.rectangle([0, 0, W, 104], fill=(0, 0, 0, 230))
+    parts = []
+    for key, label in (("asteroids", "小惑星"), ("probes", "探査機"), ("comets", "彗星")):
+        ok = [k for k, v in scene.get(key, {}).items() if not v.get("error")]
+        if ok:
+            parts.append(label + "・".join(ok))
+    title = "太陽系・現在位置（斜め俯瞰・黄道面を仰角{:g}°から）".format(OBLIQUE_EL)
+    if parts:
+        title += "＋" + "／".join(parts)
+    dr.text((26, 16), title, font=load_font(30, True), fill=(255, 255, 255, 255))
+    dr.text((26, 70), "{} ・数値=太陽からの距離AU ・弱い透視（カメラ距離 {:.1f}×画面半径）・"
+                      "画面上の距離はAUに比例しない".format(scene.get("time_utc", ""), OBLIQUE_DOLLY),
+            font=load_font(18), fill=(195, 205, 235, 255))
+
+    # フッタ
+    dr.rectangle([14, H - 54, W - 14, H - 14], fill=(0, 0, 0, 225))
+    leg = ("● 惑星  ⬥ 小惑星  ☄彗星  ◆探査機   ┈ 通過経路（破線）"
+           "   奥ほど暗く細い（手前が明るい）")
+    if orbits_skipped:
+        leg += "   表示範囲外の惑星軌道 {} 本は描いていない".format(len(orbits_skipped))
+    dr.text((28, H - 40), leg + " ・ 出典: JPL DE421+SBDB+Horizons / Skyfield",
+            font=load_font(16), fill=(225, 232, 250, 255))
+
+    # 表示範囲の記録（既存 simple 版と同じキー）。範囲外は黙って消さず out_of_range に列挙する。
+    out_of_range = []
+    for group, kind_name in (("planets", "planet"), ("asteroids", "asteroid"),
+                             ("comets", "comet"), ("probes", "probe")):
+        for name, d in scene.get(group, {}).items():
+            if d.get("error") or d.get("au") is None:
+                continue
+            au = float(d["au"])
+            if not (lo <= au <= hi):
+                out_of_range.append({"type": kind_name, "name": name, "au": au})
+    # 経路の目印（近日点・遠日点・最接近）が範囲外なら、それも列挙する（黙って消さない）
+    for rname, rt in (scene.get("routes") or {}).items():
+        if rt.get("error"):
+            continue
+        for mk in (rt.get("marks") or []):
+            rr = float(mk.get("proj_au") or mk.get("r_au") or 0.0)
+            if rr > hi:
+                out_of_range.append({"type": "route_mark",
+                                     "name": rt.get("name") or rname,
+                                     "label": mk.get("label"), "au": rr,
+                                     "date": mk.get("date")})
+    scene["range_report"] = {"range_au": hi, "lo_au": lo,
+                             "skipped_orbits": orbits_skipped,
+                             "out_of_range": out_of_range}
+
+    out = io.BytesIO()
+    img.save(out, format="PNG")
+    return out.getvalue()
+
+
+def _verify_oblique(scene, png):
+    """斜め俯瞰図の画素検証: 各天体の「期待 px」にマーカー（白点）があるかを確かめる。
+
+    期待値は描画と同じ `orbit_view.View` から出す（図と検証で別の式を使わない）。
+    戻り値は既存の figure.verify と同じ流儀（ok / checked / missing / method）。
+    """
+    import io as _io
+
+    from PIL import Image
+
+    from .orbit_view import expected_px
+
+    view = _oblique_view(scene)
+    hi, lo = float(view.scale.hi_au), float(view.scale.lo_au)
+    img = Image.open(_io.BytesIO(png)).convert("RGB")
+    W, H = img.size
+    checked, missing, found = 0, [], []
+    for group in ("planets", "asteroids", "comets", "probes"):
+        for name, val in scene.get(group, {}).items():
+            if val.get("error") or not val.get("au"):
+                continue
+            au = float(val["au"])
+            if not (lo <= au <= hi * 1.2):
+                continue
+            pos = _xyz_from_au_lonlat(au, val.get("eclLon") or 0.0, val.get("eclLat") or 0.0)
+            px, py = expected_px(view, pos)
+            checked += 1
+            best = 0
+            for dx in range(-6, 7):
+                for dy in range(-6, 7):
+                    x, y = px + dx, py + dy
+                    if 0 <= x < W and 0 <= y < H:
+                        r, g, b = img.getpixel((x, y))
+                        best = max(best, min(r, g, b))
+            if best >= 200:
+                found.append({"name": name, "pixels_found": 1, "at": [px, py]})
+            else:
+                missing.append({"name": name, "at": [px, py], "max_rgb": best})
+    return {"ok": not missing, "checked": checked, "method": "oblique_expected_px+marker_core",
+            "found": found, "missing": missing}
+
+
 def _render_accurate(scene):
     import matplotlib
     matplotlib.use("Agg")
@@ -2650,6 +2931,7 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
                      probe2: Optional[str] = None, comet: Optional[str] = None,
                      comet2: Optional[str] = None, engine: str = "simple",
                      view: str = "system", days: int = 180,
+                     projection: str = "oblique",
                      route: bool = False, range_au: "float | str" = 0) -> CallToolResult:
     """太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置図を返す（認証不要）。
 
@@ -2697,6 +2979,8 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
              "紫金山・アトラス"/"C/2023 A3", "ラブジョイ"/"C/2014 Q2"）。
         comet2: 2つ目の彗星。
         engine: "simple"(既定/Pillow) / "accurate"(matplotlib)。
+        projection: "top"(既定)=黄道面を真上から / "oblique"=斜め上から見た俯瞰
+            （仰角34°・方位28°・弱い透視。奥ほど暗く細い線で描く。画面上の距離はAUに比例しない）。
         view: "system"(既定)=太陽系俯瞰図 / "comet_orbit"=彗星の軌道面ビュー /
             "asteroid_orbit"=小惑星の閉じた楕円軌道面ビュー /
             "apparition"=彗星の見え方チャート（地心距離・日心距離・予想光度・太陽離角の
@@ -2838,6 +3122,12 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
     eng = (engine or "simple").lower()
     if eng == "auto" or eng not in ("accurate", "simple"):
         eng = "simple"
+    # 斜め俯瞰（既定）は Pillow 実装のみ。engine="accurate" が確定したらそちらを優先する
+    # （実際の解決は accurate→simple の自動降格のあとで行う）。
+    proj_req = (projection or "oblique").strip().lower()
+    if proj_req not in ("top", "oblique"):
+        proj_req = "oblique"
+    proj = proj_req
     # 遠方探査機・彗星は線形(±45AU)では枠外 → 対数縮尺の Pillow 版へ。
     # ただし route=True で経路が枠に収まるときは accurate を維持する（経路を重ねるなら
     # 形が本当の軌道と一致する線形版の方が良い。彗星が枠外なら対数版へ落とす）。
@@ -2857,13 +3147,26 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
                 and all(float(co.get("au") or 0.0) <= rmax for co in drawn_coms))
         if not fits:
             eng = "simple"
+    # engine が確定したので投影を決める。accurate（線形距離）は斜め俯瞰にしない。
+    oblique_forced_note = ""
+    if eng == "accurate":
+        if proj == "oblique":
+            oblique_forced_note = ("engine=\"accurate\"（線形距離）の指定を優先したため、"
+                                   "斜め俯瞰（projection=\"oblique\"）は使っていない")
+        proj = "top"
     import base64
+    oblique_verify = None
     try:
-        if eng == "accurate":
+        if eng == "accurate" and proj != "oblique":
             with RENDER_LOCK:                    # matplotlib はスレッド安全でないため直列化
                 png = _render_accurate(scene)
             eng_label = "accurate (matplotlib, 線形距離)"
             alt = "太陽系の惑星・小惑星位置の線形距離俯瞰図"
+        elif proj == "oblique":
+            png = _render_oblique(scene)
+            eng_label = "oblique (Pillow, 斜め俯瞰・対数動径・弱い透視)"
+            alt = "黄道面を斜め上から見た太陽系の惑星・小惑星・探査機・彗星位置の合成図"
+            oblique_verify = _verify_oblique(scene, png)
         else:
             png = _render_simple(scene)
             eng_label = "simple (Pillow, 対数縮尺・視認性重視)"
@@ -3073,6 +3376,9 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
             verify_out["method"] = "{}+light_day_ring".format(verify_out.get("method") or "pixels")
         else:
             verify_out = {"ok": bool(_ldv.get("ok")), "method": "light_day_ring", "light_day": _ldv}
+    if oblique_verify is not None:
+        # 斜め俯瞰は座標系が違うため、既存の正射影前提の画素検証は使わない。
+        verify_out = oblique_verify
     why_txt = ("太陽を図の中心に置く俯瞰図のため、楕円軌道の焦点は主天体ではなく、"
                "各天体の軌道の形そのものは描いていない")
     rng_rep = scene.get("range_report") or {}
@@ -3164,8 +3470,11 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
     fig = figure_payload(
         kind="heliocentric_overview",
         title="太陽系の現在位置（太陽中心・黄道面俯瞰）",
-        view=view_spec("ecliptic_plane", "top_down",
-                       "黄道面を真上から見た日心俯瞰図（太陽は図の中心）",
+        view=view_spec("ecliptic_plane", "oblique" if proj == "oblique" else "top_down",
+                       ("黄道面を斜め上（仰角34°・方位28°・弱い透視）から見た日心俯瞰図。"
+                        "太陽は図の中心、画面上の距離はAUに比例しない"
+                        if proj == "oblique" else
+                        "黄道面を真上から見た日心俯瞰図（太陽は図の中心）"),
                        why=why_txt),
         primary=primary_spec("太陽", "center"),
         scale=_scale_with_range(scale_spec("log" if eng == "simple" else "linear",
@@ -3182,6 +3491,11 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
              "（structuredContent.planet_errors を参照）"
              if scene.get("planet_errors") else ""),
             "彗星の尾は反太陽方向に描いており、進行方向ではない",
+            ("斜め俯瞰: 奥行き（カメラからの距離）で線の太さと明度を変えており、手前が明るい。"
+             "画面上の距離はAUに比例しないので、距離は structuredContent の au を参照。"
+             "彗星の尾は向き（反太陽方向）だけを示す模式表現で、長さ・明るさは実際の光度を反映しない"
+             if proj == "oblique" else ""),
+            oblique_forced_note,
         ] + rng_notes + route_notes + ld_notes),
         caption="太陽を中心とした日心俯瞰図。数値は structuredContent の各値を参照。"
                 + ("破線＝彗星の通過経路。" if scene.get("routes") else ""),
@@ -3193,6 +3507,7 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
     return CallToolResult(
         content=[TextContent(type="text", text="\n".join(lines)), img],
         structuredContent={"time_utc": scene["time_utc"], "engine": eng_label,
+                           "projection": proj,
                            "planets": scene["planets"],
                            "planet_errors": scene.get("planet_errors", []),
                            "asteroids": scene["asteroids"],
