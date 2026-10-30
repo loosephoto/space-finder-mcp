@@ -106,16 +106,21 @@ class ConcurrencyTests(unittest.TestCase):
                              str(inspect.signature(fn.sync_fn)),
                              "{} のシグネチャが変わりました".format(name))
 
-    def test_matplotlib_rendering_is_serialized(self):
-        """matplotlib はプロセス全体の状態を持つため、描画はロックで直列化されていること。"""
+    def test_no_module_rasterizes_with_matplotlib(self):
+        """描画は Pillow のみ（matplotlib を使うモジュールが無いこと）。
+
+        星空マップ（ground_view）も太陽系俯瞰（_render_oblique）も Pillow で描くので、
+        プロセス全体の状態を持つ matplotlib を描画に使う経路はもう無い。matplotlib を
+        matplotlib を使うとプロセス全体の状態を共有するため直列化が必須になる。ここで
+        「使っていない」ことを固定する（将来また使い始めたら、このテストが落ちる）。
+        """
         from space_finder_mcp import img_common
         from pathlib import Path
 
-        self.assertTrue(hasattr(img_common, "RENDER_LOCK"))
         root = Path(img_common.__file__).parent
-        for mod in ("sky_overlay.py", "solar_system.py"):
-            src = (root / mod).read_text(encoding="utf-8")
-            self.assertIn("with RENDER_LOCK", src, "{} に描画ロックがありません".format(mod))
+        offenders = [path.name for path in root.glob("*.py")
+                     if "import matplotlib" in path.read_text(encoding="utf-8")]
+        self.assertEqual(offenders, [], "matplotlib を描画に使うモジュール: {}".format(offenders))
 
 
 if __name__ == "__main__":

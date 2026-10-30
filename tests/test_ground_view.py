@@ -244,10 +244,15 @@ class ToolContractTests(unittest.TestCase):
         self.assertIn("一致する天体がありません", text)
 
     def test_legacy_engines_still_dispatch(self):
+        """旧 engine 名（simple / accurate）も受け付け、統合先の ground で描いて返す。
+
+        旧 simple/accurate の描画関数は廃止したが、引数は互換のため残す（呼び出し側を壊さない）。
+        """
         from space_finder_mcp.sky_overlay import sky_map_with_satellites
-        r = sky_map_with_satellites(place="東京", engine="simple")
-        self.assertIn("simple", r.structuredContent["engine"])
-        self.assertIn("image", [getattr(c, "type", "?") for c in r.content])
+        for eng in ("simple", "accurate"):
+            r = sky_map_with_satellites(place="東京", engine=eng)
+            self.assertIn("ground", r.structuredContent["engine"], eng)
+            self.assertIn("image", [getattr(c, "type", "?") for c in r.content])
 
 
 class VerifyFrameTests(unittest.TestCase):

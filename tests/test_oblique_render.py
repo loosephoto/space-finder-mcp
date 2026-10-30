@@ -65,12 +65,13 @@ class ObliqueRenderTests(unittest.TestCase):
         self.assertEqual([m["name"] for m in v["missing"]], ["パラス"])
 
     def test_range_au_fixes_frame(self):
-        hi, lo = ss._oblique_hi(make_scene(range_au=2.0))
+        hi, lo, kind = ss._oblique_hi(make_scene(range_au=2.0))
+        self.assertEqual(kind, "log")
         self.assertAlmostEqual(hi, 2.0, places=6)
         self.assertAlmostEqual(lo, 0.10, places=6)
 
     def test_auto_frame_covers_probe(self):
-        hi, _lo = ss._oblique_hi(make_scene())
+        hi, _lo, _kind = ss._oblique_hi(make_scene())
         self.assertGreaterEqual(hi, 172.0 * 1.12 - 1e-9)      # 探査機の真距離まで広がる
 
     def test_route_is_drawn(self):
@@ -80,9 +81,12 @@ class ObliqueRenderTests(unittest.TestCase):
         self.assertTrue(v["ok"], v)
 
     def test_comet_tail_points_away_from_sun(self):
-        """彗星の尾が反太陽方向に描かれ、名札の箱に隠れていないこと（画素で確認）。"""
-        from space_finder_mcp import orbit_view as ov
+        """彗星の尾が反太陽方向に描かれていること（光暈より外側の画素で測る）。
 
+        核の周りには対称な光暈があるので、核のすぐ近くで測ると「尾の向き」を判定できない
+        （実測: 太陽側 20 px でも光暈で g,b が 150 を超えた）。尾の長さ（34〜76 px）の
+        範囲で、反太陽側と太陽側の明るさを積算して比べる。
+        """
         scene = make_scene()
         png = ss._render_oblique(scene)
         img = Image.open(io.BytesIO(png)).convert("RGB")
@@ -94,15 +98,19 @@ class ObliqueRenderTests(unittest.TestCase):
         vx, vy = px - cx, py - cy
         n = (vx * vx + vy * vy) ** 0.5
         ux, uy = vx / n, vy / n                      # 太陽→彗星 = 反太陽方向
-        bright = 0
-        for k in (10, 20, 30, 40):
-            r, g, b = img.getpixel((int(px + ux * k), int(py + uy * k)))
-            if g > 150 and b > 150:                  # 彗星色（青緑）が背景より明るい
-                bright += 1
-        self.assertGreaterEqual(bright, 3)
-        # 太陽側（尾の反対）は尾ではないので、同じ判定を満たさない
-        r, g, b = img.getpixel((int(px - ux * 20), int(py - uy * 20)))
-        self.assertFalse(g > 150 and b > 150)
+
+        def brightness(dx, dy):
+            total = 0
+            for t in range(18, 76, 3):
+                x, y = int(px + dx * t), int(py + dy * t)
+                if 0 <= x < ss.OBLIQUE_W and 0 <= y < ss.OBLIQUE_W:
+                    r, g, b = img.getpixel((x, y))
+                    total += g + b
+            return total
+
+        away, toward = brightness(ux, uy), brightness(-ux, -uy)
+        self.assertGreater(away, toward * 1.25,
+                           "尾が反太陽側に無い（反太陽側 {} / 太陽側 {}）".format(away, toward))
 
     def test_render_is_deterministic(self):
         a = ss._render_oblique(make_scene())

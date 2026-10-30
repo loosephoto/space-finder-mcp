@@ -51,11 +51,11 @@ LLM は1ターンで複数のツールを並行に呼びます。**サーバー�
 
 - **同期ツールは `anyio` のワーカースレッドで実行**（`server.py` の `_threaded` / `_reg`）。同じ4並列が **wall 2.47s・4.0×** になりました。実ネットワークでも、別々の地名の `astronomy_weather` 3並列が **3.93s**（逐次合計 11.72s・3.0×）です。
 - **同じ引数の並行呼び出しは1回に集約**（`cache.ttl_cache` の single-flight）。8並列の同一呼び出しでも実行は1回・結果は共有なので、NASA の DEMO_KEY のような共有枠を N 倍消費しません。
-- **matplotlib で描く経路は `img_common.RENDER_LOCK` で直列化**。pyplot はプロセス全体の状態（rcParams・現在の figure）を持つため、並列に描くと図が混ざります。
+- **描画は Pillow のみ**（matplotlib は使いません）。プロセス全体の状態を持つ pyplot を使わないので、図の描画はスレッド並列でも混ざりません（`--concurrency` が検査）。
 - **共有状態はロックで保護**（`cache` / `nasa_budget`）。キャッシュされた戻り値は呼び出し側で書き換えません（並行時に他人の結果を壊すため。書き換えるなら `deepcopy`）。
 - **CPU 律速の計算は GIL で並列化しません**（Skyfield・Pillow の計算）。並列化が効くのは I/O 待ち（API 呼び出し）で、それが並列ツール呼び出しの主目的です。
 - 検査: `uv run python scripts/check-tools.py --concurrency`（single-flight／ワーカースレッドへの逃がし／混在4ツールの並列呼び出しで例外漏れ・`structuredContent` 欠落が無いこと）。
-- ⚠️ **遅延 import するネイティブ拡張は起動前に import 済みにしておきます**（`server.py` 冒頭の `import numpy`）。stdio サーバーが動き出した後に numpy / matplotlib / skyfield を import すると、**import が返らずツール呼び出しが無応答**になります（実測: numpy・matplotlib.pyplot・skyfield.api が HANG。PIL.Image・sgp4・requests は問題なし）。`scripts/check-tools.py --stdio` が実際に子プロセスを起動して代表ツールの応答を確認します。
+- ⚠️ **遅延 import するネイティブ拡張は起動前に import 済みにしておきます**（`server.py` 冒頭の `import numpy`）。stdio サーバーが動き出した後に numpy / skyfield を import すると、**import が返らずツール呼び出しが無応答**になります（実測: numpy・skyfield.api が HANG。PIL.Image・sgp4・requests は問題なし）。`scripts/check-tools.py --stdio` が実際に子プロセスを起動して代表ツールの応答を確認します。
 
 ## 🧭 名前解決のフォールバック（表記ゆれ・和名・名前→座標）
 
@@ -99,7 +99,7 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 
 ## 📝 更新履歴
 
-各バージョンの変更内容は **[GitHub Releases](https://github.com/loosephoto/space-finder-mcp/releases)** に記載しています（最新: [v0.43.0](https://github.com/loosephoto/space-finder-mcp/releases/tag/v0.43.0)）。
+各バージョンの変更内容は **[GitHub Releases](https://github.com/loosephoto/space-finder-mcp/releases)** に記載しています（最新: [v0.44.0](https://github.com/loosephoto/space-finder-mcp/releases/tag/v0.44.0)）。
 
 **README では履歴を二重管理しません** — 同じ内容を2か所に書くと必ず片方が古くなるため、変更点はリリース時に GitHub Releases の本文へ書きます（手順は [`CLAUDE.md`](CLAUDE.md) の「リリース手順」）。
 
@@ -156,9 +156,6 @@ export SPACE_FINDER_FONT_BOLD="/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.t
 ```bash
 uv run python scripts/check-tools.py --fonts
 ```
-
-`engine="accurate"`（matplotlib）の `sky_map_with_satellites` / `solar_system_now` も同じフォントを使います
-（`img_common.apply_matplotlib_cjk_font()`）。
 
 ### （任意）NASA APIキー
 
@@ -302,8 +299,8 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `space_literature_search` | **惑星科学・宇宙の一次文献（論文・技術報告）を横断検索**して根拠（DOI付き）を返す。OpenAlex（要旨・被引用数・OAリンク）・Crossref・NASA NTRS（技術報告＋PDF）・JAXAリポジトリ・J-STAGE・CiNii Research・Zenodo・DataCite を1回で横断し、DOI/タイトルの重複を統合。**日本語クエリは語彙辞書＋和名テーブルで英語語へ置換してから英語圏ソースへ投げる**（実測: OpenAlex/Crossref は日本語クエリだと無関係な文献を返すため）。`sort`（関連度/被引用数/年）・`year_from`/`year_to`・`min_citations`・`open_access_only`・`planetary_only`（惑星科学概念に限定）・`sources` で絞り込み。⚠️ 返すのは**文献（書誌）**で観測データではない（観測は `mast_observations` / `alma_search` / `cadc_observations`） | OpenAlex / Crossref / NASA NTRS / JAXAリポジトリ / J-STAGE / CiNii / Zenodo / DataCite | 不要（`ADS_API_KEY`・`S2_API_KEY`・`WOS_API_KEY` を設定すると ADS・Semantic Scholar・WoS も使う） |
 | `planetary_evidence` | **天体（惑星・衛星・小天体・探査機）の文献的な裏づけをまとめて返す**。①名前解決（Sesame/CDS で和名→英語名→座標）と、②その天体の文献を**英語圏＋日本語の両方**から集めて提示（既定は被引用数順。**惑星科学概念で絞った OpenAlex を上位に置く**＝実測「火星」で MOLA / OMEGA-Mars Express / ALH84001 が上位に来る）。⚠️ 太陽系天体は時刻で位置が変わるため固定座標を持たない旨を `caveats` に明記 | OpenAlex / Crossref / NASA NTRS / JAXAリポジトリ / J-STAGE / CiNii ＋ Sesame/CDS | 不要 |
 | `radio_sources_now` | TART オープン電波望遠鏡が「いま観測できる電波源」（GNSS・静止衛星等）を仰角順に表示 | TART source catalog (NZ) | 不要 |
-| `sky_map_with_satellites` | 指定地の空を**地上から見上げた**画像（既定=地上視点パノラマ: Hipparcos実星表の恒星・天の川・街並み・方位目盛り・惑星・人工衛星。太陽高度で昼/夕方/朝焼け/薄明/夜の空色が変わり、**今は見えない天体は○で位置を示す**。`span`/`az0` で視野、`lp` で光害、`show` で依頼表示を指定。従来の天頂中心図は `engine="simple"`(Pillow) / `"accurate"`(matplotlib)） | JPL de421+Skyfield / Hipparcos(VizieR) / CelesTrak+SGP4 | 不要 |
-| `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示）。**`projection` で視点を選べる（既定 `"oblique"`＝黄道面を斜め上・仰角34°・方位28°・弱い透視から見た俯瞰、`"top"`＝従来の真上図）**。斜め俯瞰は奥行きで線の太さと明度を変え（手前が明るい）、画面上の距離はAUに比例しないので距離は数値を使う（`figure.view.projection`・`figure.verify.method="oblique_expected_px+marker_core"`）。`engine="accurate"`（matplotlib・線形距離）を明示したときはそちらを優先し、斜め俯瞰は使わない＝その旨を `figure.notes` に出す。`view="comet_orbit"` で彗星の軌道面ビュー（太陽＝焦点の楕円／e≥1 は双曲線の枝）、`view="asteroid_orbit"` で指定した小惑星（`asteroid`）の楕円全体と現在位置を表示（SBDB要素のケプラー二体伝播・1天体ずつ）。**`comet` にカンマ区切りで複数（または `comet2`、最大4天体）指定すると 1彗星=1パネルで1枚に並べる**（パネルごとに軌道面と縮尺が違う旨は `figure.notes` に自動生成）。`view="apparition"` で彗星の**見え方チャート**（地心距離・日心距離・予想光度・太陽離角の時系列、`days` で期間指定。1天体ずつ）。`route=True` で**彗星の通過経路（軌道）を俯瞰図に破線で重ねる**（近日点・遠日点は◇＋日付。**近日点の日付は SBDB の2体近似と JPL Horizons の n 体解を併記**し、差を日数で注記。対数縮尺では線の形は実際の楕円と一致しない旨を注記に自動生成し、線形版は形が本当の軌道）。**`probe` を併用した `route=True` では探査機の実際の飛行経路（JPL Horizons の実状態ベクトル）を破線で重ね、実際のスイングバイを◇＋日付＋距離で示す**（詳細は下の「探査機のスイングバイ経路」）。**`range_au` で表示範囲（太陽からの距離の上限 AU）を指定でき、`range_au=10` なら土星(9.5 AU)より内側だけを表示して内惑星を大きく見せられる**（`2`=火星まで／`5.2`=木星まで／`30`=海王星まで。**範囲外の天体・目印・軌道の円は描かず**、`figure.notes` と `structuredContent.out_of_range` に数値付きで列挙。0.5 AU 未満はエラー）。**`probe` 指定時は「1光日」（173.1446 AU＝25,902,068,371 km）を破線の円で描き、1光日に達していない探査機**ごとに**投影での1光日リング・到達時の方向（◇）・到達予測日（日心距離ベースの線形外挿＝`probes[].light_day_eta_date`）を出す（`light_day.projected_rings` と `figure.verify.light_day.rings` に各リングを列挙）**） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
+| `sky_map_with_satellites` | 指定地の空を**地上から見上げた**画像（既定=地上視点パノラマ: Hipparcos実星表の恒星・天の川・街並み・方位目盛り・惑星・人工衛星。太陽高度で昼/夕方/朝焼け/薄明/夜の空色が変わり、**今は見えない天体は○で位置を示す**。`span`/`az0` で視野、`lp` で光害、`show` で依頼表示を指定。`engine` は互換引数で、旧 `"simple"`/`"accurate"` を渡しても同じ描画（ground）になる） | JPL de421+Skyfield / Hipparcos(VizieR) / CelesTrak+SGP4 | 不要 |
+| `solar_system_now` | 太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置俯瞰図（ハレー等の周期彗星とC/彗星・ボイジャー等の遠方天体まで対数縮尺で自動拡張表示）。**描画は 1 本（黄道面を斜め上・仰角34°・方位28°・弱い透視から見た俯瞰）**で、奥行きで線の太さと明度を変え（手前が明るい）、画面上の距離はAUに比例しないので距離は数値を使う（`figure.view.projection="oblique"`・`figure.verify.method="oblique_expected_px+marker_core"`）。`projection="top"`（旧・真上図）は廃止したが引数は残し、指定されたときは同じ斜め俯瞰で描いてその旨を `figure.notes` に出す。**`engine` も互換引数**で、`"accurate"` は**線形縮尺**（相対距離が正確）を選ぶ（旧 matplotlib 版の情報だけを残した）。`view="comet_orbit"` で彗星の軌道面ビュー（太陽＝焦点の楕円／e≥1 は双曲線の枝）、`view="asteroid_orbit"` で指定した小惑星（`asteroid`）の楕円全体と現在位置を表示（SBDB要素のケプラー二体伝播・1天体ずつ）。**`comet` にカンマ区切りで複数（または `comet2`、最大4天体）指定すると 1彗星=1パネルで1枚に並べる**（パネルごとに軌道面と縮尺が違う旨は `figure.notes` に自動生成）。`view="apparition"` で彗星の**見え方チャート**（地心距離・日心距離・予想光度・太陽離角の時系列、`days` で期間指定。1天体ずつ）。`route=True` で**彗星の通過経路（軌道）を俯瞰図に破線で重ねる**（近日点・遠日点は◇＋日付。**近日点の日付は SBDB の2体近似と JPL Horizons の n 体解を併記**し、差を日数で注記。対数縮尺では線の形は実際の楕円と一致しない旨を注記に自動生成し、線形版は形が本当の軌道）。**`probe` を併用した `route=True` では探査機の実際の飛行経路（JPL Horizons の実状態ベクトル）を破線で重ね、実際のスイングバイを◇＋日付＋距離で示す**（詳細は下の「探査機のスイングバイ経路」）。**`range_au` で表示範囲（太陽からの距離の上限 AU）を指定でき、`range_au=10` なら土星(9.5 AU)より内側だけを表示して内惑星を大きく見せられる**（`2`=火星まで／`5.2`=木星まで／`30`=海王星まで。**範囲外の天体・目印・軌道の円は描かず**、`figure.notes` と `structuredContent.out_of_range` に数値付きで列挙。0.5 AU 未満はエラー）。**`probe` 指定時は「1光日」（173.1446 AU＝25,902,068,371 km）を破線の円で描き、1光日に達していない探査機**ごとに**到達時の方向（◇＝現在の向きで 1 光日に達する点）・到達予測日（日心距離ベースの線形外挿＝`probes[].light_day_eta_date`）を出す（`light_day.projected_rings` と `figure.verify.light_day.rings` に各◇を列挙）**） | JPL DE421+Skyfield / JPL SBDB / JPL Horizons | 不要 |
 | `solar_eclipse_series` | 日食（太陽が月に欠ける過程）の時系列パネル画像（7枚・食分と太陽高度・次回日食の自動検索=約4年(1400日)先まで・max_magnitude対応。**地平線下で見えない食は返さない**） | JPL DE421+Skyfield | 不要 |
 | `moon_phase_map` | **月齢マップ**（月の満ち欠け）。`layout="calendar"`（既定）で1か月の日別格子（日月火水木金土・月齢・照度・月相）、`layout="lunation"` で1朔望月（朔→朔）の時系列パネル。輝面の向きは太陽の位置角から計算（月齢からの決め打ちをしない）。朔・望・上弦・下弦の時刻を現地時間で併記 | JPL DE421+Skyfield | 不要 |
 | `eodashboard_collections` | EO Dashboard（NASA×ESA×JAXA共同）の173データセットをテーマ・機関・キーワードで検索 | EO Dashboard (GitHub catalog) | 不要 |
@@ -733,9 +730,9 @@ ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカ�
   - `span`（横方向の視野 30〜360°, 既定 360）/ `az0`（左端の方位, 既定 0）で切り出しを指定（例: `span=180, az0=225` で南西→北東）。
   - `lp`（`"city"` 都心 / `"suburb"` 郊外=既定 / `"dark"` 山間・離島）で光害の程度＝限界等級・天の川の見え方・空の明るさを切り替え。未対応の値は既定（郊外）に落ちて、本文にその旨を明示します。
   - `show`（カンマ区切り, 例 `"木星,ベガ,M31"`）で**依頼表示**する天体を指定。指定した天体だけが ●/○ のマーカーと名札を持ち、他は通常の星として描かれます。
-- `"simple"` / `"accurate"`: 従来の**天頂中心の円形図**（`simple`=Pillow による実写背景の簡易合成・JPEG / `accurate`=matplotlib 極座標の正確な星図・PNG）。マーカーの配色・光背・土星の環・木星の縞・火星の極冠・名札・凡例は共通パレット `img_common.BODY_COLORS` / `SYMBOL_COLORS` の 1 か所から生成します（凡例も実際に描いたものだけを色コード付きで表示）。
+- `"simple"` / `"accurate"`: **廃止（互換のため受け付ける）**。旧・天頂中心の円形図は地上視点パノラマ（`ground`）へ統合したので、どの値を渡しても同じ描画になります。マーカーの配色・光背・土星の環・木星の縞・火星の極冠・名札・凡例は共通パレット `img_common.BODY_COLORS` / `SYMBOL_COLORS` の 1 か所から生成します（凡例も実際に描いたものだけを色コード付きで表示）。
 
-画像は content に base64 でインライン表示（`ground`/`simple`=**JPEG** / `accurate`=PNG）、座標一覧は structuredContent に JSON。JPEG は PNG 比で約1/5の転送量です。
+画像は content に base64 でインライン表示（**JPEG**）、座標一覧は structuredContent に JSON。JPEG は PNG 比で約1/5の転送量です。
 
 ```json
 {"time_utc": "...", "engine": "ground (Pillow, 地上視点パノラマ)", "phase": "夜",
@@ -748,30 +745,30 @@ ALMA（アタカマ大型ミリ波サブミリ波干渉計）の科学アーカ�
 
 ### ☀️ `solar_system_now` — 太陽系俯瞰図（太陽中心の惑星・小惑星・探査機・彗星位置）
 
-「太陽系を上から見た図」「今の惑星の位置」「イトカワの今の位置を図で」「ベンヌの楕円軌道を表示して」などに応答。**既定は斜め俯瞰**（黄道面を仰角34°・方位28°から見た構図。`projection="top"` で従来の真上図に切り替わる）。**位置の扱い**: マーカーは日心位置（距離・黄経・黄緯）を 3D で置き、その投影で描く。以下の説明にある「黄道面への正射影」は `projection="top"`（真上図）での言い方で、斜め俯瞰では同じ 3D 位置を斜めから見た投影になる（どちらの投影でも画面上の距離は AU に比例しないので、距離は数値を使う）。太陽を中心とした黄道面俯瞰図を画像化し、惑星(8惑星＋冥王星)は **JPL DE421 暦表 + Skyfield** で日心黄道座標を計算。任意の小惑星は **JPL SBDB API** の軌道要素を取得し**ケプラー2体問題**で日心位置へ伝播する（`asteroid`/`asteroid2` で複数指定可）。
+「太陽系を上から見た図」「今の惑星の位置」「イトカワの今の位置を図で」「ベンヌの楕円軌道を表示して」などに応答。**描画は 1 本（黄道面を仰角34°・方位28°から見た斜め俯瞰）**。旧 `engine="simple"`（真上・Pillow）と `engine="accurate"`（matplotlib・線形距離）、旧 `projection="top"`（真上図）は、見た目の要素をこの 1 本へ統合して廃止しました（引数は互換のため残置）。**位置の扱い**: マーカーは日心位置（距離・黄経・黄緯）を 3D で置き、その投影で描く（画面上の距離は AU に比例しないので、距離は数値を使う）。太陽を中心とした黄道面俯瞰図を画像化し、惑星(8惑星＋冥王星)は **JPL DE421 暦表 + Skyfield** で日心黄道座標を計算。任意の小惑星は **JPL SBDB API** の軌道要素を取得し**ケプラー2体問題**で日心位置へ伝播する（`asteroid`/`asteroid2` で複数指定可）。
 
 - 距離が 0.4〜40 AU と2桁超のため、**Pillow版(既定)は対数縮尺**で全天体を一枚に表示。惑星を実物色アイコン＋距離ラベル、小惑星を**緑の十字マーカー**＋緑軌道リングで強調。惑星軌道円・小惑星帯(2.0-3.4AU目安)も併記。学生・観賞向けに視認性優先。
-- `engine="accurate"` で **matplotlib 版**（線形距離の正確な相対距離俯瞰図）も選択可。科学的な相対距離比較用途向け。
-- 惑星・太陽・小惑星・彗星の色は `img_common.BODY_COLORS` / `SYMBOL_COLORS` の共通パレット（`sky_map_with_satellites` と同一の値）を両エンジンで共有します。
+- `engine="accurate"` は**線形縮尺**（対数ではなく距離に比例。科学的な相対距離比較用途）を選びます。描画そのものは同じ 1 本です。
+- 惑星・太陽・小惑星・彗星の色は `img_common.BODY_COLORS` / `SYMBOL_COLORS` の共通パレット（`sky_map_with_satellites` と同一の値）。
 - **一部の惑星の位置を計算できなかった場合**は、その旨（失敗数）を `content` と `figure.notes` に出し、`structuredContent.planet_errors` に天体名と理由を記録します（黙って欠落させません）。
 - 対応小惑星エイリアス: イトカワ(itokawa/25143)・ベンヌ(101955)・アポフィス(99942)・リュウグウ(162173)・ツタティス(4179)・エロス(433)。SBDBの`sstr`（番号・名前）なら任意の小惑星を指定可能。認証不要。
-- **遠方探査機**: `probe`/`probe2` 引数に ボイジャー1号/2号・パイオニア10号/11号・ニュー・ホライズンズ・はやぶさ2（日英名対応）を指定。JPL Horizons 状態ベクトル（ECLIPTIC, 太陽中心）から日心位置を取得。ボイジャー等は**黄緯が大きい（~35°）ため、黄道面への正射影距離**で描画し、ラベルに真距離と黄緯を併記。表示スケールは探査機の距離まで自動拡張し、色付き菱形マーカー＋太陽からの補助線で強調。遠方のため線形 matplotlib 版は使わず Pillow（対数縮尺）で表示。認証不要。
-- **「1光日」を図に重ねる（`probe` 指定時）**: 光が24時間で進む距離＝**173.1446 AU＝25,902,068,371 km** を**破線の円**で描きます（探査機を描く図では表示範囲を1光日まで自動で広げます）。1光日に達していない探査機では、**その探査機の黄道面投影での1光日リング**と**到達時の方向（◇＝黄経/黄緯）**・**到達予測日**も出します。俯瞰図は黄道面への正射影なので**真距離の円と投影の円は別物**で、その旨と両者の半径を数値付きで `figure.notes` に出します（実測: 黄緯 35.2° のボイジャー1号は真距離 173.14 AU に対し投影 141.6 AU＝別の円。黄緯 3.0° のパイオニア10号は 172.9 AU で図上ほぼ重なるため「見分けられない」旨を注記）。`structuredContent.probes[]` に **`light_days`**（何光日）・**`light_hours`**（光の所要時間）・**`to_light_day_au`**（1光日までの残り）・**`light_day_eta_date` / `light_day_eta_method`**（到達予測＝現在の日心視線速度による線形外挿）が入ります（実測: ボイジャー1号 0.9925 光日・残り 1.30 AU・**2027-02-03**＝JPL Horizons の n 体解で厳密に解いた日付と一致）。**距離の基準は日心距離（真距離）に統一**しています（地心距離での1光日は地球の公転で最大 ±1 AU 変わり、日付が違うため）。1光日が表示範囲の外（例: `range_au=10`）なら描かず、理由を注記と `structuredContent.light_day.ring_why` に出します。リングの破線・ラベル文字・探査機マーカーの画素を測り直して `figure.verify.light_day` に残します（ラベルがマーカーを覆っていれば `ok=false`）。
+- **遠方探査機**: `probe`/`probe2` 引数に ボイジャー1号/2号・パイオニア10号/11号・ニュー・ホライズンズ・はやぶさ2（日英名対応）を指定。JPL Horizons 状態ベクトル（ECLIPTIC, 太陽中心）から日心位置を取得。ボイジャー等は**黄緯が大きい（~35°）ため 3D の実位置**（黄経・黄緯）で描画し、ラベルに真距離と黄緯を併記。表示スケールは探査機の距離まで自動拡張し、色付き菱形マーカー＋太陽からの補助線で強調。遠方のため線形縮尺では枠に入らず、対数縮尺で表示。認証不要。
+- **「1光日」を図に重ねる（`probe` 指定時）**: 光が24時間で進む距離＝**173.1446 AU＝25,902,068,371 km** を**破線の円**で描きます（探査機を描く図では表示範囲を1光日まで自動で広げます）。1光日に達していない探査機では、**その探査機の現在の向きで 1 光日に達する点（◇＝到達時の方向）**と**到達予測日**も出します（マーカーは 3D の実位置なので、リングは黄道面内の真距離の円、◇ は探査機の方向へ伸ばした 173.14 AU の点）。`structuredContent.probes[]` に **`light_days`**（何光日）・**`light_hours`**（光の所要時間）・**`to_light_day_au`**（1光日までの残り）・**`light_day_eta_date` / `light_day_eta_method`**（到達予測＝現在の日心視線速度による線形外挿）が入ります（実測: ボイジャー1号 0.9925 光日・残り 1.30 AU・**2027-02-03**＝JPL Horizons の n 体解で厳密に解いた日付と一致）。**距離の基準は日心距離（真距離）に統一**しています（地心距離での1光日は地球の公転で最大 ±1 AU 変わり、日付が違うため）。1光日が表示範囲の外（例: `range_au=10`）なら描かず、理由を注記と `structuredContent.light_day.ring_why` に出します。リングの破線・ラベル文字・探査機マーカーの画素を測り直して `figure.verify.light_day` に残します（ラベルがマーカーを覆っていれば `ok=false`）。
 - **彗星の軌道面ビュー（`view="comet_orbit"`）**: 単体なら `comet` と併せて指定すると、その彗星の軌道を**彗星自身の軌道面を真横から見た図**で返します。太陽は**円錐曲線の焦点**（楕円の中心ではない）に置き、近日点・遠日点・現在位置・日心距離目盛(AU)を描画します。**e≥1 の C/彗星**（例: 紫金山・アトラス＝SBDB の a が負）は**閉じない双曲線の枝**として近日点から有限距離までを描きます（楕円として描くと `a(1+e)` が負になり破綻するため）。ハレー彗星（e=0.968・逆行 i=162°）のような極端な楕円でも、**焦点と中心のズレ a·e** が図と `figure.notes` の両方に出ます。
 - **小惑星の楕円軌道ビュー（`view="asteroid_orbit"`）**: `solar_system_now(asteroid="ベンヌ", view="asteroid_orbit")` のように指定すると、JPL SBDB の楕円軌道全体をその軌道面から真横に見た画像を返します。太陽を焦点に置き、近日点・遠日点・指定時刻の現在位置・1 AU目盛を描画。図の線は SBDB の osculating elements によるケプラー二体軌道で、惑星の摂動を含む将来予報ではありません。`asteroid` / `asteroid2` で複数指定した場合、このビューは**1天体ずつ**呼び出してください。`figure.conic` / `figure.verify` に楕円要素と画素検証を含みます。認証不要。
-- **表示範囲を絞って内側を拡大する（`range_au`）**: **数値（AU）でも天体名でも指定できます**（`range_au="火星"` → 1.65 AU／`"木星まで"` → 5.62 AU／`"saturn"` → 10.35 AU／`"小惑星帯"`／`"内惑星"`／`"外惑星"`。決め方は `figure.notes` と `structuredContent.range_resolved` に「木星の軌道（長半径 5.20 AU × 1.08 = 5.62 AU）」の形で出ます）。`range_au="fit"` は**その呼び出しで指定した天体（小惑星・彗星・探査機・経路）が全部入る範囲**を自動で選びます（最大値×1.10、下限 1.2 AU。例: `asteroid="イトカワ", range_au="fit"` → 1.52 AU）。解決できない名前は**推測せず候補一覧つきでエラーを返します**（`range_targets`）。`solar_system_now(range_au=10)` で**太陽から 10 AU まで＝土星より内側だけ**を表示します。線形版（`engine="accurate"`）は縮尺が固定（実測 約12 px/AU）で、既定の ±45 AU では内惑星が太陽マーカー（半径 1.7 AU 相当）と重なって潰れていました。`range_au` を指定すると `lim` を固定し、**px/AU が約4.5倍**（10 AU なら 約51 px/AU）になり、太陽マーカーの誇張半径も 0.4 AU まで下がって**水星〜土星が読める大きさ**になります（実測値は `figure.scale.px_per_AU`）。**範囲外の天体は描かず**、「表示範囲10 AU の外にあるため描いていない: 天王星 19.44 AU、海王星 29.88 AU…」のように`figure.notes` と `structuredContent.out_of_range` へ数値付きで列挙します（黙って消しません）。経路が範囲外へ出る彗星は対数版へ自動で落とし、その旨と範囲外の目印も注記します。
-- **彗星の通過経路を俯瞰図に重ねる（`route=True`）**: `solar_system_now(comet="エンケ彗星", route=True)` で、太陽系俯瞰図にその彗星の**軌道（通過経路）を破線で重ねます**（黄道面への正射影）。**近日点・遠日点**には◇と日付を添え、本文と `figure.notes` にも SBDB 軌道要素から数値で出します（**近日点の日付は SBDB の2体近似に加えて JPL Horizons の n 体解も併記**し、両者の差を日数で注記します。SBDB の要素は古いエポックの接触軌道なので、摂動の大きい彗星では2体近似が数か月ずれます＝実測: ハレー彗星 163.8日・67P 82.6日・エンケ彗星 0.8日。n 体解を取得できないときは**取得できなかった旨と理由**を注記し、2体近似だけを黙って出すことはしません）。**対数縮尺の `simple`（既定）では線の長さと曲率は実際の楕円と一致しません**（注記に自動生成。形そのものは `view="comet_orbit"`）。`engine="accurate"`（線形±45 AU）は経路が枠に収まる彗星なら自動で維持され、**形が本当の軌道**になります（収まらないときは対数版へ自動で落とします）。**近日点が誇張した太陽の描画円盤の内側に来る彗星では目印を描かず**、「この縮尺では図から位置を確認できない（数値は 0.339 AU）」を注記に数値から生成します。認証不要。
-- **探査機のスイングバイ経路を俯瞰図に重ねる（`probe` + `route=True`）**: `solar_system_now(probe="ボイジャー1号", route=True)` で、太陽系俯瞰図にその探査機が**実際に飛んだ経路**を破線で重ねます。経路は**JPL Horizons の状態ベクトル点列**（記憶した日付の線ではなく実測）を黄道面へ正射影したもので、彗星の軌道要素のような閉じた円錐曲線ではありません（開いた経路として描画）。**実際のスイングバイ（最接近）**は◇＋日付＋距離(km)を添えて注記に自動生成します（実測: ボイジャー1号 木星 1979-03-05 348,132 km／土星 1980-11-13 184,382 km、ボイジャー2号 木星 1979-07-09 721,406 km／土星 1981-08-26 161,960 km／天王星 1986-01-24 102,724 km／海王星 1989-08-25 33,705 km）。最接近は**惑星位置との距離の極小を探索**して求め（日付を書き込まない）、候補の粗い刻み→精密化の可変グリッドで解決します。**地球−月系で完結する機体（アポロの S-IVB 段など）**は月も最接近の対象に加えます（`probe="アポロ11号 S-IVB"` → 月 1969-07-19 5,700 km）。アポロの S-IVB は暦が1969年で終わるため現在位置は取得できませんが、**当時の経路だけは描けます**（`structuredContent.probes` に現在位置のエラー、`route` に経路を返す）。`engine="accurate"`（線形±45 AU）でも同じ経路データを使います。認証不要。
+- **表示範囲を絞って内側を拡大する（`range_au`）**: **数値（AU）でも天体名でも指定できます**（`range_au="火星"` → 1.65 AU／`"木星まで"` → 5.62 AU／`"saturn"` → 10.35 AU／`"小惑星帯"`／`"内惑星"`／`"外惑星"`。決め方は `figure.notes` と `structuredContent.range_resolved` に「木星の軌道（長半径 5.20 AU × 1.08 = 5.62 AU）」の形で出ます）。`range_au="fit"` は**その呼び出しで指定した天体（小惑星・彗星・探査機・経路）が全部入る範囲**を自動で選びます（最大値×1.10、下限 1.2 AU。例: `asteroid="イトカワ", range_au="fit"` → 1.52 AU）。解決できない名前は**推測せず候補一覧つきでエラーを返します**（`range_targets`）。`solar_system_now(range_au=10)` で**太陽から 10 AU まで＝土星より内側だけ**を表示します。線形縮尺（`engine="accurate"`）は枠が ±45 AU で **13.8 px/AU**（実測: 画面半径 620 px ÷ 45 AU）。`range_au=10` に絞ると **62 px/AU**（約4.5倍）になり、太陽の描画円盤も最内惑星を覆わない大きさ（実測 半径 2 px）に縮めて**水星〜土星が読める大きさ**になります（実測値は `figure.scale.px_per_AU`）。内惑星が中心に密集するので、線形縮尺では名札のリング半径に下限（150 px）を置き、離れた名札は引き出し線で結びます。**範囲外の天体は描かず**、「表示範囲10 AU の外にあるため描いていない: 天王星 19.44 AU、海王星 29.88 AU…」のように`figure.notes` と `structuredContent.out_of_range` へ数値付きで列挙します（黙って消しません）。経路が範囲外へ出る彗星は対数版へ自動で落とし、その旨と範囲外の目印も注記します。
+- **彗星の通過経路を俯瞰図に重ねる（`route=True`）**: `solar_system_now(comet="エンケ彗星", route=True)` で、太陽系俯瞰図にその彗星の**軌道（通過経路）を破線で重ねます**（黄道座標の3D位置を斜め俯瞰へ投影。破線の矢印は進行方向）。**近日点・遠日点**には◇と日付を添え、本文と `figure.notes` にも SBDB 軌道要素から数値で出します（**近日点の日付は SBDB の2体近似に加えて JPL Horizons の n 体解も併記**し、両者の差を日数で注記します。SBDB の要素は古いエポックの接触軌道なので、摂動の大きい彗星では2体近似が数か月ずれます＝実測: ハレー彗星 163.8日・67P 82.6日・エンケ彗星 0.8日。n 体解を取得できないときは**取得できなかった旨と理由**を注記し、2体近似だけを黙って出すことはしません）。**対数縮尺（既定）では線の長さと曲率は実際の楕円と一致しません**（注記に自動生成。形そのものは `view="comet_orbit"`）。線形縮尺（`engine="accurate"`）は経路が枠に収まる彗星なら自動で維持され、**形が本当の軌道**になります（収まらないときは対数縮尺へ自動で落とします）。**近日点が誇張した太陽の描画円盤の内側に来る彗星では目印を描かず**、「この縮尺では図から位置を確認できない（数値は 0.339 AU）」を注記に数値から生成します。認証不要。
+- **探査機のスイングバイ経路を俯瞰図に重ねる（`probe` + `route=True`）**: `solar_system_now(probe="ボイジャー1号", route=True)` で、太陽系俯瞰図にその探査機が**実際に飛んだ経路**を破線で重ねます。経路は**JPL Horizons の状態ベクトル点列**（記憶した日付の線ではなく実測）を3Dのまま斜め俯瞰へ投影したもので、彗星の軌道要素のような閉じた円錐曲線ではありません（開いた経路として描画）。**実際のスイングバイ（最接近）**は◇＋日付＋距離(km)を添えて注記に自動生成します（実測: ボイジャー1号 木星 1979-03-05 348,132 km／土星 1980-11-13 184,382 km、ボイジャー2号 木星 1979-07-09 721,406 km／土星 1981-08-26 161,960 km／天王星 1986-01-24 102,724 km／海王星 1989-08-25 33,705 km）。最接近は**惑星位置との距離の極小を探索**して求め（日付を書き込まない）、候補の粗い刻み→精密化の可変グリッドで解決します。**地球−月系で完結する機体（アポロの S-IVB 段など）**は月も最接近の対象に加えます（`probe="アポロ11号 S-IVB"` → 月 1969-07-19 5,700 km）。アポロの S-IVB は暦が1969年で終わるため現在位置は取得できませんが、**当時の経路だけは描けます**（`structuredContent.probes` に現在位置のエラー、`route` に経路を返す）。線形縮尺（`engine="accurate"`）でも同じ経路データを使います。認証不要。
 - **彗星の見え方チャート（`view="apparition"`）**: `comet` と併せて指定すると、その彗星の**観測の可否を時系列で示す3段パネル**（横軸＝UTC の日付）を返します。上から **距離**（日心距離 r＝黄／地心距離 Δ＝シアン、AU）・**予想光度 m1**（橙。JPL SBDB の全光度の式 `m1 = M1 + 5·log10(Δ) + K1·log10(r)`。**値が小さい＝明るい方が上**）・**太陽離角**（緑。0°＝太陽と同じ方向＝地球からは見えない）。**今日・近日点・地球最接近**を縦線で示し、期間内の極値は数値ラベル付きの点で示します（ラベルは**点から近い順に空きを探して曲線・凡例・軸ラベルの文字・他のラベルに重ならない位置＝線から2px以上の余白**へ置き、どこにも置けなかったラベルだけを `figure.notes` に列挙）。位置は **JPL Horizons の N 体解**（期間ぶんを1リクエストでまとめて取得）、地球位置は JPL DE421+Skyfield。Horizons が使えないときだけ SBDB 要素の2体近似へ退避し、**精度差を数値で注記**します（実測: 169P/NEAT で N 体解と最大 0.0249 au・地球最接近の時刻が約1.2日ずれる）。**期間の端で最小のときは「近日点」「地球最接近」とは呼びません**（ハレー彗星は 2061 年まで太陽へ近づき続けるので、どの期間でも最小は端に来る）＝「期間の端で最小＝真の極値はこの期間の外」と数値付きで注記し、マーカーも「r 最小」「Δ 最小」に切り替えます。`days`（既定180日）で長さを変えられ、**今日の30日前から**描くので直前に過ぎた近日点・最接近も見えます（1天体ずつ。複数指定は「1天体ずつ指定してください」と返して停止）。
 - **複数彗星を1枚に（1彗星=1パネル）**: `comet="ハレー彗星,C/2004 R2"` のように**カンマ区切り**（`、`/`;` も可）または `comet2` を併用すると、最大4天体を**縦に並べた1枚の画像**で返します。彗星ごとに**軌道面も縮尺も違う**ため、1つの座標系に重ねると嘘になる（＝軌道面が違えば「真横から見た形」は同時に成立せず、a が2桁違うと小さい軌道が点に潰れる）ので、**パネルは独立した軌道面・独立した縮尺**です。その旨（同じ長さの線でも距離が一致しないこと）と `a` の開き（例: 229倍）は `figure.notes` に数値から生成して入ります。1天体の取得に失敗しても他のパネルは描き、`structuredContent.errors` と注記に理由を残します（上限4件を超える要求も「要求N件のうちM件を描画」と明示）。`figure.kind` は `orbit_plane_set` で、パネルごとの円錐曲線・自己検証は `figure.panels[]`（`conic` / `verify` / `px_per_AU` / `notes`）、`figure.verify` は全パネルの集約です。
-- **彗星（周期・C/）**: `comet`/`comet2` 引数に ハレー彗星(halley/1P)・エンケ彗星(2P)・チュリュモフ・ゲラシメンコ(67P)・テンペル第1(9P)・ヴィルト第2(81P) 等の**周期彗星**、または 紫金山・アトラス(C/2023 A3)・ラブジョイ(C/2014 Q2) 等の**C/彗星**を指定。周期彗星は JPL SBDB 軌道要素のケプラー伝播、C/彗星（非周期・放物線/双曲線軌道）は JPL Horizons 状態ベクトルで 日心位置を計算。彗星は**シアン色の輝く核＋太陽と反対方向に伸びる尾**で描画し、黄緯が大きいものは 黄道面への正射影距離で配置・ラベルに真距離と黄緯を併記。遠方彗星は表示スケールを自動拡張。認証不要。
+- **彗星（周期・C/）**: `comet`/`comet2` 引数に ハレー彗星(halley/1P)・エンケ彗星(2P)・チュリュモフ・ゲラシメンコ(67P)・テンペル第1(9P)・ヴィルト第2(81P) 等の**周期彗星**、または 紫金山・アトラス(C/2023 A3)・ラブジョイ(C/2014 Q2) 等の**C/彗星**を指定。周期彗星は JPL SBDB 軌道要素のケプラー伝播、C/彗星（非周期・放物線/双曲線軌道）は JPL Horizons 状態ベクトルで 日心位置を計算。彗星は**シアン色の輝く核＋太陽と反対方向に伸びる尾**で描画し、位置は黄緯を落とさない 3D の実位置（ラベルに真距離と黄緯を併記）。遠方彗星は表示スケールを自動拡張。認証不要。
 
 ```json
 // route=True のときは彗星の通過経路（点列は入れず、目印と要素だけ）が付く
 // "comet_routes": {"エンケ彗星": {"name": "2P/Encke", "e": 0.8470, "q_au": 0.3395,
 //   "period_days": 1207.0, "closed": true, "marks": [{"id": "perihelion", "label": "近日点",
 //   "r_au": 0.3395, "proj_au": 0.3393, "date": "2027-02-11", "px": [736, 755], "drawn": false}]}}
-{"time_utc": "2026-09-09 05:32 UTC", "engine": "simple (Pillow, 対数縮尺)",
+{"time_utc": "2026-09-09 05:32 UTC", "engine": "oblique (Pillow, 斜め俯瞰・対数動径)",
  "asteroids": {"イトカワ": {"au": 1.60, "eclLon": 82.9}},
  "probes": {"ボイジャー1号": {"au": 171.7, "proj_au": 140.4, "eclLat": 35.2}},
  "comets": {"ハレー彗星": {"au": 35.1, "proj_au": 33.7, "eclLat": -16.6}}}  // 惑星は全9天体
@@ -985,7 +982,7 @@ planetary_rover_location_map(body="moon", rover="apollo15")
 - `planetary_orbiter_track`: 2.1s → 1.4s（Horizons の状態ベクトルを分単位キーでキャッシュ）
 - `satellite_status`: 50.28s → 0.00s ／ `astronomy_weather` 2.56s → 0.00s
 - `satellite_status`（全1,044件の走査）: **初回 38.5s → 以後 0.07s**（カタログをディスクにも保存し、プロセス再起動後も即時）
-- `sky_map_with_satellites`(simple) の画像: **992KB → 188KB**（JPEG化）
+- `sky_map_with_satellites`(ground) の画像: **992KB → 188KB**（JPEG化）
 - `search_space_images`: インライン画像を3枚 → 1枚（`inline_max` で増やせる）
 - **`tools/list`（全66ツールの定義。毎ターンのプロンプトに載る）: 118.7KB ≈ 約39,600 トークン → 69.1KB ≈ 約23,000 トークン（−42%）**。description は「要約＋例＋Args（引数の一次情報は改変しない）＋契約文」に圧縮し、inputSchema からは意味のない `title` と `anyOf: [..., null]` を落とす（`tool_docs.py`）。**リポジトリ側の docstring は完全なまま**（`README`/`SKILL.md` を読む人・エージェント向けの説明は減らない）
 
@@ -1111,12 +1108,12 @@ src/space_finder_mcp/
 ├── cds.py               # object_lookup / catalog_search（CDS SIMBAD・VizieR の天体カタログ検索）
 ├── exoplanet.py         # exoplanet_search（NASA Exoplanet Archive TAP・ADQL）
 ├── news.py               # astronomy_news（Sky & Telescope 天文ニュース）
-├── sky_overlay.py        # sky_map_with_satellites（星図+人工衛星, 天頂中心の円形図 / matplotlib+Pillow）
+├── sky_overlay.py        # sky_map_with_satellites（星図+人工衛星。描画は ground_view に一本化）
 ├── ground_view.py        # sky_map_with_satellites(engine="ground") 地上視点パノラマ（実星表・天の川・街並み・方位目盛り）
-├── solar_system.py        # solar_system_now（太陽系俯瞰図, JPL DE421+SBDB / matplotlib+Pillow）
+├── solar_system.py        # solar_system_now（太陽系俯瞰図, JPL DE421+SBDB。描画は _render_oblique の1本）
 ├── comet_apparition.py   # 彗星の見え方チャート（solar_system_now view="apparition"）
 ├── swingby.py            # スイングバイ航路の実測（Horizons 状態ベクトル＋最接近探索）
-├── orbit_view.py          # 斜め俯瞰の投影・円錐曲線サンプリング・深度・描画部品（正射影/弱い透視・対数動径）
+├── orbit_view.py          # 斜め俯瞰の投影部品（正射影/弱い透視・対数/線形動径・円錐曲線サンプリング・深度）
 ├── solar_eclipse.py       # solar_eclipse_series（日食の時系列パネル, JPL DE421+Skyfield）
 ├── moon_phase.py          # moon_phase_map（月齢マップ: 月齢カレンダー/朔望月パネル, JPL DE421+Skyfield）
 ├── mars_rover.py         # mars_rover_status（火星ローバー状況・天気）

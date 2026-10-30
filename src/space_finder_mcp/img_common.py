@@ -17,7 +17,6 @@ import math
 import os
 import re
 import sys
-import threading
 import time
 import urllib.parse
 import uuid
@@ -30,7 +29,6 @@ from .cache import CACHE_ROOT
 # matplotlib はプロセス全体の状態（rcParams・現在の figure・フォントキャッシュ）を共有するため
 # スレッド安全ではない。並列ツール呼び出しで図が混ざらないよう、matplotlib で描く経路だけを
 # このロックで直列化する（Pillow 合成だけの経路はロック不要なので触らない）。
-RENDER_LOCK = threading.RLock()
 
 # ---------- 日本語フォント探索（Windows / macOS / Linux 共通） ----------
 # 画像内の日本語が「豆腐（□）」になるのを防ぐため、OS ごとの標準日本語フォントを順に探す。
@@ -130,12 +128,6 @@ _FONT_FAMILY_GLOBS = (
     ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf"),   # 日本語なし（最後の保険）
 )
 
-# matplotlib に渡すフォントファミリ名の候補（先頭ほど優先。PIL 側で見つからない場合の保険）
-_MPL_FAMILY_CANDIDATES = (
-    "Noto Sans CJK JP", "Noto Sans JP", "Source Han Sans JP", "Hiragino Sans",
-    "Hiragino Kaku Gothic ProN", "ヒラギノ角ゴシック", "Yu Gothic", "Meiryo",
-    "IPAexGothic", "IPAGothic", "TakaoPGothic", "VL Gothic", "Arial Unicode MS",
-)
 def _font_search_dirs() -> List[str]:
     """OS 標準のフォントディレクトリ（存在しないものは無視してよい）。"""
     if os.name == "nt":
@@ -376,40 +368,6 @@ def font_status() -> dict:
         }
     return out
 
-def apply_matplotlib_cjk_font() -> Optional[str]:
-    """matplotlib の rcParams に日本語フォントを設定する（Windows / macOS / Linux 共通）。
-
-    sky_overlay / solar_system の accurate 版（matplotlib）が使う。Pillow 側と
-    同じ探索結果（_resolve_font）を最優先にし、無ければ matplotlib のフォント一覧から
-    日本語ファミリを選ぶ。戻り値は設定したファミリ名（見つからなければ None）。
-
-    matplotlib.pyplot は import しない（rcParams は pyplot 無しでも触れる。stdio 起動後の
-    pyplot import はこの環境で HANG するため、呼び出し側が import 済みの rcParams を共有する）。
-    """
-    from matplotlib import rcParams
-    try:
-        from matplotlib import font_manager
-    except Exception:                               # pragma: no cover - matplotlib 欠如時
-        return None
-
-    family: Optional[str] = None
-    path, _src = _resolve_font(False)
-    if path:
-        try:
-            font_manager.fontManager.addfont(path)   # matplotlib に登録（重複は無視される）
-            family = font_manager.FontProperties(fname=path).get_name()
-        except Exception:
-            family = None
-    if not family:                                   # PIL 側で見つからない環境の保険
-        have = {f.name for f in font_manager.fontManager.ttflist}
-        family = next((n for n in _MPL_FAMILY_CANDIDATES if n in have), None)
-
-    chain = ([family] if family else []) + [n for n in _MPL_FAMILY_CANDIDATES if n != family]
-    rcParams["font.family"] = "sans-serif"
-    rcParams["font.sans-serif"] = chain + ["DejaVu Sans"]
-    rcParams["axes.unicode_minus"] = False
-    return family
-
 
 # ---------- 天体・記号の表示色（描画系ツール共通の単一の出典） ----------
 # 「実物の見た目に寄せた色」を 1 か所で決める。ここを直せば sky_overlay /
@@ -450,10 +408,6 @@ def symbol_rgb(key: str, default: Tuple[int, int, int] = (200, 200, 210)) -> Tup
     """記号色（ring/band/cap/asteroid/comet 等）→ RGB。"""
     return SYMBOL_COLORS.get(str(key), default)
 
-
-def rgb_hex(rgb) -> str:
-    """(r, g, b) → #rrggbb（matplotlib 用）。"""
-    return "#{:02x}{:02x}{:02x}".format(*rgb)
 
 
 @lru_cache(maxsize=128)

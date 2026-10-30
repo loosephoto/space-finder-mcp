@@ -15,8 +15,10 @@
 
 ## 0. 方針（変えるもの／変えないもの）
 
-- **置き換えない**。現在の `_render_simple`（Pillow・真上・対数動径）はそのまま残し、
-  **投影だけを差し替え可能**にする。`engine=` と同じ流儀で `view="top"(既定) | "oblique"` を足す。
+- ~~**置き換えない**。現在の `_render_simple`（Pillow・真上・対数動径）はそのまま残し、
+  **投影だけを差し替え可能**にする。`engine=` と同じ流儀で `view="top"(既定) | "oblique"` を足す。~~
+  **→ Phase 4（下記 §9）で方針を変更**: 既定を oblique にしたうえで、`_render_simple` /
+  `_render_accurate` / `_render_orbit_plane` を `_render_oblique` へ統合し、3 関数を廃止した。
 - 幾何（`_compute` の scene 構築）と検証（`_verify_*`）は `solar_system.py` に残す。
   新しい共通モジュールは「3D(AU) → 画面(px)」の写像と描画部品だけを持つ。
 - 新モジュール: `src/space_finder_mcp/orbit_view.py`。
@@ -214,3 +216,50 @@ for θ in range(0, 360, 6):
 - `engine="accurate"`（matplotlib・線形距離）を明示したときは **accurate を優先**し、斜め俯瞰は
   使わない（勝手に描画方式を変えない）。その旨を `figure.notes` に自動で出す。
   `engine="auto"` 等で accurate が自動降格した場合は oblique のまま描く。
+
+
+---
+
+## 9. Phase 4 — 統合と廃止（2026-10-31 決定・実装済み）
+
+ユーザー評価の高かった 2 つの図（`sky_map_with_satellites` の地上視点パノラマと、
+`solar_system_now` の斜め俯瞰）に**描画ルーチンを一本化**した。並列に持っていた実装は廃止する。
+「引数で選ばせる」から「1 本の描画に統合し、引数は互換のためだけに残す」への転換。
+
+| 廃止した関数 | 統合先 | 引数の扱い |
+|---|---|---|
+| `sky_overlay._render_simple`（`engine="simple"`） | `ground_view.render` | `engine` は互換（どの値でも ground） |
+| `sky_overlay._render_accurate`（`engine="accurate"`） | `ground_view.render` | 同上 |
+| `solar_system._render_simple`（`projection="top"`） | `solar_system._render_oblique` | `projection` は互換（`top` でも斜め俯瞰で描き、注記に出す） |
+| `solar_system._render_accurate`（`engine="accurate"`） | `solar_system._render_oblique` | `engine="accurate"` は**線形縮尺**を選ぶ |
+| `solar_system._render_orbit_plane`（`view="comet_orbit"`） | `solar_system._render_oblique(body=…)` | `view="comet_orbit"` は従来どおり |
+| `orbit_view.draw_orbit` | `solar_system._obl_draw_orbit` | 呼び出し側は変更なし（内部） |
+
+### 決定事項
+
+1. **軌道面図（`view="comet_orbit"`）の構図は変えない。** 「真横から見た楕円＋太陽＝焦点」は
+   形を読むための図で、斜め俯瞰へ投影し直すと楕円が潰れて離心率・焦点が読めなくなる
+   （実測: Q/q 3.32 → 2.26、楕円の縦横比 1.11 → 0.58）。統合するのは**描画コード**で、
+   投影は「軌道面を画面に一致させた View（仰角 90°・線形動径・透視なし）」を使う。
+   これで `orbit_segments` / 名札配置 / 図の契約（`figure.kind="orbit_plane"`・`verify_curve`）を
+   俯瞰図と共有できる。
+2. **`engine="accurate"` は「線形縮尺」として残す。** 旧 matplotlib 版の価値は「相対距離が正確」
+   という情報で、見た目ではない。`RadialScale(kind="linear")` で同じ情報を斜め俯瞰で出し、
+   内惑星が中心に密集する分は**名札リングの下限（150 px）＋引き出し線**で補う。
+3. **`projection="top"` は廃止。** 指定されたら斜め俯瞰で描き、「統合したので真上図ではない」旨を
+   `figure.notes` に自動生成する（黙って無視しない）。
+4. **マーカーは 3D の実位置**（黄経・黄緯）に置く。旧 simple/accurate は黄道面への正射影だったが、
+   斜め俯瞰は 3D をそのまま投影するので、経路（Horizons の 3D 点列）とマーカーが同じ座標系になる。
+5. **matplotlib への依存を削除**（`RENDER_LOCK` / `apply_matplotlib_cjk_font` / `rgb_hex`、
+   `pyproject.toml` の `matplotlib`）。描画は Pillow のみになり、直列化ロックは不要。
+
+### 統合で見つかって直した不具合（実測）
+
+- 対数縮尺の「太陽円盤 vs 最内惑星」検証が、px で決めた円盤半径を `au_at_px` で逆算していたため
+  縮尺依存で誤判定（実測: `range_au=10` で 0.314 AU vs 0.335 AU → `ok=False`）。判定を **px 空間**へ。
+- `_verify_oblique` の可視判定が `hi*1.2` まで許容していたため、`range_au=5` の木星（5.32 AU）を
+  「描いていないのに探す」誤検出。描画と同じ `_oblique_visible(view, au)` に統一。
+- 彗星の尾が自分のラベル箱に隠れる問題（v0.39.6 の回帰）は、**全ラベル箱の後に尾を描き直す**
+  最終パスを統合先でも維持して防いでいる。
+- 旧 `_render_orbit_plane` に無かった太陽の光暈を追加したところ、近日点側の曲線色が薄まり
+  `verify_curve` の測定値が 0.57 → 2.77 AU に跳ねた（`ok=False`）。**軌道面図には光暈を描かない**。

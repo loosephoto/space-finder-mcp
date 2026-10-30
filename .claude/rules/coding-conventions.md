@@ -7,7 +7,7 @@
 - `structuredContent` = LLM向け純粋JSON（LLMが表示文を要約しても元データを失わない）
 - ツールの docstring は**クライアント向け仕様**として書く（例文・引数・認証要否・返却形式）。
 - **メディア（画像/音声/動画）は本体より前にアイコン付きリンク**を出す（`🖼️/🎧/🎬 [◯を開く](URL または file:///…)`）。CLI系・Android系ハーネスは `ImageContent` を描画しないため、このリンクが唯一の導線。生成画像は `save_output()` で保存し `structuredContent.image_path` にも実パスを入れる。検査は `--media-links`。
-- **画像内の日本語フォントは OS 非依存で解決**する（`img_common.load_font()`：環境変数 → OS 標準パス → フォントディレクトリ走査。採用前に **cmap で日本語グリフを検証**）。matplotlib 経路は `apply_matplotlib_cjk_font()`（pyplot 非依存）。検査は `--fonts`。
+- **画像内の日本語フォントは OS 非依存で解決**する（`img_common.load_font()`：環境変数 → OS 標準パス → フォントディレクトリ走査。採用前に **cmap で日本語グリフを検証**）。描画は Pillow のみなので、確認するのは画像描画経路のフォントだけ。検査は `--fonts`。
 - **回答文の保証範囲を混同しない**: JSON（`structuredContent`）と `content` の数値・画像・リンクは**サーバー側**で決まりモデル非依存、文章化はホスト側モデルの裁量（`SKILL.md` 注意事項10）。
 
 ## 例外・入力の防御
@@ -21,8 +21,8 @@
 ## 並列処理（LLM は1ターンで複数ツールを呼ぶ）
 
 - ツールは `server.py` の **`_reg()` で登録**する（同期のツール本体を `anyio.to_thread` のワーカースレッドで実行し、イベントループを塞がない）。`mcp.tool()(fn)` を直に使うと同期実行に戻り、1つの API 待ちが他の呼び出しを止める（実測: 4並列で wall = 合計）。
-- **共有状態はスレッド安全に**: `cache`・`nasa_budget` は `threading.Lock`、matplotlib の描画は `img_common.RENDER_LOCK` で直列化、キャッシュされた戻り値は書き換えない。
-- **遅延 import の例外**: numpy / matplotlib / skyfield は **起動前に import**（`server.py` 冒頭で numpy を import 済み）。stdio サーバー起動後に import すると**ツールが無応答**になる（実測）。Pillow / sgp4 / requests は遅延 import のままで問題ない。
+- **共有状態はスレッド安全に**: `cache`・`nasa_budget` は `threading.Lock`、キャッシュされた戻り値は書き換えない（描画は Pillow のみでプロセス全体の状態を持たない）。
+- **遅延 import の例外**: numpy / skyfield は **起動前に import**（`server.py` 冒頭で numpy を import 済み）。stdio サーバー起動後に import すると**ツールが無応答**になる（実測）。Pillow / sgp4 / requests は遅延 import のままで問題ない。
 - 検査は `--concurrency`（single-flight・スレッド逃がし）と `--stdio`（実クライアント経路）。
 
 ## キャッシュ（`cache.py`）
@@ -61,7 +61,7 @@ moon_phase_map / astronomy_weather〔雨雲・降水画像を返すとき〕 / s
 
 - 共通処理は `img_common.py`（フォント探索/JPEG化/アンチメリジアン分割）、`stac_common.py`（bbox/雲量検証）、`cache.py`、`env_config.py` に集約し、各ツールへ重複実装しない。
 - 依存方向は一方向（例: `planetary_rover → planetary_map → img_common/cache`）。循環 import を作らない。
-- 依存追加は最小限（標準ライブラリ優先）。Pillow / sgp4 / requests は関数内で遅延 import（起動を速く保つ）。**ただし numpy / matplotlib / skyfield は起動前に import**（遅延 import すると stdio で無応答。上記「並列処理」参照）。`server.py` が直接 import する `anyio`・`numpy` は `pyproject.toml` の依存に明示する。
+- 依存追加は最小限（標準ライブラリ優先）。Pillow / sgp4 / requests は関数内で遅延 import（起動を速く保つ）。**ただし numpy / skyfield は起動前に import**（遅延 import すると stdio で無応答。上記「並列処理」参照）。`server.py` が直接 import する `anyio`・`numpy` は `pyproject.toml` の依存に明示する。
 
 ## ドキュメント
 

@@ -35,7 +35,7 @@ import base64
 from .cache import TTL_DAILY, disk_get, ttl_cache
 from .img_common import (figure_notes, figure_payload, figure_text_block, load_font,
                          media_link_line, pixel_near, primary_spec, save_output,
-                         scale_spec, view_spec)
+                         scale_spec, symbol_rgb, view_spec)
 from .input_utils import as_float
 
 _LOCAL = os.environ.get("LOCALAPPDATA", ".")
@@ -646,6 +646,30 @@ def draw_stars(lin, cat, alt, az, span, az0, sky_h, W, header, lim_z, lim_h):
                 faint_drawn=int(deep.sum()))
 
 
+def _planet_icons(name):
+    """惑星を見分けるための種類別アイコン（土星＝環・木星＝縞・火星＝極冠）。
+
+    旧 engine="simple"（Pillow 実写合成）と engine="accurate"（matplotlib 極座標星図）が
+    持っていたアイコンを ground_view へ取り込んだもの（見た目の統合）。色は
+    img_common.symbol_rgb（共通の記号色）から引き、戻りは (patch, dx, dy) のリスト。
+    該当しない天体は空のリストを返す。
+    """
+    def _col(key):
+        return (np.array(symbol_rgb(key), np.float32) / 255.0)[None, None, :]
+    if name == "土星":                          # 環（横長の細い楕円リング）
+        rx, ry, w = 17.0, 7.0, 2.0
+        rw, rh = int(rx + 3 * w) + 1, int(ry + 3 * w) + 1
+        yy, xx = np.mgrid[-rh:rh + 1, -rw:rw + 1].astype(np.float32)
+        d = np.sqrt((xx / rx) ** 2 + (yy / ry) ** 2)
+        return [(np.exp(-((d - 1.0) / 0.18) ** 2)[:, :, None] * _col("ring"), 0.0, 0.0)]
+    if name == "木星":                          # 縞（本体の上下に細い横線を2本）
+        band = np.full((3, 27), 0.85, np.float32)[:, :, None] * _col("band")
+        return [(band, 0.0, -8.0), (band, 0.0, 6.0)]
+    if name == "火星":                          # 極冠（本体の上の小さな丸）
+        return [(_gauss(3.2)[:, :, None] * 0.9 * _col("cap"), 0.0, -9.0)]
+    return []
+
+
 def draw_planets(lin, pl, span, az0, sky_h, W, header, lim_fn, sun_az, sun_alt, in_focus=None):
     """太陽系天体を描く。空が明るくて見えなくても「位置」は示す（白い輪郭マーカー）。
 
@@ -694,6 +718,8 @@ def draw_planets(lin, pl, span, az0, sky_h, W, header, lim_fn, sun_az, sun_alt, 
         elif vis:                                         # 見えている: 実物に近い点＋細いリング
             _add_patch(lin, (_gauss(5.0) * FOCUS_BOOST)[:, :, None] * rgb[None, None, :], x, y)
             _add_patch(lin, (_ring_patch(10.0, 1.0) * 0.40)[:, :, None] * np.ones(3, np.float32), x, y)
+            for _icon, _dx, _dy in _planet_icons(nm):    # 種類別アイコン（環・縞・極冠）
+                _add_patch(lin, _icon, x + _dx, y + _dy)
         else:                                             # 昼・薄明: 位置だけを示す
             _add_patch(lin, (_ring_patch(10.0, 1.3) * 0.85)[:, :, None] * np.ones(3, np.float32), x, y)
         labels.append((label_txt, float(x), float(y), bool(vis)))

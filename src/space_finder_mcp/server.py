@@ -63,7 +63,7 @@ from . import exoplanet as _exo
 from . import qzss as _qzss
 
 # ---- ネイティブ拡張は「起動前に」import しておく（重要） ----
-# numpy / matplotlib / skyfield を**ツール実行時**（イベントループが動き出した後）に import
+# numpy / skyfield を**ツール実行時**（イベントループが動き出した後）に import
 # すると、この環境では import が完了せずツール呼び出しが無応答になる（実測: Windows +
 # Python 3.11 + mcp の stdio。numpy・matplotlib.pyplot・skyfield.api が HANG、PIL.Image・
 # sgp4・requests は問題なし。numpy を起動時に1回 import しておけば、その後の
@@ -184,7 +184,7 @@ _reg(_cds.catalog_search)
 # ---- 太陽系外惑星 (NASA Exoplanet Archive TAP, 認証不要) ----
 _reg(_exo.exoplanet_search)
 
-# ---- 星空マップ＋人工衛星オーバーレイ (matplotlib/Pillow 選択式, 認証不要) ----
+# ---- 星空マップ＋人工衛星オーバーレイ (地上視点パノラマ・Pillow, 認証不要) ----
 _reg(_skyover.sky_map_with_satellites)
 
 # ---- 太陽系俯瞰図（太陽中心の惑星・小惑星位置合成, 認証不要） ----

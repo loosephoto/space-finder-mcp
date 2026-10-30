@@ -160,21 +160,5 @@ class FontResolutionTests(unittest.TestCase):
         self.assertEqual(ic._scan_font_dirs(False), ())
 
 
-class MatplotlibFontTests(unittest.TestCase):
-    def test_matplotlib_gets_japanese_font(self):
-        path, _src = ic._resolve_font(False)
-        if not path or not ic._cmap_has_glyphs(path, CJK_PROBE):
-            self.skipTest("この環境に日本語フォントがありません")
-        family = ic.apply_matplotlib_cjk_font()
-        self.assertIsNotNone(family)
-        from matplotlib import font_manager, rcParams
-        self.assertEqual(list(rcParams["font.family"]), ["sans-serif"])
-        self.assertFalse(rcParams["axes.unicode_minus"])
-        fp = font_manager.FontProperties(family=rcParams["font.sans-serif"])
-        found = font_manager.findfont(fp, fallback_to_default=False)
-        self.assertIs(ic._cmap_has_glyphs(found, CJK_PROBE), True,
-                      "matplotlib が日本語フォントを掴めていません: " + str(found))
-
-
 if __name__ == "__main__":
     unittest.main()

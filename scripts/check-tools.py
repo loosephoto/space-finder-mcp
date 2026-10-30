@@ -685,8 +685,8 @@ def stdio_report(timeout: float = 90.0) -> list:
         ("constellation_now", {"place": "東京"}, "numpy をツール実行時に import する経路"),
         ("moon_phase_map", {"place": "東京"}, "skyfield + numpy の計算経路"),
         ("sky_map_with_satellites", {"place": "東京", "engine": "accurate"},
-         "matplotlib の描画経路（pyplot）"),
-        ("solar_system_now", {"engine": "accurate"}, "matplotlib の描画経路（pyplot）"),
+         "旧 engine 名（互換）を渡したときの Pillow 描画経路"),
+        ("solar_system_now", {"engine": "accurate"}, "線形縮尺の Pillow 描画経路"),
         ("sat_ground_track", {"name": "iss"}, "sgp4 + Pillow の描画経路"),
         ("space_weather", {"kind": "forecast"},
          "SWPC 予報の取得経路（DONKI を経由しない forecast 分岐）"),
@@ -914,8 +914,8 @@ def fonts_report() -> list:
     """日本語フォントの解決結果を検査する（Windows / macOS / Linux 共通の探索）。
 
     画像内の日本語が豆腐（□）にならないよう、解決したフォントが実際に日本語グリフを
-    持つこと（cmap を直接確認）と、matplotlib 経路（accurate 版）が同じフォントを
-    掴むことを確認する。日本語フォントが無い環境では SPACE_FINDER_FONT で指定する。
+    持つこと（cmap を直接確認）を確かめる（描画は Pillow のみになったので、確認するのは
+    画像描画経路のフォントだけ）。日本語フォントが無い環境では SPACE_FINDER_FONT で指定する。
     """
     from space_finder_mcp import img_common as ic
     rows = []
@@ -932,24 +932,6 @@ def fonts_report() -> list:
                 "日本語フォントを解決できません（画像の日本語が豆腐になります）。"
                 "そのOSの日本語フォントを入れるか、環境変数 SPACE_FINDER_FONT で指定してください"),
         })
-    family = ic.apply_matplotlib_cjk_font()
-    path = None
-    try:
-        from matplotlib import font_manager, rcParams
-        fp = font_manager.FontProperties(family=rcParams["font.sans-serif"])
-        path = font_manager.findfont(fp, fallback_to_default=False)
-    except Exception:
-        path = None
-    ok = bool(path) and ic._cmap_has_glyphs(path, ic._CJK_PROBE) is True
-    rows.append({
-        "check": "matplotlib(accurate版)",
-        "status": "OK" if ok else "NG",
-        "path": path,
-        "source": family,
-        "detail": "" if ok else (
-            "matplotlib の日本語フォントを解決できません"
-            "（sky_overlay / solar_system の accurate 版が豆腐になります）"),
-    })
     return rows
 
 

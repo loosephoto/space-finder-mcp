@@ -1,8 +1,9 @@
-"""斜め俯瞰ビューの投影と描画部品（正射影・対数動径）。
+"""斜め俯瞰ビューの投影と描画部品（正射影・対数/線形動径・深度）。
 
-太陽を中心とする軌道図を「黄道面の斜め上から見た」構図で描くための共通部品。
-既存の `solar_system._render_simple`（真上・対数動径）を置き換えるものではなく、
-**投影だけを差し替える**ために使う（`view="oblique"` を足すときの下請け）。
+太陽を中心とする軌道図を「黄道面の斜め上から見た」構図で描くための投影と部品。
+描画そのもの（軌道線・マーカー・名札・凡例）は `solar_system._render_oblique` が持ち、
+このモジュールは「AU → px の写像」「円錐曲線の点列」「奥行きの重み」だけを提供する
+（投影を 1 か所に閉じ込めて、図と画素検証が同じ式を使えるようにするため）。
 
 ## 投影（正射影）
 
@@ -25,11 +26,11 @@
 
 ## 使い方
 
-    from .orbit_view import Camera, RadialScale, View, orbit_segments, draw_orbit
+    from .orbit_view import Camera, RadialScale, View, orbit_segments, draw_marker
     view = View(Camera(), RadialScale(hi_au=190.0), cx=750, cy=750)
     segs = orbit_segments({"a": 17.9, "e": 0.9679, "i": 162.2, "om": 58.4, "w": 111.3,
                            "q": 0.575}, view, r_max_au=190.0)
-    draw_orbit(draw, segs, view, (95, 224, 208), kind="comet")
+    _obl_draw_orbit(draw, segs, view, (95, 224, 208), kind="comet")   # solar_system 側
     draw_marker(draw, pos_xyz, view, (95, 224, 208))
 
 探査機の経路（Horizons の点列）・スケールバー・凡例は Phase 2 で `solar_system` に接続するときに
@@ -69,7 +70,7 @@ class RadialScale:
     """動径の写像。kind="log"（既定）は 0.3〜190 AU のような広い範囲を 1 枚に収める。
 
     `lo_au` は log の下限。`range_au` を絞る図では `lo_au=min(lo, hi*0.05)` を呼び側で決める
-    （既存 `_render_simple` と同じ規則）。
+    （`solar_system._oblique_hi` と同じ規則）。
     """
 
     kind: str = "log"
@@ -313,32 +314,6 @@ def depth_width(base_w: float, depth: float, dmin: float, dmax: float) -> float:
 def _rgba(color: Sequence[int], alpha: float) -> Tuple[int, int, int, int]:
     r, g, b = color[0], color[1], color[2]
     return (int(r), int(g), int(b), int(max(0, min(255, round(alpha * 255)))))
-
-
-def draw_orbit(draw, segments: List[Segment], view: View, color: Sequence[int],
-               base_width: float = 1.0, kind: str = "tno",
-               chunk: int = 8, dmin: Optional[float] = None,
-               dmax: Optional[float] = None) -> int:
-    """軌道をアンチエイリアス無しの線分列で描く（Pillow）。描いたセグメント数を返す。
-
-    深度で不透明度と線幅を連続変化させる。`draw` は RGBA モードの ImageDraw を想定。
-    """
-    if dmin is None or dmax is None:
-        dmin, dmax = depth_range(segments, view)
-    drawn = 0
-    for seg in segments:
-        pts = [view.project(p) for p in seg]
-        for s0 in range(0, len(pts) - 1, chunk):
-            part = pts[s0:s0 + chunk + 1]
-            if len(part) < 2:
-                continue
-            depth = sum(p[2] for p in part) / len(part)
-            w = max(1, int(round(depth_width(base_width, depth, dmin, dmax))))
-            a = depth_alpha(depth, dmin, dmax, kind)
-            xy = [(p[0], p[1]) for p in part]
-            draw.line(xy, fill=_rgba(color, a), width=w, joint="curve")
-            drawn += 1
-    return drawn
 
 
 def draw_track(draw, points: Sequence[Point3], view: View, color: Sequence[int],

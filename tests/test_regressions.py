@@ -27,9 +27,11 @@ class OverviewLabelBoxTests(unittest.TestCase):
         return 620.0 * (math.log10(au) - math.log10(lo)) / (math.log10(self.RANGE_AU) - math.log10(lo))
 
     def _xy(self, au, lon):
-        import math
-        r = self._rpx(au)
-        return (self.CX + r * math.cos(math.radians(lon)), self.CY + r * math.sin(math.radians(lon)))
+        """斜め俯瞰の投影での画素位置（図と検証が同じ View を使う）。"""
+        ss, scene = self._last
+        v = ss._oblique_view(scene)
+        px, py, _d = v.project(ss._xyz_from_au_lonlat(au, lon, 0.0))
+        return px, py
 
     def _scene(self, planet_lon=25.0, comet_lon=17.0, comet_au=2.0):
         """日付に依存しない合成シーン（地球と彗星の位置だけ固定する）。
@@ -46,11 +48,12 @@ class OverviewLabelBoxTests(unittest.TestCase):
         scene["comets"] = {"試験彗星": {"name": "試験彗星", "au": comet_au, "proj_au": comet_au,
                                        "eclLon": comet_lon, "eclLat": 0.0}}
         scene["range_au"] = self.RANGE_AU
+        self._last = (ss, scene)         # _xy() が同じ View を使えるように保持する
         return ss, scene
 
     def test_comet_label_box_does_not_cover_planet_marker(self):
         ss, scene = self._scene()
-        png = ss._render_simple(scene)
+        png = ss._render_oblique(scene)
         rep = ss._verify_range_draw(png, scene)
         self.assertTrue(rep["ok"], rep)
         earth = [c for c in rep["planets_drawn"] if c["name"] == "地球"]
@@ -71,7 +74,7 @@ class OverviewLabelBoxTests(unittest.TestCase):
         ss, scene = self._scene()
         scene["asteroids"] = {"試験小惑星": {"name": "試験小惑星", "au": 2.0, "eclLon": 17.0,
                                             "eclLat": 0.0, "sma": 2.0}}
-        png = ss._render_simple(scene)
+        png = ss._render_oblique(scene)
         rep = ss._verify_range_draw(png, scene)
         self.assertTrue(rep["ok"], rep)
         box = scene["asteroids"]["試験小惑星"]["label_box"]
@@ -85,7 +88,7 @@ class OverviewLabelBoxTests(unittest.TestCase):
         scene["probes"] = {"試験探査機{:02d}".format(i): {
             "name": "試験探査機{:02d}".format(i), "au": 3.0, "proj_au": 3.0,
             "eclLon": 10.0 * i, "eclLat": 0.0, "color": [255, 214, 90]} for i in range(1, 12)}
-        png = ss._render_simple(scene)
+        png = ss._render_oblique(scene)
         rep = ss._verify_range_draw(png, scene)
         self.assertTrue(rep["ok"], rep)
         self.assertTrue(all(c["pixels_found"] >= 20 for c in rep["planets_drawn"]),
@@ -984,16 +987,19 @@ class OrbitRouteTests(unittest.TestCase):
         self.assertTrue(v["routes"][0]["occluded"][0]["verified"])
         self.assertTrue(any("確認できない" in n for n in sc["figure"]["notes"]))
 
-    def test_accurate_route_marks_are_not_hidden_by_sun_marker(self):
-        # 実測: 線形(±45AU)は約12 px/AU しかなく、太陽マーカー(s=300)は半径約1.7 AU 相当。
-        # 太陽を後に描いていたため、エンケ彗星の近日点(0.34 AU)の◇が完全に隠れていた
-        # （画素0）。太陽を最背面・◇を最前面にして、目印の画素が測れることを固定する。
+    def test_route_marks_are_visible_in_linear_scale(self):
+        """線形縮尺（engine="accurate" 互換）でも経路の◇が画素として残ること。
+
+        実測 2026-10-18: 旧 matplotlib 版は太陽マーカー（半径 約1.7 AU 相当）を後に描いて
+        いたため、エンケ彗星の近日点（0.34 AU）の◇が完全に隠れていた（画素 0）。統合後は
+        太陽の円盤を最内惑星より小さく抑え、◇を最前面に描くので、目印の画素が測れる。
+        """
         from space_finder_mcp.solar_system import solar_system_now
 
-        r = solar_system_now(comet="エンケ彗星", route=True, engine="accurate")
-        sc = r.structuredContent or {}
+        sc = solar_system_now(comet="エンケ彗星", route=True,
+                              engine="accurate").structuredContent
         self.assertNotIn("error", sc)
-        self.assertIn("accurate", sc.get("engine", ""))
+        self.assertIn("線形", sc.get("engine", ""))
         fig = sc.get("figure") or {}
         v = fig.get("verify") or {}
         self.assertTrue(v.get("ok"), v.get("missing"))
@@ -1001,11 +1007,6 @@ class OrbitRouteTests(unittest.TestCase):
         self.assertIsNotNone(marks["perihelion"].get("px"))
         self.assertGreaterEqual(marks["perihelion"].get("pixels_found") or 0, 3)
         self.assertGreaterEqual(marks["aphelion"].get("pixels_found") or 0, 3)
-        # 太陽マーカーの誇張（半径 AU）を注記・scale に出していること
-        self.assertTrue(any("太陽の描画マーカー" in x
-                            for x in (fig.get("scale") or {}).get("exaggerated", [])))
-        self.assertTrue(any("誇張した太陽マーカー" in n for n in fig.get("notes", [])))
-
 
     def test_probe_route_draws_real_ephemeris_and_swingbys(self):
         # probe + route=True で探査機の実飛行経路（JPL Horizons の実状態ベクトル）を
@@ -1146,38 +1147,29 @@ class RangeAuTests(unittest.TestCase):
             self.assertIn("表示範囲", "\n".join(sc["figure"]["notes"]), eng)
 
     def test_linear_scale_actually_zooms_with_range_au(self):
-        # 線形版の縮尺は「画像幅/(2*lim)」。lim を 45 AU → 10 AU に絞れば px/AU が約4.5倍に
-        # なる（figure.scale.px_per_AU に実測値を出しているので数値で検証できる）。
+        # 線形縮尺（engine="accurate" 互換）の縮尺は「画面半径 / 上限 AU」。自動（45 AU）と
+        # range_au=10 で px/AU が約 4.5 倍になることを、figure.scale の実測値で確かめる。
         from space_finder_mcp.solar_system import solar_system_now
 
         auto = solar_system_now(engine="accurate").structuredContent["figure"]["scale"]
         tight = solar_system_now(engine="accurate", range_au=10).structuredContent["figure"]["scale"]
+        self.assertEqual(auto.get("type"), "linear")
         self.assertGreater(auto.get("px_per_AU") or 0, 5.0)
-        self.assertLess(auto.get("px_per_AU") or 0, 20.0)          # 実測 約12 px/AU（縮尺は固定）
+        self.assertLess(auto.get("px_per_AU") or 0, 25.0)
         self.assertGreater((tight.get("px_per_AU") or 0), (auto.get("px_per_AU") or 0) * 3.0)
 
     def test_inner_planets_visible_and_outer_not_drawn_with_range_au(self):
-        # range_au=10 では太陽マーカーの誇張半径が 1.7 AU → 0.4 AU に下がり、内惑星が隠れない。
-        # 地球（青）のマーカーが実際に画素として現れ、範囲外の海王星（同じ青系）は描かれない。
+        # range_au=10 では誇張した太陽の円盤が最内惑星を覆わない大きさに縮む（画素で判定）。
+        # 地球（青）のマーカーは実際に画素として現れ、範囲外の海王星（同じ青系）は描かれない。
         import numpy as np
         from PIL import Image
 
         from space_finder_mcp.solar_system import solar_system_now
 
-        def sun_marker_au(sc):
-            for x in (sc["figure"]["scale"].get("exaggerated") or []):
-                if "太陽の描画マーカー" in x:
-                    return float(x.split("半径 ")[1].split(" AU")[0])
-            return None
-
-        auto = solar_system_now(engine="accurate").structuredContent
         tight = solar_system_now(engine="accurate", range_au=10).structuredContent
-        self.assertGreater(sun_marker_au(auto), 1.0)               # 1.7 AU（内惑星を覆う大きさ）
-        self.assertLess(sun_marker_au(tight), 0.5)                 # 0.4 AU
         a = np.asarray(Image.open(tight["image_path"]).convert("RGB")).astype(int)
         blue = (a[:, :, 2] > 140) & (a[:, :, 2] - a[:, :, 0] > 55)
         self.assertGreater(int(blue.sum()), 50)                    # 地球のマーカーが見えている
-        # 海王星（30 AU）は範囲外なので描かれていない ＝ 青系は地球だけ
         self.assertIn("海王星", [o["name"] for o in tight["out_of_range"]])
         # 画素検証（figure.verify）が範囲内の描画と範囲外の非描画を実際に測っていること
         v = tight["figure"].get("verify") or {}
@@ -1187,7 +1179,7 @@ class RangeAuTests(unittest.TestCase):
         self.assertTrue(all(c["ok"] for c in rv["planets_drawn"]), rv["planets_drawn"])
         self.assertTrue(all(c["ok"] for c in rv["out_of_range_zero_pixels"]),
                         rv["out_of_range_zero_pixels"])
-        self.assertTrue((rv.get("sun_marker_vs_inner_planet") or {}).get("ok"), rv)
+        self.assertTrue((rv.get("sun_disk_vs_inner_planet") or {}).get("ok"), rv)
 
     def test_route_labels_do_not_hide_planet_markers(self):
         # range_au=10＋route では ◇の日付ラベル箱が金星のマーカーを覆っていた（実測 255→13 px）。
@@ -1254,7 +1246,8 @@ class RangeAuTests(unittest.TestCase):
         self.assertTrue(any(o.get("type") == "route_mark" for o in sc["out_of_range"]), sc["out_of_range"])
 
 
-    def test_simple_solar_system_draws_projected_light_day_for_each_probe(self):
+    def test_light_day_direction_is_drawn_for_each_probe(self):
+        """1光日リングと「到達時の方向（◇）」が探査機ごとに描かれ、画素で確認できること。"""
         from space_finder_mcp import solar_system
 
         scene = {
@@ -1277,13 +1270,12 @@ class RangeAuTests(unittest.TestCase):
             "range_au": None,
             "range_report": {},
         }
-        png = solar_system._render_simple(scene)
+        png = solar_system._render_oblique(scene)
         verified = solar_system._verify_light_day_draw(png, scene)
         names = {ring.get("name") for ring in verified["rings"]
                  if ring.get("kind") == "probe_projection"}
         self.assertEqual(names, {"Voyager 1", "Voyager 2"}, verified)
         self.assertTrue(verified["ok"], verified)
-
 
 class NewCraterSiteTests(unittest.TestCase):
     """月に新しくできたクレーター（LROC 公表値）の回帰テスト。
@@ -1405,27 +1397,32 @@ class NewCraterSiteTests(unittest.TestCase):
 class BugSweepV0392Tests(unittest.TestCase):
     """v0.39.2 で一括修正した日時解釈・キャッシュ汚染・カレンダー境界処理の回帰テスト。"""
 
-    def test_sky_map_simple_and_accurate_report_bad_when(self):
+    def test_sky_map_reports_bad_when_for_every_engine(self):
+        """engine の値（廃止した旧 simple/accurate を含む）に関わらず、不正な when はエラーで返す。"""
         from space_finder_mcp.sky_overlay import sky_map_with_satellites
-        for eng in ("simple", "accurate"):
+        for eng in ("ground", "simple", "accurate"):
             r = sky_map_with_satellites(place="東京", engine=eng, when="not-a-date")
             self.assertIn("error", r.structuredContent, eng)
 
-    def test_sky_map_simple_reports_tle_failure_and_converts_offset(self):
-        from space_finder_mcp.sky_overlay import _compute, sky_map_with_satellites
+    def test_sky_map_reports_tle_failure_and_converts_offset(self):
+        """TLE が取れないときは「地平線下」と書かず、+09:00 の時刻は UTC に直して同じ図にする。
+
+        （描画は ground_view に統合したが、engine="simple" の互換経路も同じ契約であること。）
+        """
+        from space_finder_mcp.sky_overlay import sky_map_with_satellites
         old_get = requests.get
         requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(requests.ConnectionError("offline"))
         try:
-            a = _compute(35.68, 139.69, "2026-10-14T12:00:00Z")
-            b = _compute(35.68, 139.69, "2026-10-14T21:00:00+09:00")
-            self.assertEqual(a["time_utc"], b["time_utc"])
             r = sky_map_with_satellites(place="東京", engine="simple", when="2026-10-14T12:00:00Z")
+            b = sky_map_with_satellites(place="東京", when="2026-10-14T21:00:00+09:00")
         finally:
             requests.get = old_get
         text = "\n".join(getattr(c, "text", "") for c in r.content)
         self.assertIn("**見えている人工衛星**: なし（TLE を取得できなかったため位置を計算できません）", text)
         self.assertNotIn("**見えている人工衛星**: なし(地平線下)", text)
         self.assertTrue(r.structuredContent["satellite_errors"])
+        # 数値オフセット（+09:00）でも UTC 表記と同じ時刻として扱う
+        self.assertEqual(r.structuredContent["time_utc"], b.structuredContent["time_utc"])
 
     def test_solar_system_resolve_when_handles_blank_offset_and_bad_calendar_date(self):
         from space_finder_mcp.solar_system import _load, _resolve_when
@@ -1442,14 +1439,14 @@ class BugSweepV0392Tests(unittest.TestCase):
         from space_finder_mcp import solar_system
         old_elem = solar_system._comet_elements
         old_kepler = solar_system._kepler_position
-        old_render = solar_system._render_comet_orbit
+        old_render = solar_system._render_oblique
         try:
             solar_system._comet_elements = lambda nm: (
                 nm, {"typ": "sbdb", "fullname": nm, "e": 0.5, "a": 2.0, "q": 1.0,
                      "i_deg": 10.0, "source": "test"}
             )
             solar_system._kepler_position = lambda raw, jd: (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
-            solar_system._render_comet_orbit = lambda cid, el, pos, tstr: (
+            solar_system._render_oblique = lambda scene=None, body=None: (
                 Image.new("RGB", (200, 100), (10, 14, 26)),
                 {"markers": [{"id": "periapsis", "label": "近日点", "au": 1.0, "px": [50, 40]}],
                  "scale": {"px_per_AU": 20.0},
@@ -1461,7 +1458,7 @@ class BugSweepV0392Tests(unittest.TestCase):
         finally:
             solar_system._comet_elements = old_elem
             solar_system._kepler_position = old_kepler
-            solar_system._render_comet_orbit = old_render
+            solar_system._render_oblique = old_render
         markers = r.structuredContent["figure"]["markers"]
         self.assertEqual([m["panel"] for m in markers], [1, 2])
         self.assertEqual(markers[0]["px"], [50, 40])
@@ -1627,31 +1624,28 @@ class CometRenderRegressionTests(unittest.TestCase):
             scene["range_au"] = range_au
         return ss, scene
 
-    def _comet_marker_px(self, scene, co):
-        import math
-        hi = 60.0
-        for c in scene["comets"].values():
-            if not c.get("error") and c["proj_au"] > 0:
-                hi = max(hi, c["proj_au"] * 1.15)
-        lo = 0.30
-        r = 620.0 * (math.log10(co["proj_au"]) - math.log10(lo)) / (math.log10(hi) - math.log10(lo))
-        ang = math.radians(co["eclLon"])
-        return 750 + r * math.cos(ang), 750 + r * math.sin(ang)
+    def _comet_marker_px(self, ss, scene, co):
+        """彗星マーカーの画素位置（描画と同じ View で投影した 3D の実位置）。"""
+        v = ss._oblique_view(scene)
+        px, py, _d = v.project(ss._xyz_from_au_lonlat(co["au"], co["eclLon"],
+                                                      co.get("eclLat") or 0.0))
+        return px, py
 
     def test_comet_tail_is_not_hidden_by_its_own_label_box(self):
         """尾はラベル箱より上に描かれる（箱の中でシアン色が見える）。"""
         import io
         from PIL import Image
         ss, scene = self._scene()
-        png = ss._render_simple(scene)
+        png = ss._render_oblique(scene)
         im = Image.open(io.BytesIO(png)).convert("RGB")
         px = im.load()
         co = scene["comets"]["試験彗星"]
         box = co.get("label_box")
         self.assertTrue(box, "彗星の label_box が残っていない")
-        mx, my = self._comet_marker_px(scene, co)
+        mx, my = self._comet_marker_px(ss, scene, co)
         import math
-        ux, uy = math.cos(math.radians(co["eclLon"])), math.sin(math.radians(co["eclLon"]))
+        _n = math.hypot(mx - 750.0, my - 750.0) or 1.0
+        ux, uy = (mx - 750.0) / _n, (my - 750.0) / _n     # 太陽→彗星（反太陽方向）
         # ラベル箱の内部を通る尾の点を数え、シアン色が残っているか見る
         inside = cyan = 0
         t = 0
@@ -1674,14 +1668,14 @@ class CometRenderRegressionTests(unittest.TestCase):
         import io
         from PIL import Image
         ss, scene = self._scene(comet_lon=17.0)
-        png = ss._render_simple(scene)
+        png = ss._render_oblique(scene)
         im = Image.open(io.BytesIO(png)).convert("RGB")
         px = im.load()
         co = scene["comets"]["試験彗星"]
-        mx, my = self._comet_marker_px(scene, co)
+        mx, my = self._comet_marker_px(ss, scene, co)
         import math
-        ang = math.radians(co["eclLon"])
-        ux, uy = math.cos(ang), math.sin(ang)          # 反太陽方向
+        _n = math.hypot(mx - 750.0, my - 750.0) or 1.0
+        ux, uy = (mx - 750.0) / _n, (my - 750.0) / _n     # 反太陽方向（画面座標）
         sx, sy = (750 - mx), (750 - my)                 # 太陽方向
         sl = math.hypot(sx, sy) or 1.0
         sx, sy = sx / sl, sy / sl
@@ -1703,43 +1697,38 @@ class CometRenderRegressionTests(unittest.TestCase):
                            "尾が太陽側を向いている（反太陽側 {} px / 太陽側 {} px）".format(
                                away, toward))
 
-    def test_accurate_comet_marker_uses_projected_distance(self):
-        """accurate の彗星マーカーは proj_au（正射影）に置く（軌道線に乗る）。"""
+    def test_comet_marker_uses_true_3d_position(self):
+        """彗星マーカーは黄道座標の 3D の実位置（黄経・黄緯）に置く。
+
+        旧 engine="accurate"（真上からの正射影）は黄緯を落とした `proj_au` に置いていた。
+        斜め俯瞰は 3D をそのまま投影するので、黄緯 60° の天体は真距離 10 AU の方向へ
+        置かれ、正射影だけの位置（5 AU）には来ない。両方の位置の画素を測って確かめる。
+        """
         import io
-        import math
         from PIL import Image
+        from space_finder_mcp.orbit_view import expected_px
+
         ss, scene = self._scene(comet_au=10.0)
-        # 合成シーン: 軌道は半径 5 AU の円、彗星は au=10 / proj_au=5
-        scene["routes"] = {"試験彗星": {
-            "name": "試験彗星", "color": (150, 235, 255), "marks": [], "closed": True,
-            "period_days": 100.0, "e": 0.5, "q_au": 5.0, "r_cap_au": None, "typ": "sbdb",
-            "r_max_au": 5.0, "out_of_frame": False,
-            "points": [(5.0 * math.cos(2 * math.pi * k / 360),
-                        5.0 * math.sin(2 * math.pi * k / 360), 0.0) for k in range(361)]}}
         scene["comets"]["試験彗星"].update({"au": 10.0, "proj_au": 5.0, "eclLon": 0.0,
                                             "eclLat": 60.0})
-        png = ss._render_accurate(scene)
+        png = ss._render_oblique(scene)
         im = Image.open(io.BytesIO(png)).convert("RGB")
-        px = im.load()
-        ox, oy = [float(v) for v in scene["origin_px"]]
-        pu = float(scene["px_per_au"])
-        tgt = (150, 235, 255)
+        box = im.load()
+        view = ss._oblique_view(scene)
 
-        def count_at(c, r=12):
+        def bright(pxy, r=6):
             n = 0
-            for y in range(max(0, int(c[1]) - r), min(im.size[1], int(c[1]) + r + 1)):
-                for x in range(max(0, int(c[0]) - r), min(im.size[0], int(c[0]) + r + 1)):
-                    q = px[x, y]
-                    if abs(q[0] - tgt[0]) + abs(q[1] - tgt[1]) + abs(q[2] - tgt[2]) <= 3:
+            for y in range(max(0, pxy[1] - r), min(im.size[1], pxy[1] + r + 1)):
+                for x in range(max(0, pxy[0] - r), min(im.size[0], pxy[0] + r + 1)):
+                    if min(box[x, y]) >= 200:
                         n += 1
             return n
 
-        co = scene["comets"]["試験彗星"]
-        n_au = count_at((ox + co["au"] * pu, oy))
-        n_proj = count_at((ox + co["proj_au"] * pu, oy))
-        self.assertGreater(n_proj, n_au * 2,
-                           "accurate の彗星マーカーが真距離 au に置かれている"
-                           "（au 位置 {} px / proj 位置 {} px）".format(n_au, n_proj))
+        at_3d = expected_px(view, ss._xyz_from_au_lonlat(10.0, 0.0, 60.0))
+        at_proj = expected_px(view, ss._xyz_from_au_lonlat(5.0, 0.0, 0.0))
+        self.assertGreater(bright(at_3d), 20, "3D の実位置に彗星マーカーが無い")
+        self.assertLess(bright(at_proj), 5,
+                        "彗星マーカーが黄緯を落とした正射影位置に置かれている")
 
     def test_comet_orbit_current_position_marker_stays_in_frame(self):
         """comet_orbit: 現在位置マーカーが図の範囲外（画面外）に出ない。"""
@@ -1787,8 +1776,10 @@ class CometRenderRegressionTests(unittest.TestCase):
                                              el["argp_deg"])
         self.assertAlmostEqual(_bx, xp, places=6)
         self.assertAlmostEqual(_by, yp, places=6)
-        img, fig = ss._render_comet_orbit("C/2023 A3", el, (x, y, z2),
-                                          "2026-10-20 00:00 UTC")
+        img, fig = ss._render_oblique(body={"cid": "C/2023 A3", "el": el,
+                                           "pos_xyz": (x, y, z2),
+                                           "when": "2026-10-20 00:00 UTC",
+                                           "kind": "comet"})
         W, H = img.size
         cur = [m for m in fig["markers"] if m["id"] == "current"][0]
         self.assertTrue(cur.get("in_frame"),
