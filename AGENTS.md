@@ -93,6 +93,7 @@ src/space_finder_mcp/
 ├── input_utils.py   # 引数の防御的数値変換（as_int / as_float）
 ├── env_config.py    # リポジトリ直下 .env の読み込み（標準ライブラリのみ）
 ├── *_map.py         # 画像生成系（satellite_map / planetary_map / planetary_rover / sky_overlay）
+├── obs_sheet.py     # observing_sheet（観測判断シート: 判定＋雲量の予報＋衛星＋雨雲を1枚に）
 ├── solar_eclipse.py # solar_eclipse_series（日食の時系列パネル）
 ├── moon_phase.py    # moon_phase_map（月齢マップ: 月齢カレンダー/朔望月パネル）
 ├── swpc.py          # NOAA SWPC（宇宙天気のフォールバック・フレアイベント・認証不要）

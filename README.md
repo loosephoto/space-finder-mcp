@@ -22,7 +22,7 @@
 
 ## 🧭 図の注記（figure/1）— 描画系ツールの自己申告
 
-描画系ツール（`solar_system_now` / `sat_ground_track` / `planetary_orbiter_track` / `planetary_rover_location_map` / `sky_map_with_satellites` / `solar_eclipse_series` / `moon_phase_map` / `astronomy_weather`〔雨雲・降水画像を返すとき〕 / `space_calendar`）は、画像を返すだけでなく **`structuredContent.figure`（`schema: "figure/1"`）** に「その図をどう描いたか」を自己申告します。LLM はピクセルから描画規約を推測できないため（高離心率の軌道を「主天体の周りを回る円」と説明してしまう等）、注記をデータとして渡す設計です。
+描画系ツール（`solar_system_now` / `sat_ground_track` / `planetary_orbiter_track` / `planetary_rover_location_map` / `sky_map_with_satellites` / `solar_eclipse_series` / `moon_phase_map` / `astronomy_weather`〔雨雲・降水画像を返すとき〕 / `space_calendar` / `observing_sheet`）は、画像を返すだけでなく **`structuredContent.figure`（`schema: "figure/1"`）** に「その図をどう描いたか」を自己申告します。LLM はピクセルから描画規約を推測できないため（高離心率の軌道を「主天体の周りを回る円」と説明してしまう等）、注記をデータとして渡す設計です。
 
 - **`view`** — どの面を（`frame`）どの投影で（`projection`）見た図か、なぜその視点なのか（`why`）
 - **`primary`** — 主天体を**焦点**（`at: "focus"`）に置いたか**中心**（`"center"`）に置いたか、焦点と中心のズレ（`center_offset`）
@@ -80,11 +80,12 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 
 | 種別 | 出る場所 | 形 |
 |------|----------|-----|
-| **生成画像**（描画系8ツール） | `content` の**先頭行** | `🖼️ [生成した画像を開く: 対象](file:///…) ｜ 保存先: \`…\`` |
+| **生成画像**（描画系10ツール） | `content` の**先頭行** | `🖼️ [生成した画像を開く: 対象](file:///…) ｜ 保存先: \`…\`` |
 | **検索した画像**（`search_space_images`） | 各項目の説明の直後 | `🖼️ [画像を開く: タイトル](URL)` |
 | **検索した音声**（`search_space_audio`） | 各項目の直後 | `🎧 [音声を開く: タイトル](URL)` |
 | **検索した動画**（`search_space_videos`） | 各項目の直後 | `🎬 [動画を開く: タイトル](URL)` ＋ `🖼️ [画像を開く: タイトル のポスター](URL)` |
 | **気象衛星の実画像**（`weather_satellite_now`） | `content` の**先頭行** | `🖼️ [生成した画像を開く: ひまわり9号 最新画像](URL または file:///…)` ＋ 保存先 |
+| **観測判断シート**（`observing_sheet`） | `content` の**先頭行** | `🖼️ [生成した画像を開く: 観測判断シート（地点）](file:///…)` ＋ 保存先 |
 | **気象庁の雨雲・降水画像**（`astronomy_weather`） | 各画像の直前行 | `🖼️ [画像を開く: ラベル](気象庁のページURL)` |
 | **EO Dashboard のサムネイル**（`eodashboard_detail`） | 説明の直後・画像の直前 | `🖼️ [画像を開く: タイトル のサムネイル](URL)` |
 | **APOD の画像URL**（`apod`） | タイトルの直後 | `🖼️ [画像を開く: タイトル](URL)`（動画の日は `🎬 [動画を開く: タイトル]`） |
@@ -254,7 +255,24 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 
 ## 🛠️ ツール一覧
 
-登録ツールは **67本**（宇宙・天文イベントカレンダー 4本（`space_calendar` / `calendar_events` / `calendar_event_add` / `calendar_event_remove`）＋ロケット打ち上げ・逆引き 4本＋NASA日次・宇宙天気 3本＋メディア 3本＋各国宇宙機関・地球観測 20本（うち **AWS Earth Search 2本**（`stac_collections` / `stac_search`））＋衛星・軌道 6本＋天体位置・画像合成 7本＋観測支援・天文データ 13本（うち**天体カタログ 2本**（`object_lookup` / `catalog_search`）・**系外惑星 1本**（`exoplanet_search`））＋気象衛星リアルタイム画像 1本＋天体異常系 3本＋**学術文献 2本**）。全67ツールを実呼び出しで検証済みです（外部APIの障害・レート制限時は、例外ではなく CallToolResult のエラーとして返します）。
+登録ツールは **67本**。カテゴリ別の内訳:
+
+| カテゴリ | 本数 | 補足 |
+|:--|--:|:--|
+| 宇宙・天文イベントカレンダー | 4 | `space_calendar` / `calendar_events` / `calendar_event_add` / `calendar_event_remove` |
+| ロケット打ち上げ・逆引き | 4 | 打ち上げ予定（世界・中国・ロシア）と「最初/記録」の逆引き |
+| NASA 日次・宇宙天気 | 3 | APOD・NEO・宇宙天気 |
+| メディア（画像/音声/動画） | 3 | NASA Image & Video Library ほか |
+| 各国宇宙機関・地球観測 | 20 | うち **AWS Earth Search 2本**（`stac_collections` / `stac_search`） |
+| 衛星・軌道 | 6 | TLE・地上軌道・ISS/天宮の現在位置ほか |
+| 天体位置・画像合成 | 7 | 太陽系俯瞰・星空・日食・月齢・カレンダー画像ほか |
+| 観測支援・天文データ | 14 | うち **観測判断シート 1本**（`observing_sheet`）・**天体カタログ 2本**（`object_lookup` / `catalog_search`）・**系外惑星 1本**（`exoplanet_search`） |
+| 気象衛星リアルタイム画像 | 1 | `weather_satellite_now` |
+| 天体異常系 | 3 | 火球・接近・衝突リスク |
+| 学術文献 | 2 | OpenAlex/Crossref・NTRS/J-STAGE/CiNii |
+| **合計** | **67** | 全ツールを実呼び出しで検証済み |
+
+外部APIの障害・レート制限時は、例外ではなく `CallToolResult` のエラーとして返します。
 
 | ツール | できること | データ源 | 認証 |
 |--------|-----------|---------|------|
@@ -315,7 +333,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `sat_ground_track` | 任意の人工衛星（ISS・ひので・ハッブル等）の現在位置と地上軌道を地球地図にプロットした画像を返す。CelesTrak TLE + Skyfield(SGP4) で真下の点・高度・速度を計算し、NASA Blue Marble 地図に軌道トレイルを重ねる | CelesTrak + Skyfield + Blue Marble | 不要 |
 | `planetary_orbiter_track` | 任意の天体（月・火星・水星・タイタン等）を周回する探査機の現在位置と軌道トレイルを、その天体の地図にプロットした画像を返す。JPL Horizons の状態ベクトルを IAU 自転モデルで天体固定座標（緯度経度・高度）に変換し、NASA Trek の等角図法地図に重ねる。`span_deg=360`で天体全面表示にも対応。**過去機（かぐや等）は運用終了を案内し、落点が公表されている機体は落点を地点マーカーで描いた地図（`figure.kind="impact_site_map"`）を返す**。`sites="apollo"`（または `"apollo11"`〜`"apollo17"`, `"all"`, `"newcrater"`）で **地点マーカー図**（`figure.kind="landing_site_map"`／木星は `impact_site_map`）も返す。**接近通過（フライバイ）対応**: `orbiter` にミッション名（`europa clipper`/`juice`/`bepicolombo`/`hera`/`psyche`/`lucy`/`new horizons`/`はやぶさ2`/`juno`/`parker solar probe`/`solar orbiter`/`mmx` と和名）を指定でき、`flyby=True` で**最接近（CA）を自動探索**して表示時刻と地図の中心を CA に置き直し、最接近時刻・高度・相対速度・最接近点を図と `structuredContent.closest_approach` に出す（`ca_hours` で探索範囲、既定 ±24 時間。天体半径の50倍より遠い「最小」は接近通過と呼ばない）。対象天体に**ガリレオ衛星（イオ・エウロパ・ガニメデ・カリスト）**を追加（全球画像ベースマップ）。**地点マーカー図（`sites=`）は18天体**（月・火星・水星・金星・タイタン・ベスタ・ケレス・イオ・エウロパ・ガニメデ・カリスト・木星・土星・天王星・海王星・冥王星・ベンヌ・リュウグウ）に対応し、**全球等角図がある天体は地形画像の上に、無い天体（リュウグウ）は緯度経度グリッドの上に**公表座標を描く（全球図は NASA Trek のタイル／USGS の全球モザイク／**Hubble OPAL の全球図**（気体惑星）／New Horizons・OSIRIS-REx のモザイクを天体ごとに自動選択） | JPL Horizons + NASA Trek / USGS Astrogeology / Hubble OPAL (STScI) / NASA NSSDC / PDS | 不要 |
 | `planetary_rover_location_map` | 任意の天体面を移動する探査ローバーの現在地をその天体の地図中心に示した画像（走行経路・着陸点）。火星は NASA MMGIS の位置データと NASA Trek の等角地図を合成。**同じ天体にあるほかの人工物着陸地点は黄枠●で重ねる**（`show_sites=false` で非表示。例: 火星のマルス2/3号・バイキング、月ではサーベイヤー3号）。**フォボス（MMX / IDEFIX）にも対応** — 着陸地点は未公表なので `site_lat`/`site_lon`（東向き正）または `site_lon_w`（西向き正）で任意の場所を描き、未指定なら**着陸候補条件の緯度帯 ±30°**を明示。IAU/U.S. Gazetteer に着陸地点が公表されれば自動検出。**月にも対応** — `body="moon"` でアポロ11〜17号・ルノホート1/2号・玉兔号/玉兔2号を表示。**2 段構えの図**（左: Trek の月面地図に着陸地点と近隣の着陸地点／右: **メートル単位の局地サイトプラン**）で、LM・ALSEP・LRRR・LRV 最終駐車地点・アメリカ国旗を**一次情報が公開する距離＋方位だけ**から求めた位置で描く。位置の公開値がない機材（例: アポロ11号の旗）は**図には描かず**凡例に「位置の公開値なし」と記す | NASA MMGIS + Trek WMTS ＋ USGS 公式全球図 + IAU Gazetteer ＋ **NASA NSSDCA（月面遺跡座標）** ＋ **NASA ALSJ（旗・LRV 最終駐車地点）** | 不要 |
-| `weather_satellite_now` | GEO/LEO気象衛星19機（ひまわり9号・GOES-18/19・Meteosat・FY・GK-2A・INSAT・NOAA-20/-21・SNPP・Metop-B/C・FY-3D）の公開画像。GEOは最新フレーム、LEOは日次全球合成。**ひまわり9号は気象庁 気象衛星センター（MSC）のリアルタイム画像（601×601・10分間隔・約23時間保持）から全帯域を取得**する: 可視 `b03`／赤外 `b13`／水蒸気 `b08`／夜間マイクロフィジクスRGB `ngt`／昼間RGB `dms`／自然色 `dnc`。**夜の観測可否を判断する図では可視は真っ暗なので `band="infrared"` か `"night_rgb"` を使う**。配信元は実画像の代わりに全黒のプレースホルダ（実測 550×550 1bit・444 バイト）を返すことがあるため、**JPEG マジック・バイト数・色数を測って実画像と確認できたフレームだけ**を返し（`structuredContent.image_verified`）、駄目なら次の時刻・予備源（himawari.asia の true color）へ送る。取得不可は `restricted`/`unavailable`/`non_image_product` の理由コードで返す | JMA MSC(himawari real-time)/himawari.asia(NOAA STAR)/EUMETSAT WMS/CMA-NSMC/KMA/IMD/NASA GIBS | 不要 |
+| `weather_satellite_now` | GEO/LEO気象衛星19機（ひまわり9号・GOES-18/19・Meteosat・FY・GK-2A・INSAT・NOAA-20/-21・SNPP・Metop-B/C・FY-3D）の公開画像。GEOは最新フレーム、LEOは日次全球合成。**ひまわり9号は気象庁 気象衛星センター（MSC）のリアルタイム画像（601×601・10分間隔・約23時間保持）から全帯域を取得**する: 可視 `b03`／赤外 `b13`／水蒸気 `b08`／夜間マイクロフィジクスRGB `ngt`／昼間RGB `dms`／自然色 `dnc`。**夜の観測可否を判断する図では可視は真っ暗なので `band="infrared"` か `"night_rgb"` を使う**。配信元は実画像の代わりに全黒のプレースホルダ（実測 550×550 1bit・444 バイト）を返すことがあるため、**JPEG マジック・バイト数・色数を測って実画像と確認できたフレームだけ**を返し（`structuredContent.image_verified`）、駄目なら次の時刻・予備源（himawari.asia の true color）へ送る。**`lat`/`lon`/`place` を渡すと、全円盤＋日本域拡大＋観測地点マーカー＋明暗スケールを1枚（1500×880）に焼き込んだ合成パネルを返す**（緯度経度→画素は静止軌道・東経140.7度からの透視投影。地点マーカーの実画素と切り出しの色数を `structuredContent.panel` に残す）。取得不可は `restricted`/`unavailable`/`non_image_product` の理由コードで返す | JMA MSC(himawari real-time)/himawari.asia(NOAA STAR)/EUMETSAT WMS/CMA-NSMC/KMA/IMD/NASA GIBS | 不要 |
 | `observing_sheet` | **天体観測の判断シートを1枚で**返す。判定（○/△/×＝その夜の予報雲量の最大値）＋雲量の推移（今夜／明日の夜・1時間ごと・月の出線・20/50% の色分け）＋ひまわり9号 赤外（日本域を拡大・観測地点マーカー）＋気象庁ナウキャスト（実況／+60分）。**予報（雲量の棒）と実況（衛星・雨雲）はタグで区別**し、雨雲は「現在」であることを明記（今夜の降水は雲量の予報を見る）。日本国外・気象庁の障害時は衛星だけの軽量版に落ちる | Open-Meteo + Skyfield / JMA ひまわり9号(MSC) / JMA ナウキャスト | 不要 |
 | `space_calendar` | **宇宙・天文イベントカレンダー**（月グリッド図＋JSON）。打ち上げ（LL2 の月範囲クエリ・日付精度 `net_precision` が Day/Hour/Minute/Second の行だけを日付セルに配置）・天文現象（Skyfield のローカル計算: 月相・二十四節気・惑星の衝/合/内合・最大離角・日食月食・流星群）・公開イベント（国立天文台＋**JAXA の施設一般公開・特別公開**＝ファン!ファン!JAXA! の施設見学ページと宇宙科学研究所のイベント表。告知済みのみを載せ、取得日を窓にして毎日取り直します）・**小天体イベント（小惑星接近・火球観測。`neo_close_approach` / `fireball_reports` の呼び出し結果を蓄積したもの＝カレンダー自身は JPL を叩かないので未蓄積の月は空）**・自分の予定を重ねて描く。取得結果は**蓄積ストア**に溜め、要求月 M に対して窓 [M-1, M+2] を確保し**未取得・期限切れの月だけ**取りに行く（2回目は API 0 回）。NASA の公式リスト（WP REST）と照合した行には公式URLを付与 | Launch Library 2 + JPL DE421/Skyfield + 国立天文台 + JAXA + nasa.gov | 不要 |
 | `calendar_events` | 蓄積済みイベントの一覧（**図を描かず外部APIも呼ばない**軽い経路）。打ち上げ・天文現象・**小惑星接近・火球観測（`neo_close_approach` / `fireball_reports` の呼び出しで蓄積されたぶん）**・公開イベント・自分の予定を日付順に返す | 蓄積ストア（ローカル） | 不要 |
@@ -560,6 +578,9 @@ A: astronomy_weather(place="マウナケア") → 夜間の観測チャンス時
 Q: 東京で明日の星空は?
 A: astronomy_weather(place="東京") → 雲が少ない夜間を抽出＋気象庁の雨雲・降水画像（解析雨量＋今夜の予報＋ナウキャスト）を添付
 A: astronomy_weather(place="東京", include_rain=False) → 雨雲画像なしで予報のみ
+Q: 今夜の観測は大丈夫? 図で見せて
+A: observing_sheet(place="東京") → 判定（○/△/×）＋雲量の推移＋ひまわり赤外＋雨雲を1枚に
+A: observing_sheet(place="マウナケア") → 気象庁の範囲外では衛星なし/雨雲なしでも判定と雲量は出る（軽量版）
 ```
 
 出典: open-meteo.com（CC BY 4.0 データ）
@@ -1085,6 +1106,7 @@ src/space_finder_mcp/
 ├── uk_datahub.py        # uk_stac_collections / uk_stac_search（英国 EO DataHub）
 ├── cnes.py              # cnes_status（フランス CNES THEIA/GEODES）
 ├── weather_astro.py     # astronomy_weather（天体観測用天気, Open-Meteo, 薄明=太陽高度＋月相＋気象庁雨雲画像）
+├── obs_sheet.py         # observing_sheet（観測判断シート: 判定＋雲量の予報＋衛星＋雨雲の合成図）
 ├── jma_rain.py          # 気象庁の雨雲・降水画像の合成（解析雨量・降水予報＋ナウキャスト/雷）
 ├── weather_sat.py       # weather_satellite_now（GEO/LEO気象衛星の公開画像, 19機＋理由コード）
 ├── power.py             # power_climate（NASA POWER 気候・太陽エネルギー統計）

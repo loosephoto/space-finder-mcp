@@ -39,7 +39,8 @@
 
 自前で図を描くツール（solar_system_now / sat_ground_track / planetary_orbiter_track /
 planetary_rover_location_map / sky_map_with_satellites / solar_eclipse_series /
-moon_phase_map / astronomy_weather〔雨雲・降水画像を返すとき〕 / space_calendar）は、
+moon_phase_map / astronomy_weather〔雨雲・降水画像を返すとき〕 / space_calendar /
+observing_sheet）は、
 `structuredContent.figure` に「どう描いたか」を自己申告する。
 
 - 主天体は**円錐曲線の焦点**に置く（`primary.at = "focus"`）。楕円の中心に置くと、高離心率の
@@ -47,6 +48,10 @@ moon_phase_map / astronomy_weather〔雨雲・降水画像を返すとき〕 / s
 - **e ≥ 1 / 半長軸 a < 0 の軌道（C/彗星など）を楕円として描かない**。閉じていない＝遠点は
   存在せず、`a(1+e)` は負になる。`conic_from_elements` が kind を ellipse/parabola/hyperbola
   に判定するので、双曲線は枝として有限距離まで描く。
+- **時間の意味が違うものを同じ図に混ぜない**。予報（雲量の棒）と実況（衛星画像・雨雲レーダー）を
+  1枚に置くときは、カード見出しに「予報」「実況」のタグを出し、`notes` にも「どちらが予報か」を書く
+  （`observing_sheet` の実例: 「今夜の判断」と「今の実況」を同じ画面に並べたとき、読み手が
+  『今夜は雨』と誤読した）。
 - 注記(`notes`)は `figure_notes` などで**数値から生成**する。手書きにすると図と注記がドリフトする。
 - `content` にも `figure_text_block()` で同じ注記を出し、docstring に
   「`figure.notes` は要約・言い換えせず、そのまま引用すること」と書く（LLM 向けの指示）。
