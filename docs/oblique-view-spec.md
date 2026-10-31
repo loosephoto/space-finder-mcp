@@ -54,6 +54,15 @@ class RadialScale:
     r_px: float = 620.0             # 画面半径（現行 R0 と同義）
 ```
 
+**カメラの公開（v0.47.0）**: `solar_system_now(elevation=, azimuth=, dolly=)` が
+`scene["oblique_elevation" | "oblique_azimuth" | "oblique_dolly"]` に入れ、
+`solar_system.oblique_camera(scene)` が**唯一の取得口**になる。範囲は仰角 **0–90**（既定 34）／
+方位 **-360–360**（内部で 0–360 に正規化、既定 28）／dolly **0–20**（既定 4.2）。
+範囲外・非数値は**クランプせずエラー結果**（`elevation=120` → 「0〜90 の範囲で指定してください」、
+`dolly="abc"` → 「数値で指定してください」）。描画・題名・`figure.view.description`・
+`structuredContent.camera` は**すべてこの関数から取る**（定数 `OBLIQUE_EL` の直書き禁止＝
+片方だけ既定値で残ると、指定した角度と注記の角度が食い違う）。
+
 写像（すべて AU 入力・px 出力）:
 
 ```
@@ -107,14 +116,15 @@ for θ in range(0, 360, 6):
 
 | ツール | 入力 | 推奨 `RadialScale` | 備考 |
 |---|---|---|---|
-| `solar_system_now` | 惑星＋探査機＋彗星＋小惑星 | `log`, `hi=auto`（現行同じ自動拡張） | `view="oblique"` を追加。既定は `top` |
+| `solar_system_now` | 惑星＋探査機＋彗星＋小惑星 | `log`, `hi=auto`（現行同じ自動拡張） | 既定 oblique（Phase 3/4 で切替済み）。**カメラは `elevation`/`azimuth`/`dolly` で公開**（v0.47.0） |
 | `_render_orbit_plane`（彗星・小惑星） | 1天体＋現在位置 | `linear`, `hi=fit` | 二重円錐の全景。`_verify_range_draw` を流用 |
 | `comet_apparition` | 彗星の日付列 | 変更なし | 別種の図（光度曲線） |
 | `planetary_orbiter_track` | 天体中心・km | `linear`, km→AU 換算 | Phase 3 以降 |
 | `solar_system_now(probe=…, route=True)` | Horizons 点列 | `log` | 破線経路＋最接近◇。刻みは §7(l) |
 
 互換性のため、`range_au` / `engine` / `route` / `probes` の意味は変えない。
-`view` は追加引数のみ（既定 `"top"` で従来と同一出力）。
+`projection` は**互換引数のみ**（`"top"` を渡しても斜め俯瞰で描き、その旨を `figure.notes` に出す）。
+視点は `elevation` / `azimuth` / `dolly` で指定する（v0.47.0）。
 
 ## 6. 性能（実測）
 
@@ -148,7 +158,7 @@ for θ in range(0, 360, 6):
 12. **探査機の刻みは遭遇期間で別に取る**。40 日刻みだと木星近傍の点間隔が 0.558 AU
     （枠 12 AU で 22 px）でスイングバイが多角形になる。6 日刻みなら 0.085 AU（3.3 px）。
 
-## 7.6 実装状況（Phase 2 完了）
+## 7.6 実装状況（Phase 2 完了・当時の記録）
 
 - `solar_system_now(..., projection="top"|"oblique")` を追加。`oblique` は `_render_oblique(scene)` で描き、
   `_verify_oblique(scene, png)` が **描画と同じ `orbit_view.View`** から期待 px を出してマーカー（白点）の
@@ -164,6 +174,8 @@ for θ in range(0, 360, 6):
   `--figures` 43 経路すべて `verify_ok=True`（`solar_system_now` の全ケースが既定 oblique で通過）。
 - 既存の回帰テストのうち simple 固有の画素検証（経路の破線・720 分割）を見る 3 件は
   `projection="top"` を明示する形に変更した（simple 経路の検証はそのまま残す）。
+  **※ Phase 4 で `_render_simple` 自体を廃止したため、この記述は当時のもの。現在 `projection="top"` は
+  斜め俯瞰を描く（真上図が欲しいときは `elevation=90`）。**
 - `_render_oblique` は `scene["range_report"]`（`lo_au`/`hi_au`/`skipped_orbits`/`out_of_range`。
   経路の目印が範囲外なら `type="route_mark"`）を simple 版と同じ形で埋める。
 
@@ -187,10 +199,11 @@ for θ in range(0, 360, 6):
 - **Phase 2 — 選択肢として公開**
   `solar_system_now(view="oblique")` と `_render_orbit_plane(view=…)`。
   `scripts/check-tools.py` に `view="oblique"` のケースを 2 件追加（ハレー、ボイジャー）。
-  既定は `top` のまま。
+  既定は `top` のまま。→ **完了（2026-10-30、既定 oblique へ切替済み）**
 - **Phase 3 — 既定を切り替える**（要ユーザー判断）
   既定 `oblique` にし、`top` を残す。README / SKILL.md / CLAUDE.md のファイル構成に
-  `orbit_view.py` を追記（**同一コミット**）。
+  `orbit_view.py` を追記（**同一コミット**）。→ **完了（2026-10-30）**。`top` は Phase 4 で
+  「斜め俯瞰を描く互換引数」になった（`elevation=90` が実質の真上図）。
 
 ## 9. テスト計画
 
@@ -212,7 +225,9 @@ for θ in range(0, 360, 6):
 - 決定: **弱い透視あり（dolly=4.2）** / **対数動径を維持**。
 - 実装上の注意: 引数名は `projection`（`view` は既存の表示モード
   `system`/`comet_orbit`/`apparition` が使っているため）。
-- 決定: **既定 `projection="oblique"` に切替済み**（2026-10-30。`engine="accurate"` 明示時は accurate 優先）。`projection="top"` で従来の真上図。
+- 決定: **既定 `projection="oblique"` に切替済み**（2026-10-30。`engine="accurate"` 明示時は accurate 優先）。
+  **`projection="top"` は Phase 4 で真上図を廃止した**ので、現在は指定しても斜め俯瞰で描き、
+  その旨を `figure.notes` に出す。真上図が欲しいときは **`elevation=90`** を使う（v0.47.0）。
 - `engine="accurate"`（matplotlib・線形距離）を明示したときは **accurate を優先**し、斜め俯瞰は
   使わない（勝手に描画方式を変えない）。その旨を `figure.notes` に自動で出す。
   `engine="auto"` 等で accurate が自動降格した場合は oblique のまま描く。
@@ -263,3 +278,28 @@ for θ in range(0, 360, 6):
   最終パスを統合先でも維持して防いでいる。
 - 旧 `_render_orbit_plane` に無かった太陽の光暈を追加したところ、近日点側の曲線色が薄まり
   `verify_curve` の測定値が 0.57 → 2.77 AU に跳ねた（`ok=False`）。**軌道面図には光暈を描かない**。
+
+---
+
+## 12. Phase 5 — カメラの引数化（v0.47.0・実装済み）
+
+**目的**: 視点を**呼び出し側の変数**にする。固定の 1 枚は「宇宙は平面」「軌道は同じ面」という
+誤概念を作るため、同じ瞬間を真上・斜め・真横で出せることを仕様に含める（教育用途の要件）。
+
+| 引数 | 範囲 | 既定 | 効果 |
+|:--|:--|--:|:--|
+| `elevation` | 0–90 | 34 | 0=真横（軌道が線に潰れる）／90=真上（旧 真上図の構図） |
+| `azimuth` | -360–360 | 28 | 黄道面内の回転（内部で 0–360 に正規化） |
+| `dolly` | 0–20 | 4.2 | 透視の強さ＝カメラ距離（画面半径の倍数）。0 で完全な正射影 |
+
+- 実装: `solar_system.oblique_camera(scene)` が唯一の取得口。`_oblique_view` / 題名 / 互換注記 /
+  `view_spec.description` / `structuredContent.camera` の 5 か所がここを通る。
+  検証は `solar_system._split_camera_arg()`（非数値・範囲外はエラー結果）。
+- 実測: `{"elevation":74,"azimuth":210,"dolly":1.5}` → `camera` が同値で返り `verify.ok=True`。
+  `elevation=120` → `elevation は 0〜90 の範囲で指定してください（受け取った値: 200）`。
+  既定 vs `elevation=90` の画素差 `diff_bbox=(169,23,1407,1322)`・平均絶対差 3.94/255。
+  dolly=0 では反対側の点が中心対称（正射影）／dolly=4.2 では非対称（透視）。
+- テスト: `tests/test_camera_args.py` 9 件。全体 555 件 OK。ゲート 8 本 exit 0。
+- **未対応（次の Phase）**: `planetary_orbiter_track`（月・衛星・周回機の天体中心図）は視点固定。
+  衛星軌道の傾斜（木星の衛星で 0.0°〜164.9°）を見せる主戦場はこちらなので、同じ引数を
+  天体中心スケール（km）に載せ替える必要がある（§10 の「火星中心・km」と同じ課題）。
