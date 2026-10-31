@@ -303,3 +303,7 @@ for θ in range(0, 360, 6):
 - **未対応（次の Phase）**: `planetary_orbiter_track`（月・衛星・周回機の天体中心図）は視点固定。
   衛星軌道の傾斜（木星の衛星で 0.0°〜164.9°）を見せる主戦場はこちらなので、同じ引数を
   天体中心スケール（km）に載せ替える必要がある（§10 の「火星中心・km」と同じ課題）。
+  → **解消（v0.48.0）**: `planetary_orbiter_track(mode="orbit3d", elevation=, azimuth=, dolly=)`
+  として実装した（`src/space_finder_mcp/orbit3d.py`）。`View` を**線形・km**で使い、投影の
+  実装は 1 本のまま。傾斜角は Horizons の接触軌道要素（`REF_PLANE=BODY EQUATOR` の IN）を
+  使う（天体固定の点列フィットは自転で数度ずれる。実測: LRO で −1.2°、MRO で −0.02°）。

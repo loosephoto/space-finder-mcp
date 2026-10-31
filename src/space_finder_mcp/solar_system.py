@@ -859,17 +859,10 @@ def _split_camera_arg(value, name, lo, hi):
 
     範囲外を黙ってクランプすると「指定した角度で描いた」と誤解されるので、
     数値でない・範囲外はエラー文を返して呼び側がエラー結果にする。
+    実装は `orbit_view.one_camera_arg` に 1 本化してある（`planetary_orbiter_track` と共有）。
     """
-    if value is None or (isinstance(value, str) and not str(value).strip()):
-        return None, None
-    v = as_float(value, None)
-    if v is None:
-        return None, "{} は数値（度）で指定してください（受け取った値: {!r}）".format(
-            name, str(value)[:40])
-    if not (lo <= v <= hi):
-        return None, "{} は {:g}〜{:g} の範囲で指定してください（受け取った値: {:g}）".format(
-            name, lo, hi, v)
-    return v, None
+    from .orbit_view import one_camera_arg
+    return one_camera_arg(value, name, lo, hi)
 
 
 def _obl_rgba(color, alpha):

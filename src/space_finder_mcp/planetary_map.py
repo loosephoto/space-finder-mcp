@@ -1522,13 +1522,188 @@ def _sites_result(body: str, key, out_px: int = 1000):
         })
 
 
+@ttl_cache(TTL_SHORT, maxsize=256)
+def _horizons_elements_cached(cmd: str, center: str, jd_minute: float) -> dict:
+    """Horizons の接触軌道要素（REF_PLANE=BODY EQUATOR）を 1 時刻ぶん取得する。
+
+    傾斜角は「慣性系の軌道面」と「自転軸」のなす角。点列の平面フィットでも出せるが、
+    軌道面の歳差で数度ずれる（実測: LRO で −1.2°、MRO で −0.02°）。Horizons の
+    IN/QR/AD をそのまま使えば JPL と一致する。失敗時は呼び側がフィットへ落ちる。
+    """
+    data = {"format": "text", "COMMAND": "'" + cmd + "'", "OBJ_DATA": "'NO'",
+            "MAKE_EPHEM": "'YES'", "EPHEM_TYPE": "'ELEMENTS'",
+            "CENTER": "'" + center + "'", "REF_PLANE": "'BODY EQUATOR'",
+            "TLIST": "'{:.6f}'".format(float(jd_minute) / 1440.0), "OUT_UNITS": "'KM-S'"}
+    r = requests.post("https://ssd.jpl.nasa.gov/api/horizons.api", data=data,
+                      headers=UA, timeout=(30, 60))
+    r.raise_for_status()
+    txt = r.text
+    if "No ephemeris" in txt or "No such record" in txt:
+        raise ValueError(txt.strip().splitlines()[-1][:200])
+    m = re.search(r"IN\s*=\s*([-+0-9.Ee]+)", txt)
+    if not m:
+        raise ValueError("Horizons の応答に IN（傾斜角）がありません")
+    q = re.search(r"QR\s*=\s*([-+0-9.Ee]+)", txt)
+    ad = re.search(r"AD\s*=\s*([-+0-9.Ee]+)", txt)
+    return {"inclination_deg": float(m.group(1)),
+            "q_km": float(q.group(1)) if q else None,
+            "ad_km": float(ad.group(1)) if ad else None,
+            "ref_plane": "BODY EQUATOR"}
+
+
+def _horizons_elements(cmd: str, center: str, jd: float) -> dict:
+    """分単位に丸めたキーでキャッシュ（軌道要素は1分でほとんど変わらない）。"""
+    return _horizons_elements_cached(cmd, center, round(float(jd) * 1440.0))
+
+
+def _pole_axis_in_frame(body: dict, jd) -> tuple:
+    """天体の自転軸（北極方向の単位ベクトル）を、**入力ベクトルと同じ座標系**で返す。
+
+    `_j2000_to_body` は「入力座標系 → 天体固定」の回転行列 M。逆像は Mᵀ なので、
+    基底ベクトルの像の第 3 成分が Mᵀ の第 3 行＝(0,0,1) の逆像になる。
+    """
+    cols = [_j2000_to_body(body, *e, jd)
+            for e in ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))]
+    return (cols[0][2], cols[1][2], cols[2][2])
+
+
+def _orbit_inclination(points, body: dict, jd) -> tuple:
+    """慣性系の点列から軌道傾斜角（0–180°）と逆行を求める。
+
+    天体固定座標の点列を使うと、天体の自転で座標系が回るため長い時間窓で数度ずれる
+    （実測: 火星は 90 分で約 22°回る）。傾斜角は「慣性系の軌道面の法線」と
+    「同時刻の自転軸」のなす角で定義するのが正しい。
+    """
+    from .orbit3d import orbit_normal
+    n = orbit_normal(points)
+    p = _pole_axis_in_frame(body, jd)
+    dot = max(-1.0, min(1.0, n[0] * p[0] + n[1] * p[1] + n[2] * p[2]))
+    ang = math.degrees(math.acos(dot))
+    return ang, ang > 90.0
+
+
+def _orbit3d_result(body_cfg, trail3d, cur, *, ja, en="", when_str="", cam=None,
+                    minutes=90.0, step_disp="5", is_ca=False,
+                    inclination_deg=None, retrograde=None, elements=None) -> CallToolResult:
+    """天体中心 3D の斜め俯瞰（`mode="orbit3d"`）の結果を組み立てる。
+
+    地表図（等角地図）は「真下の点の軌跡」なので軌道面の傾きが読めない。ここでは
+    天体固定の 3D 位置（緯度・経度・高度 → km）を作り、`orbit_view` と同じ弱い透視で
+    斜めから描く。カメラ（仰角・方位・dolly）は `solar_system_now` と同じ引数・同じ検証。
+    """
+    from .orbit3d import render
+    cam = cam or {}
+    el = float(cam.get("elevation", 34.0))
+    az = float(cam.get("azimuth", 28.0))
+    dl = float(cam.get("dolly", 4.2))
+    try:
+        r = render(body_cfg, trail3d, cur, ja=ja, en=en, when_str=when_str,
+                   elevation=el, azimuth=az, dolly=dl, out_px=1000, minutes=float(minutes),
+                   inclination_deg=inclination_deg, retrograde=retrograde,
+                   inclination_source=("horizons_elements" if elements
+                                       else "inertial_fit"))
+    except Exception as e:      # 1点不足・数値異常などでツールを落とさない
+        return CallToolResult(
+            content=[TextContent(type="text", text="3D 軌道の描画に失敗しました: {}".format(e))],
+            structuredContent={"error": "orbit3d failed: {}".format(str(e)[:200]),
+                               "body": body_cfg.get("ja", ""), "orbiter": ja,
+                               "points": len(trail3d)})
+    jpeg = encode_jpeg(r["img"])
+    imgc = ImageContent(type="image", data=base64.b64encode(jpeg).decode("ascii"),
+                        mimeType="image/jpeg",
+                        altText="{} の{}周回軌道（3D 斜め俯瞰）".format(ja, body_cfg["ja"]))
+    out_path = save_output(jpeg, "planetary_orbiter_track_3d", "jpg")
+    proj = "弱い透視 dolly={:g}".format(dl) if dl > 0 else "正射影"
+    fig = figure_payload(
+        kind="orbit3d",
+        title="{} の{}周回軌道（3D 斜め俯瞰）".format(ja, body_cfg["ja"]),
+        view=view_spec("body_equatorial", "oblique",
+                       "{}の赤道面を仰角{:g}°・方位{:g}°から見た 3D 俯瞰（{}）".format(
+                           body_cfg["ja"], el, az, proj),
+                       why="地表図（真下の点の軌跡）では読めない軌道面の傾き・高度・"
+                           "進行方向を示すため"),
+        primary=primary_spec(body_cfg["ja"], "center",
+                             note="天体は半径 {} km の球として実寸で中心に置く".format(
+                                 body_cfg["radius"])),
+        scale=scale_spec("linear", to_scale=True, unit="km",
+                         px_per_unit=r["px_per_km"],
+                         exaggerated=["現在位置マーカー（実寸ではない）"]),
+        markers=[{"id": "current", "label": "{} {}".format(ja, "最接近（CA）" if is_ca else "現在位置"),
+                  "lat": round(cur["lat"], 4), "lon": round(cur["lon"], 4),
+                  "altitude_km": round(cur["alt_km"], 2),
+                  "px": r["verify"]["current_px"]}],
+        notes=figure_notes(extra=[
+            "軌道面の傾斜 i = {:g}°（{}の赤道面に対して・{}）。**地表図からは読み取れない値**".format(
+                r["inclination_deg"], body_cfg["ja"], "逆行" if r["retrograde"] else "順行"),
+            ("傾斜角は JPL Horizons の接触軌道要素（REF_PLANE=BODY EQUATOR の IN）をそのまま使った"
+             if r.get("inclination_method") == "horizons_elements" else
+             ("傾斜角は慣性系の軌道面の法線と同時刻の自転軸から算出した（Horizons の状態ベクトル）"
+              if r.get("inclination_method") == "inertial_fit" else
+              "⚠️ 傾斜角は天体固定座標の平面フィットによる概算（天体の自転で座標系が回るため"
+              "長い時間窓では数度ずれる）")),
+            ("Horizons の軌道要素: 近点高度 {:,.0f} km・遠点高度 {:,.0f} km（同じ時刻の接触軌道）".format(
+                elements["q_km"] - float(body_cfg["radius"]),
+                elements["ad_km"] - float(body_cfg["radius"]))
+             if (elements and elements.get("q_km") and elements.get("ad_km")) else ""),
+            "高度 {:g} 〜 {:g} km（中心距離 {:g} 〜 {:g} km）".format(
+                r["altitude_min_km"], r["altitude_max_km"],
+                r["center_distance_min_km"], r["center_distance_max_km"]),
+            "時刻 {} ・トレイルは前後 {:g} 分（{} 刻み）の JPL Horizons 状態ベクトル".format(
+                when_str, float(minutes), step_disp),
+            "天体の円盤は実寸。軌道の奥側は暗く、天体の陰に入る区間はさらに暗く描いている",
+            "画面の長さは天体中心からの距離に比例する（{:.4f} px/km）".format(r["px_per_km"]),
+            "近点（緑）・遠点（青）は、画面上で離れていれば破線の輪、重なるほど近ければ"
+            "軌道上の目盛り＋高度で示す。灰色の直線は自転軸（北極方向）",
+            ("マーカーは最接近（CA）の位置。高度 {:.1f} km".format(cur["alt_km"]) if is_ca
+             else "●は指定時刻の位置。高度 {:.1f} km・速度 {} km/s".format(
+                 cur["alt_km"],
+                 "{:.2f}".format(cur["speed_kms"]) if cur.get("speed_kms") else "?")),
+        ]),
+        caption="{} の{}周回軌道（{}）。軌道傾斜 {:g}°・高度 {:g}〜{:g} km。".format(
+            ja, body_cfg["ja"], when_str, r["inclination_deg"],
+            r["altitude_min_km"], r["altitude_max_km"]),
+        verify=r["verify"],
+    )
+    lines = [
+        media_link_line("{} の{}周回軌道（3D 斜め俯瞰）".format(ja, body_cfg["ja"]),
+                        path=out_path, kind="figure"),
+        "🛰 **{}** の{}周回軌道（{}）".format(ja, body_cfg["ja"], when_str),
+        "🧭 軌道傾斜 **i = {:g}°**（{}の赤道面に対して・{}）".format(
+            r["inclination_deg"], body_cfg["ja"], "逆行" if r["retrograde"] else "順行"),
+        "📏 高度 {:g} 〜 {:g} km（中心距離 {:g} 〜 {:g} km）".format(
+            r["altitude_min_km"], r["altitude_max_km"],
+            r["center_distance_min_km"], r["center_distance_max_km"]),
+        "🎥 カメラ: 仰角{:g}°・方位{:g}°・{}".format(el, az, proj),
+        "🛤 トレイル: 前後 {:g} 分（{} 刻み）".format(float(minutes), step_disp),
+    ]
+    fig_text = figure_text_block(fig)
+    return CallToolResult(
+        content=[imgc] + [TextContent(type="text", text="\n".join(
+            x for x in lines if x.strip()))] + ([TextContent(type="text", text=fig_text)]
+                                                if fig_text else []),
+        structuredContent={
+            "body": body_cfg["ja"], "orbiter": ja, "when": when_str,
+            "view": "orbit3d", "camera": r["camera"],
+            "inclination_deg": r["inclination_deg"], "retrograde": r["retrograde"],
+            "inclination_method": r.get("inclination_method"),
+            "altitude_min_km": r["altitude_min_km"], "altitude_max_km": r["altitude_max_km"],
+            "center_distance_min_km": r["center_distance_min_km"],
+            "center_distance_max_km": r["center_distance_max_km"],
+            "px_per_km": r["px_per_km"], "points": len(trail3d),
+            "figure": fig, "image_path": out_path,
+        },
+    )
+
+
 def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
                             when: Optional[str] = None,
                             minutes: int = 90, step: Optional[float] = None,
                             zoom: Optional[int] = None, span_deg: float = 120.0,
                             out_px: int = 900,
                             sites: Optional[str] = None,
-                            flyby: bool = False, ca_hours: float = 48.0) -> CallToolResult:
+                            flyby: bool = False, ca_hours: float = 48.0,
+                            mode: str = "map",
+                            elevation=None, azimuth=None, dolly=None) -> CallToolResult:
     '''任意の天体（月・火星・水星・タイタン等）を周回する探査機、または接近通過（フライバイ）・スイングバイする探査機の現在位置と航路を、その天体の地図にプロットした画像を返す。`flyby=True` で最接近（CA）を自動探索し、最接近時刻・高度・相対速度・最接近点を出す（軌道表示の対象は月・火星・水星・タイタン・ベスタ・ケレス＋ガリレオ衛星）。
 
     例:「LROの現在位置を月面地図で」「MROの火星での現在地」「火星周回機の位置」「BepiColombo の水星接近通過（フライバイ）の航路」「ジュノーのエウロパフライバイ」「エウロパ・クリッパーの火星スイングバイ」
@@ -1581,6 +1756,16 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
             衝突痕**（2026-08-05 06:35 UTC。直径 18 m・19.4759°N 266.7138°E）を返す。
             記録上いちばん新しいのは人工物の衝突（ファルコン9上段, 2026-08-05）、
             **自然衝突ではマクゲッチンが最新**（この規模は月で平均 132 年に1回）。
+        mode: "map"（既定）＝天体面の等角地図に真下の点の軌跡を描く／
+            **"orbit3d"＝天体を中心に置いた 3D の斜め俯瞰**。地表図では読めない
+            **軌道面の傾斜角・高度の幅・進行方向（順行/逆行）**を図と数値で示す
+            （周回機の軌道を「斜めから立体的に」見たいとき・教育用途はこちら）。
+            "3d"/"orbit"/"oblique3d" も同じ。
+        elevation: 3D ビューのカメラ仰角（度, 0〜90。既定 34）。0 で真横（軌道面が線に見える
+            ＝傾斜が最も分かる）、90 で真上（軌道が円に見える）。mode="orbit3d" でのみ効く。
+        azimuth: 3D ビューのカメラ方位（度, -360〜360。既定 28）。黄道面内の回転。
+        dolly: 透視の強さ＝カメラ距離（画面半径の倍数, 0〜20。既定 4.2）。0 で完全な正射影。
+        （elevation/azimuth/dolly は範囲外・非数値なら黙ってクランプせずエラー結果を返す）
 
     インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
     content の先頭へ「🖼️ [生成した画像を開く: …](file:///…) ｜ 保存先: `…`」という
@@ -1765,25 +1950,61 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
         )
     lat0, lon0, alt0 = cur["lat"], cur["lon"], cur["alt_km"]
     speed_kms = cur["speed_kms"]
+    # カメラ引数（仰角・方位・dolly）は入口で検証する。範囲外は黙ってクランプしない
+    # （「指定した角度で描いた」と誤解されるため）。実装は orbit_view に 1 本化。
+    from .orbit_view import camera_args as _camera_args
+    _cam, _cam_err = _camera_args(elevation, azimuth, dolly)
+    if _cam_err:
+        return CallToolResult(
+            content=[TextContent(type="text", text=_cam_err)],
+            structuredContent={"error": _cam_err, "elevation": str(elevation),
+                               "azimuth": str(azimuth), "dolly": str(dolly)})
+    _step_disp = ("{:g}".format(step) if step >= 1 else "{:.0f} 秒".format(step * 60))
 
     # トレイル点（現在位置を含む）を1リクエストの TLIST バッチで取得（高精度・高速）
     n = max(3, int(minutes / step))
     jds = [jd_now + i * step / 1440.0 for i in range(-n, n + 1)]
     trail = []
+    trail3d = []          # 3D ビュー用（緯度・経度・高度）
+    trail_j2000 = []      # 傾斜角の算出用（慣性系の生ベクトル）
     trail_errors = []
     try:
         vecs = _horizons_states(cmd, body_cfg["center"], jds)
         for jd, (x, y, z, vx, vy, vz) in zip(jds, vecs):
             st = _vec_to_state(body_cfg, x, y, z, vx, vy, vz, jd)
             trail.append((st["lon"], st["lat"]))
+            trail3d.append({"lon": st["lon"], "lat": st["lat"], "alt_km": st["alt_km"]})
+            trail_j2000.append((x, y, z))
     except Exception:
         # バッチ失敗時は逐次フォールバック
         for i in range(-n, n + 1):
             try:
                 st = _state(body_cfg, cmd, jd_now + i * step / 1440.0)
                 trail.append((st["lon"], st["lat"]))
+                trail3d.append({"lon": st["lon"], "lat": st["lat"], "alt_km": st["alt_km"]})
             except Exception as ex:
                 trail_errors.append({"offset_min": i * step, "error": str(ex)[:120]})
+
+    # 天体中心 3D の斜め俯瞰（mode="orbit3d"）。地表図の前で分岐する（地図は取得しない）。
+    _mode = str(mode or "map").strip().lower()
+    if _mode in ("orbit3d", "3d", "orbit", "oblique3d"):
+        incl = retro = None
+        elems = None
+        try:
+            elems = _horizons_elements(cmd, body_cfg["center"], jd_now)
+            incl = float(elems["inclination_deg"])
+            retro = incl > 90.0
+        except Exception:
+            elems = None
+        if incl is None and len(trail_j2000) >= 3:
+            try:
+                incl, retro = _orbit_inclination(trail_j2000, body_cfg, jd_now)
+            except Exception:
+                incl = retro = None
+        return _orbit3d_result(body_cfg, trail3d, cur, ja=ja, en=en, when_str=tstr,
+                               cam=_cam, minutes=float(minutes), step_disp=_step_disp,
+                               is_ca=is_ca, inclination_deg=incl, retrograde=retro,
+                               elements=elems)
 
     try:
         # タイル取得・切り出し・投影は共通ルーチン（surface_map）。投影と検証が

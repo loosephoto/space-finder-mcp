@@ -27,6 +27,7 @@ uv run python scripts/check-tools.py --only sat_tle,apod   # 変更したツー�
 |:--|:--|
 | ツール追加/削除 | 全件実行（`check-tools.py`）／`README.md` ツール表・`SKILL.md`・`server.py` の登録を同期 |
 | 描画パラメータの引数化（カメラ角度等） | **既定値で従来と同一の画素**になること（`ImageChops.difference(...).getbbox()` で確認）／範囲外・非数値が**エラー結果**になること／`--fuzz` と `--figures`。実測は `tests/test_camera_args.py`（既定 34/28/4.2・`dolly=0` で反対側の点が中心対称＝正射影・`dolly=4.2` では非対称） |
+| 傾斜角・軌道面の物理量を出す変更 | 値の**出どころを 1 つに決める**（例: 軌道傾斜は Horizons の接触軌道要素 `BODY EQUATOR` の IN。天体固定座標の点列フィットは自転で回るため数度ずれる＝実測 LRO −1.24°/MRO −0.02°）。フォールバックしたら `inclination_method` と注記に**概算である旨**を残す。検証は `tests/test_orbit3d.py`（幾何・定義・自己検証）と `--figures` |
 | 画像生成の変更 | 画像が出ること（`blocks` に `image` がある）＋デコード可能・非単色。**リファクタなら旧実装とバイト比較**して等価性を確認 |
 | フォント探索の変更 | `--fonts` で解決したフォントが**日本語グリフを持つ**こと（cmap 検証）。Windows のパスだけを列挙すると macOS / Linux が豆腐になる。`SPACE_FINDER_FONT` での明示指定も試す |
 | キャッシュの変更 | 2回目がキャッシュヒットすること（リクエスト数0）／**エラーが固定化しないこと**／キャッシュ値の書き換えが他呼び出しへ漏れないこと／**同じ引数の並行呼び出しが1回にまとまる（single-flight）こと** |

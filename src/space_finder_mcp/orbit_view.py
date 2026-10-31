@@ -65,6 +65,48 @@ class Camera:
     dolly: float = 4.2
 
 
+# --------------------------------------------------------------------------- カメラ引数の検証
+# 範囲は「描ける意味がある値」で決める（仰角 0=真横, 90=真上／dolly 0=正射影）。
+# 範囲外を黙ってクランプすると「その角度で描いた」と誤解されるので、エラー文を返して
+# 呼び側がエラー結果にする。実装は 1 か所だけ置き、各ツールはここを呼ぶ。
+CAMERA_RANGES = {"elevation": (0.0, 90.0), "azimuth": (-360.0, 360.0), "dolly": (0.0, 20.0)}
+
+
+def one_camera_arg(value, name: str, lo: float, hi: float):
+    """カメラ引数 1 つを検証する。戻り: (値 or None, エラー文 or None)。"""
+    if value is None or (isinstance(value, str) and not str(value).strip()):
+        return None, None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None, "{} は数値（度）で指定してください（受け取った値: {!r}）".format(
+            name, str(value)[:40])
+    if v != v or v in (float("inf"), float("-inf")):
+        return None, "{} は有限の数値で指定してください（受け取った値: {!r}）".format(
+            name, str(value)[:40])
+    if not (lo <= v <= hi):
+        return None, "{} は {:g}〜{:g} の範囲で指定してください（受け取った値: {:g}）".format(
+            name, lo, hi, v)
+    return v, None
+
+
+def camera_args(elevation=None, azimuth=None, dolly=None):
+    """3 つのカメラ引数をまとめて検証する。
+
+    戻り: (指定された値だけを入れた dict, 最初のエラー文 or None)。
+    方位は 0–360 に正規化する（-28 と 332 は同じ向き）。
+    """
+    out, errs = {}, []
+    for name, value in (("elevation", elevation), ("azimuth", azimuth), ("dolly", dolly)):
+        lo, hi = CAMERA_RANGES[name]
+        v, err = one_camera_arg(value, name, lo, hi)
+        if err:
+            errs.append(err)
+        elif v is not None:
+            out[name] = (v % 360.0) if name == "azimuth" else v
+    return out, (errs[0] if errs else None)
+
+
 @dataclass(frozen=True)
 class RadialScale:
     """動径の写像。kind="log"（既定）は 0.3〜190 AU のような広い範囲を 1 枚に収める。
