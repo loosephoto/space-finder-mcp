@@ -1186,10 +1186,15 @@ def _oblique_scene(scene):
             continue
         _cpx, _cpy, _cd = view.project(_xyz_from_au_lonlat(
             _au0, _d0.get("eclLon") or 0.0, _d0.get("eclLat") or 0.0))
+        # 探査機の現在位置マーカーは表示範囲内のときだけ描いている。範囲外では
+        # **描いていない**ので、検証に「そこに画素がある」と期待させない（同じ規則を共有する）。
+        _marker_drawn = _oblique_visible(view, _au0)
         projections.append({
             "name": _n0, "eclLat": float(_d0.get("eclLat") or 0.0),
             "eclLon": float(_d0.get("eclLon") or 0.0), "au": LIGHT_DAY_AU,
-            "probe_marker_px": [round(_cpx), round(_cpy)],
+            "probe_marker_px": [round(_cpx), round(_cpy)] if _marker_drawn else None,
+            "probe_marker_drawn": bool(_marker_drawn),
+            "probe_au": float(_au0),
             "color": list(_d0.get("color") or (255, 214, 90)),
             "eta": _d0.get("light_day_eta_date"),
             "eta_method": _d0.get("light_day_eta_method"),
@@ -2144,7 +2149,12 @@ def _verify_light_day_draw(png, scene):
             rep["missing"].append("{} の1光日到達方向ラベル文字が画素で見つからない（{} px）".format(
                 pj.get("name"), row["label_text_px"]))
         mpx = pj.get("probe_marker_px")
-        if mpx:
+        if not pj.get("probe_marker_drawn", True):
+            # 表示範囲外で**描いていない**マーカーは検査しない（描画と同じ可視判定）。
+            row["probe_marker_checked"] = False
+            row["probe_marker_skip"] = "探査機 {:.2f} AU は表示範囲外のため描いていない".format(
+                float(pj.get("probe_au") or 0.0))
+        elif mpx:
             found = 0
             for yy in range(max(0, int(mpx[1]) - 18), min(H, int(mpx[1]) + 19)):
                 for xx in range(max(0, int(mpx[0]) - 18), min(W, int(mpx[0]) + 19)):

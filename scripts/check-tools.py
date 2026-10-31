@@ -409,6 +409,10 @@ FIGURES_EXTRA_CALLS = (
     ("solar_system_now[1光日/表示範囲外]", "solar_system_now",
      {"probe": "ボイジャー1号", "range_au": 10}, {"figure_kind": "heliocentric_overview"}),
     # 日食は既定引数だと「その観測地で見える食」が無い場合があるため、可視の例で叩く
+    # 1光日リング/◇は範囲外・探査機マーカーも範囲外（描いていないものを検証で探さない）
+    ("solar_system_now[1光日/範囲外の探査機]", "solar_system_now",
+     {"probe": "ボイジャー1号", "probe2": "ボイジャー2号", "route": True, "range_au": 40,
+      "when": "2026-10-31T00:00:00Z"}, {"figure_kind": "heliocentric_overview"}),
     # 天体中心 3D の斜め俯瞰（mode="orbit3d"）。軌道傾斜は Horizons の接触軌道要素から出す経路。
     ("planetary_orbiter_track[3D斜め俯瞰/LRO]", "planetary_orbiter_track",
      {"body": "moon", "orbiter": "lro", "mode": "orbit3d",
