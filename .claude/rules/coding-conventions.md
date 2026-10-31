@@ -54,6 +54,7 @@ observing_sheet）は、
   （`observing_sheet` の実例: 「今夜の判断」と「今の実況」を同じ画面に並べたとき、読み手が
   『今夜は雨』と誤読した）。
 - 注記(`notes`)は `figure_notes` などで**数値から生成**する。手書きにすると図と注記がドリフトする。
+- **同じ描画パラメータを図・題名・注記・`structuredContent` が使うときは、1 か所の関数から取る**（例: カメラは `solar_system.oblique_camera(scene)`。定数 `OBLIQUE_EL` を直接書くと、引数で上書きできるようになった瞬間に題名だけ既定値で残る）。利用者向けの数値引数は**範囲外を黙ってクランプしない**（「その値で描いた」と誤解される）。クランプする仕様なら `notes` と SC に実値を出す。
 - `content` にも `figure_text_block()` で同じ注記を出し、docstring に
   「`figure.notes` は要約・言い換えせず、そのまま引用すること」と書く（LLM 向けの指示）。
 - **LLM 向けの指示文を `content` に書かない**。`content` は人間が読むチャネルなので、

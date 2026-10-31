@@ -838,6 +838,40 @@ OBLIQUE_AZ = 28.0
 OBLIQUE_DOLLY = 4.2          # カメラ距離 = dolly × 画面半径（弱い透視）
 
 
+def oblique_camera(scene=None):
+    """scene のカメラ設定（仰角・方位・dolly）を返す。
+
+    `solar_system_now(elevation=, azimuth=, dolly=)` が scene に入れた値を使う。
+    未指定（キーなし・None）は既定（34°・28°・4.2）。描画と注記が同じ値を見るよう、
+    **角度は必ずこの関数から取る**（片方だけ既定値で書くと図と注記が食い違う）。
+    """
+    s = scene or {}
+    el = s.get("oblique_elevation")
+    az = s.get("oblique_azimuth")
+    dl = s.get("oblique_dolly")
+    return (OBLIQUE_EL if el is None else float(el),
+            OBLIQUE_AZ if az is None else float(az),
+            OBLIQUE_DOLLY if dl is None else float(dl))
+
+
+def _split_camera_arg(value, name, lo, hi):
+    """カメラ引数を検証する。戻り: (値 or None, エラー文 or None)。
+
+    範囲外を黙ってクランプすると「指定した角度で描いた」と誤解されるので、
+    数値でない・範囲外はエラー文を返して呼び側がエラー結果にする。
+    """
+    if value is None or (isinstance(value, str) and not str(value).strip()):
+        return None, None
+    v = as_float(value, None)
+    if v is None:
+        return None, "{} は数値（度）で指定してください（受け取った値: {!r}）".format(
+            name, str(value)[:40])
+    if not (lo <= v <= hi):
+        return None, "{} は {:g}〜{:g} の範囲で指定してください（受け取った値: {:g}）".format(
+            name, lo, hi, v)
+    return v, None
+
+
 def _obl_rgba(color, alpha):
     """色＋不透明度 → RGBA（Pillow 用）。"""
     a = int(max(0, min(255, round(float(alpha) * 255))))
@@ -880,7 +914,8 @@ def _oblique_view(scene):
     """scene → orbit_view.View（斜め俯瞰・対数/線形動径・弱い透視）。"""
     from .orbit_view import Camera, RadialScale, View
     hi, lo, kind = _oblique_hi(scene)
-    return View(Camera(OBLIQUE_EL, OBLIQUE_AZ, OBLIQUE_DOLLY),
+    el, az, dl = oblique_camera(scene)
+    return View(Camera(el, az, dl),
                 RadialScale(kind, lo_au=lo, hi_au=hi, r_px=620.0),
                 OBLIQUE_W / 2.0, OBLIQUE_W / 2.0)
 
@@ -1530,14 +1565,15 @@ def _oblique_scene(scene):
         ok = [k for k, v in (scene.get(key) or {}).items() if not v.get("error")]
         if ok:
             parts.append(label + "・".join(ok))
-    title = "太陽系・現在位置（斜め俯瞰・黄道面を仰角{:g}°から）".format(OBLIQUE_EL)
+    _cam_el, _cam_az, _cam_dl = oblique_camera(scene)
+    title = "太陽系・現在位置（斜め俯瞰・黄道面を仰角{:g}°・方位{:g}°から）".format(_cam_el, _cam_az)
     if parts:
         title += "＋" + "／".join(parts)
     dr.text((26, 16), title, font=load_font(30, True), fill=(255, 255, 255, 255))
     sub = ("{} ・{}・数値=太陽からの距離AU ・弱い透視（カメラ距離 {:.1f}×画面半径）".format(
         scene.get("time_utc", ""),
         "線形縮尺（相対距離は正確）" if linear else "対数縮尺（内惑星〜星間空間を1枚に）",
-        OBLIQUE_DOLLY))
+        _cam_dl))
     if not linear:
         sub += " ・画面上の距離はAUに比例しない"
     dr.text((26, 70), sub, font=load_font(18), fill=(195, 205, 235, 255))
@@ -2679,7 +2715,8 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
                      comet2: Optional[str] = None, engine: str = "oblique",
                      view: str = "system", days: int = 180,
                      projection: str = "oblique",
-                     route: bool = False, range_au: "float | str" = 0) -> CallToolResult:
+                     route: bool = False, range_au: "float | str" = 0,
+                     elevation=None, azimuth=None, dolly=None) -> CallToolResult:
     """太陽を中心とした太陽系の惑星・小惑星・探査機・彗星の現在位置図を返す（認証不要）。
 
     例:「太陽系を上から見た図」「今の惑星の位置」「イトカワの今の位置を図で」
@@ -2733,6 +2770,11 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
         projection: 互換引数。描画は常に斜め俯瞰（仰角34°・方位28°・弱い透視。奥ほど暗く
             細い線で描く。画面上の距離はAUに比例しない）。旧 "top" を指定しても斜め俯瞰で
             描き、その旨を figure.notes に出す。
+        elevation: カメラの仰角（度, 0〜90。既定 34）。0 で真横（軌道が線に潰れる）、
+            90 で真上（＝旧「真上図」と同じ構図）。注記・題名にも実値を出す。
+        azimuth: カメラの方位（度, -360〜360。既定 28）。黄道面内の回転。
+        dolly: 透視の強さ＝カメラ距離（画面半径の倍数, 0〜20。既定 4.2）。
+            0 で完全な正射影（遠近が消える）。
         view: "system"(既定)=太陽系俯瞰図 / "comet_orbit"=彗星の軌道面ビュー /
             "asteroid_orbit"=小惑星の閉じた楕円軌道面ビュー /
             "apparition"=彗星の見え方チャート（地心距離・日心距離・予想光度・太陽離角の
@@ -2867,6 +2909,24 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
                                "planet_errors": scene["planet_errors"],
                                "supported": ["1899-07-29", "2053-10-09"]},
         )
+    # カメラ（仰角・方位・dolly）。範囲外は黙ってクランプせずエラー結果にする
+    # （「指定した角度で描いた」と誤解されないため）。
+    _el, _el_err = _split_camera_arg(elevation, "elevation", 0.0, 90.0)
+    _az, _az_err = _split_camera_arg(azimuth, "azimuth", -360.0, 360.0)
+    _dl, _dl_err = _split_camera_arg(dolly, "dolly", 0.0, 20.0)
+    _cam_err = _el_err or _az_err or _dl_err
+    if _cam_err:
+        return CallToolResult(
+            content=[TextContent(type="text", text=_cam_err)],
+            structuredContent={"error": _cam_err, "elevation": str(elevation),
+                               "azimuth": str(azimuth), "dolly": str(dolly)},
+        )
+    if _el is not None:
+        scene["oblique_elevation"] = _el
+    if _az is not None:
+        scene["oblique_azimuth"] = _az % 360.0
+    if _dl is not None:
+        scene["oblique_dolly"] = _dl
     # 表示範囲の指定を解決する（数値 AU / 天体名「火星まで」「木星」/ "fit"=指定天体に合わせる）
     rng_au, rng_why = _resolve_range(range_au, scene)
     if rng_au is None:                       # 解決できない名前は推測せず候補を提示して停止する
@@ -2893,9 +2953,10 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
     proj = "oblique"
     compat_notes = []
     if str(projection or "").strip().lower() == "top":
+        _el0, _az0, _ = oblique_camera(scene)
         compat_notes.append(
             "projection=\"top\"（黄道面を真上から見た正射影）は斜め俯瞰に統合したため、"
-            "この図は仰角{:g}°・弱い透視の斜め俯瞰で描いている".format(OBLIQUE_EL))
+            "この図は仰角{:g}°・方位{:g}°・弱い透視の斜め俯瞰で描いている".format(_el0, _az0))
     # 線形縮尺は ±45 AU が枠。遠方の探査機・彗星は枠外になるので対数縮尺へ落とす
     # （経路を重ねるなら形が本当の軌道と一致する線形の方が良いので、収まるなら維持する）。
     if scale_kind == "linear" and (has_probe or has_com):
@@ -3250,7 +3311,8 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
         title="太陽系の現在位置（太陽中心・黄道面俯瞰）",
         view=view_spec("ecliptic_plane", "oblique",
                        "黄道面を斜め上（仰角{:g}°・方位{:g}°・弱い透視）から見た日心俯瞰図。"
-                       "太陽は図の中心、画面上の距離はAUに比例しない".format(OBLIQUE_EL, OBLIQUE_AZ),
+                       "太陽は図の中心、画面上の距離はAUに比例しない".format(
+                           oblique_camera(scene)[0], oblique_camera(scene)[1]),
                        why=why_txt),
         primary=primary_spec("太陽", "center"),
         scale=_scale_with_range(scale_spec(scale_kind, to_scale=(scale_kind == "linear"),
@@ -3298,6 +3360,9 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
                                                  "で統一。探査機ごとの light_days / light_day_eta_date は"
                                                  " structuredContent.probes を参照"},
                            "figure": fig, "image_path": out_path,
+                           "camera": {"elevation_deg": oblique_camera(scene)[0],
+                                      "azimuth_deg": oblique_camera(scene)[1],
+                                      "dolly": oblique_camera(scene)[2]},
                            "range_au": (scene.get("range_au") or None),
                            "range_resolved": rng_why,
                            "out_of_range": (rng_rep.get("out_of_range") or []),
