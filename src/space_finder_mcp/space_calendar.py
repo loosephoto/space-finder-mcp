@@ -588,8 +588,17 @@ def space_calendar(year: Optional[int] = None, month: Optional[int] = None, plac
         lat: 緯度（place の代わりに数値で指定）。
         lon: 経度（同上）。
     """
-    year_i = as_int(year, None, 1900, 2200)
-    month_i = as_int(month, None, 1, 12)
+    year_i = as_int(year, None)
+    month_i = as_int(month, None)
+    if year is not None and year_i is None:
+        return _err("year は西暦の4桁の整数で指定してください（例: 2026）。受け取った値: {!r}"
+                    .format(str(year)[:40]))
+    if month is not None and month_i is None:
+        return _err("month は 1〜12 の整数で指定してください。受け取った値: {!r}"
+                    .format(str(month)[:40]))
+    if month_i is not None and not (1 <= month_i <= 12):
+        return _err("month は 1〜12 の範囲で指定してください（{}月は存在しません）"
+                    .format(month_i))
     res = _resolve_place(place, lat, lon)
     if res is None:
         return _err("観測地を解決できませんでした: {!r}。地名を変えるか lat/lon を数値で指定してください".format(place))
@@ -598,6 +607,15 @@ def space_calendar(year: Optional[int] = None, month: Optional[int] = None, plac
     today = (dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) + dt.timedelta(hours=off)).date()
     year_i = year_i or today.year
     month_i = month_i or today.month
+    # 天体暦（de421）は 1899-07〜2053-10 のみ。範囲外は Skyfield が
+    # EphemerisRangeError を投げて例外がツール外へ漏れるので、入口で弾く。
+    from .ground_view import EPH_MAX_UTC, EPH_MIN_UTC
+    if ((year_i, month_i) < (EPH_MIN_UTC.year, EPH_MIN_UTC.month)
+            or (year_i, month_i) > (EPH_MAX_UTC.year, EPH_MAX_UTC.month)):
+        return _err("天体暦（JPL DE421）は {} 〜 {} の期間だけを収録しています。"
+                    "year/month をこの範囲内で指定してください（受け取った値: {}年{}月）"
+                    .format(EPH_MIN_UTC.strftime("%Y-%m"), EPH_MAX_UTC.strftime("%Y-%m"),
+                            year_i, month_i))
     kinds_set, kerr = _parse_kinds(kinds)
     if kerr:
         return _err(kerr)
@@ -738,6 +756,11 @@ def calendar_event_remove(id: Optional[str] = None, title: Optional[str] = None,
 
     既に無い場合や既に削除済みの場合はエラーにせず「該当なし」を返します（冪等）。
     title だけで複数該当したときは**削除せず候補を提示**します（推測して消さない）。
+
+    Args:
+        id: 予定の ID（`calendar_events` の一覧に出る。最も確実）。
+        title: 予定の題名（部分一致ではなく完全一致）。id が無いときに使う。
+        date: 予定の日付 YYYY-MM-DD（title と併用して1件に絞る）。
     """
     if not id and not title:
         return _err("id か title を指定してください（`calendar_events` で一覧と ID を確認できます）")
@@ -789,8 +812,14 @@ def calendar_events(year: Optional[int] = None, month: Optional[int] = None, pla
         return _err("観測地を解決できませんでした: {!r}".format(place))
     off = _local_tz(res[0], res[1])
     today = (dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) + dt.timedelta(hours=off)).date()
-    year_i = as_int(year, today.year, 1900, 2200)
-    month_i = as_int(month, today.month, 1, 12)
+    year_i = as_int(year, today.year)
+    month_i = as_int(month, today.month)
+    if month is not None and (month_i is None or not (1 <= month_i <= 12)):
+        return _err("month は 1〜12 の範囲で指定してください。受け取った値: {!r}"
+                    .format(str(month)[:40]))
+    if year is not None and year_i is None:
+        return _err("year は西暦の4桁の整数で指定してください。受け取った値: {!r}"
+                    .format(str(year)[:40]))
     kinds_set, kerr = _parse_kinds(kinds)
     if kerr:
         return _err(kerr)

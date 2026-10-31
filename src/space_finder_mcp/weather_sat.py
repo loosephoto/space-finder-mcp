@@ -315,8 +315,9 @@ def weather_satellite_now(satellite="himawari9", band="visible", size=550,
     """世界の気象観測衛星のリアルタイム実画像を返す（認証不要）。
 
     例:「ひまわり9号の最新画像」「気象衛星の今の雲画像」「ひまわりの赤外線画像」
-    現在は日本の静止気象衛星 ひまわり9号 のフルディスク実画像に対応（気象庁 MSC の
-    リアルタイム画像。601×601 JPEG・10分間隔）。**夜の観測可否を判断する図**では
+    この関数はひまわり9号（気象庁 MSC のリアルタイム画像。601×601 JPEG・10分間隔）を
+    担当する。ほかの 18 機は `weather_satellite_now_extended`（公開ツール
+    `weather_satellite_now` の実体）が配信元ごとに取得する。**夜の観測可否を判断する図**では
     可視光は真っ暗なので `band="infrared"`（または `"night_rgb"`）を使う。
 
     戻り: structuredContent に JSON（衛星・帯域・鮮度・画像URL/保存パス・実画像の検証結果）、
@@ -507,6 +508,37 @@ def _ext_fetch(s,size):
   raise ValueError("EarthCARE QuickLookなし")
  raise ValueError("拡張プロバイダ未実装")
 def weather_satellite_now_extended(satellite="himawari9",band="visible",size=550,lat=None,lon=None,place=None):
+ """世界の気象観測衛星のリアルタイム実画像を返す（認証不要）。
+
+    例:「ひまわり9号の最新画像」「気象衛星の今の雲画像」「ひまわりの赤外線画像」
+    ひまわり9号は気象庁 MSC のフルディスク（全帯域・地点マーカー付きパネル）から、
+    それ以外の 18 機（GOES-18/19・Meteosat・FY・GK-2A・INSAT・NOAA-20/-21・SNPP・
+    Metop-B/C・FY-3D・EarthCARE 等）は EUMETSAT WMS / NOAA STAR / CMA-NSMC / KMA /
+    IMD / NASA GIBS / JAXA EORC の公開画像から取得します。
+
+    戻り: structuredContent に JSON（衛星・帯域・鮮度・画像URL・保存パス）、content に
+    表示用テキスト＋インライン画像。取得できない衛星は理由コード
+    （unavailable / restricted / non_image_product）と理由を返します。
+
+    インライン画像を表示できないハーネス（CLI系・Android系の codex / opencode など）向けに、
+    画像本体より前に「🖼️ [画像を開く](URL または file:///…)」というアイコン付きリンクを
+    必ず出します。回答時はこのリンクをそのまま提示してください。
+
+    Args:
+        satellite: 衛星名（既定 himawari9）。和名・略号も可（例 "ひまわり9号", "goes18",
+            "meteosat11", "fy4b", "gk2a", "insat3dr", "noaa20", "snpp", "metopb",
+            "fy3d", "earthcare"）。
+        band: ひまわり9号の帯域。visible（可視・昼のみ）/ infrared（赤外・昼夜）/
+            water_vapor / night_rgb（夜間マイクロフィジクスRGB）/ day_rgb / true_color。
+            旧名（"1d"/"3d"/"8d"/"vis"/"ir"/"wv"）も可。**ひまわり以外は配信元の固定
+            プロダクトを使うため無視**される。
+        size: 出力サイズの希望 px（**互換引数**）。配信元の解像度が優先されるため、
+            実際の大きさは structuredContent.size_px を見ること。
+        lat: 観測地点の緯度（任意。**ひまわり9号のみ有効**）。
+        lon: 観測地点の経度（任意。lat と併用）。
+        place: 地点名（マーカーのラベル。任意。例 "東京"）。lat/lon/place を指定すると
+            全円盤＋日本域拡大＋地点マーカーの1枚パネル（1500×880）を返す。
+ """
  size=as_int(size,550,200,1808);s=_ext_canon(satellite)
  if s in _EXT_UNAVAILABLE:
   code,msg=_EXT_UNAVAILABLE[s];return CallToolResult(content=[TextContent(type="text",text=msg)],structuredContent={"error":code,"satellite":satellite,"message":msg})

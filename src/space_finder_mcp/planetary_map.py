@@ -10,7 +10,8 @@ import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import TTL_SHORT, ttl_cache
-from .surface_map import (add_legend_band, draw_marker, draw_markers, fit_font_for_width,
+from .surface_map import (add_legend_band, clamp_note, draw_marker, draw_markers,
+                         fit_font_for_width,
                          graticule_view, image_view, marker_scan_radius, panel_placement,
                          surface_view, tile_failure_note, verify_marker, verify_markers)
 from .name_common import split_names
@@ -1026,6 +1027,7 @@ def _impact_site_result(body_cfg: dict, info: dict, span_deg: float = 60.0,
             imp.get("note", ""),
             "出典: " + imp.get("source", ""),
             tile_failure_note(sv),          # タイルが欠けたら「背景色のまま」と明示する
+            clamp_note(sv),                 # 端／極で切り詰めたら「描いた範囲」を明示する
         ]),
         caption=f"{info['ja']} の{body_cfg['ja']}面落下地点（{ns} {abs(lat):.2f}° / {ew} {abs(lon):.2f}°、"
                 f"{imp.get('place', '')}、{imp.get('when_utc', '')}）。"
@@ -1487,7 +1489,7 @@ def _sites_result(body: str, key, out_px: int = 1000):
                              note="天体面の地図なので主天体は図の中心に置いていない"),
         scale=scale_spec("linear", to_scale=True, unit="deg",
                          exaggerated=[f"{pt_label}マーカー（実寸ではない）"]),
-        markers=marks, notes=figure_notes(extra=list(notes) + [tile_failure_note(sv)]),
+        markers=marks, notes=figure_notes(extra=list(notes) + [tile_failure_note(sv), clamp_note(sv)]),
         caption="{}。マーカーは公表された地点座標に置いたもの{}。".format(
             title + "。" + "、".join("{} {}°{} {}°{}".format(
                 m["numeral"], abs(st["lat"]), "N" if st["lat"] >= 0 else "S",
@@ -1946,6 +1948,7 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
             ("" if body_cfg.get("tile") else
              "この天体は全球画像1枚をベースマップに使うため zoom（拡大段階）は指定できない"),
             tile_failure_note(sv),
+            clamp_note(sv),
         ]),
         caption=f"{ja} の{body_cfg['ja']}面位置（{tstr}）。真下の点は {ns} {abs(lat0):.2f}° / "
                 f"{ew} {abs(lon0):.2f}°、高度 {alt0:.1f} km。"

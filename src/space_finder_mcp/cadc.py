@@ -16,7 +16,7 @@ from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_FORECAST, ttl_cache, is_error_result
 from .input_utils import as_int
-from .name_common import resolve_object
+from .name_common import ResolverUnavailable, resolve_object
 
 TAP = "https://ws.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/argus/sync"
 UA = {"User-Agent": "space-finder-mcp/0.13 (MCP; CADC TAP)"}
@@ -95,7 +95,16 @@ def cadc_observations(object_name: Optional[str] = None,
             # 内蔵テーブルに無い名前は Sesame/CDS（SIMBAD・NED 横断）で座標解決する。
             # 以前はここで即エラーにしていたため、M104 / Sombrero / HL Tau / 和名 といった
             # 自然な入力で必ず失敗していた（実測 2026-09）。
-            hit = resolve_object(object_name)
+            try:
+                hit = resolve_object(object_name)
+            except ResolverUnavailable as e:
+                return CallToolResult(
+                    content=[TextContent(type="text", text=(
+                        "天体名の解決サービス（Sesame/CDS）に接続できませんでした: {}\n"
+                        "ra/dec（度）を直接指定するか、内蔵テーブルの星表名"
+                        "（例 'M104', 'NGC 4594'）で指定してください。").format(str(e)[:140]))],
+                    structuredContent={"error": "resolver_unavailable", "object": object_name},
+                )
             if hit:
                 ra, dec = hit["ra_deg"], hit["dec_deg"]
                 object_name = hit["input_name"]

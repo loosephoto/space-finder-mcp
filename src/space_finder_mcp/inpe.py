@@ -12,7 +12,7 @@ from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_error_result
 from .stac_common import parse_bbox, parse_cloud_cover
-from .input_utils import as_int
+from .input_utils import as_int, as_list
 
 STAC = "https://data.inpe.br/bdc/stac/v1"
 UA = {"User-Agent": "space-finder-mcp/0.3 (MCP; INPE BDC STAC)"}
@@ -113,7 +113,7 @@ def inpe_search(collection: str = "CB4-WFI-L4-SR-1", bbox: Optional[str] = None,
             content=[TextContent(type="text", text=f"INPE STAC 検索に失敗しました: {e}")],
             structuredContent={"error": str(e), "source": "data.inpe.br/bdc/stac/v1"},
         )
-    feats = d.get("features", [])
+    feats = as_list(d.get("features"))
     if not feats:
         return CallToolResult(
             content=[TextContent(type="text", text=f"コレクション '{collection}' に条件一致の画像がありませんでした。")],

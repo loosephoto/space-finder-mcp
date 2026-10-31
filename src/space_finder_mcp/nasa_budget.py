@@ -41,8 +41,11 @@ MAX_COOLDOWN = WINDOW        # 実際に待つ上限（秒）。NASA の Retry-A
 
 _lock = threading.Lock()
 _calls: "collections.deque[float]" = collections.deque()
-_cooldown_until = 0.0      # 429 を受けた場合の再開時刻（epoch秒）
-_announced_wait = 0.0      # NASA が告知した待機秒（参考表示用。実際の待機は MAX_COOLDOWN で上限）
+# 429 の待機は**キーごと**に持つ。単一の値だと DEMO_KEY の 429 が、開発者キーで
+# 呼ぶ apod / neo_today まで最大1時間止めてしまう（実測 2026-10-31: note_429(DEMO_KEY)
+# の直後に check("custom-key") が (False, 120.0, 0) を返した）。
+_cooldown_until: dict = {}     # key -> 再開時刻（epoch秒）
+_announced_wait: dict = {}     # key -> NASA が告知した待機秒（参考表示用）
 
 
 class BudgetExceeded(requests.RequestException):
@@ -74,14 +77,14 @@ def _prune(now: float) -> None:
 
 def check(key: Optional[str] = None) -> tuple:
     """呼んでよいか判定する。戻り: (可否, 待つべき秒数, 直近1時間の使用数)。"""
-    global _cooldown_until
     k = key or current_key()
     now = time.time()
     with _lock:
         _prune(now)
         used = len(_calls)
-        if now < _cooldown_until:
-            return False, _cooldown_until - now, used
+        cool = float(_cooldown_until.get(k, 0.0))
+        if now < cool:
+            return False, cool - now, used
         if used >= limit_for(k):
             # 最も古い呼び出しが窓から外れるまで待てば枠が空く
             wait = max(0.0, (_calls[0] + WINDOW) - now) if _calls else 0.0
@@ -105,19 +108,20 @@ def note_429(key: Optional[str] = None, retry_after=None) -> float:
     ``MAX_COOLDOWN``（=1時間）で頭打ちにする。告知値は ``_announced_wait`` に残して
     案内文に含める（APIキーを設定すべき根拠になる）。
     """
-    global _cooldown_until, _announced_wait
+    global _announced_wait
+    k = key or current_key()
     wait = RETRY_AFTER_FALLBACK
     try:
         if retry_after is not None:
             v = float(str(retry_after).strip())
             if v > 0:
-                _announced_wait = v
+                _announced_wait[k] = v
                 wait = min(v, MAX_COOLDOWN)
     except (TypeError, ValueError):
         pass
     now = time.time()
     with _lock:
-        _cooldown_until = max(_cooldown_until, now + wait)
+        _cooldown_until[k] = max(float(_cooldown_until.get(k, 0.0)), now + wait)
     return wait
 
 
@@ -160,14 +164,19 @@ def blocked_message(key: Optional[str] = None) -> str:
     if ok:
         return ""
     k = key or current_key()
-    if time.time() < _cooldown_until:
+    if time.time() < float(_cooldown_until.get(k, 0.0)):
+        ann = float(_announced_wait.get(k, 0.0))
         extra = ""
-        if _announced_wait > MAX_COOLDOWN * 1.5:
-            extra = (f"NASA 側は{human_wait(_announced_wait)}の待機を告知していますが、"
+        if ann > MAX_COOLDOWN * 1.5:
+            extra = (f"NASA 側は{human_wait(ann)}の待機を告知していますが、"
                      "まず上限の1時間後に再試行します。")
-        return (f"NASA API から一時的な制限（429）を受けました。{human_wait(wait)}後に自動で再試行します。"
-                f"（DEMO_KEY は1時間 {DEMO_LIMIT}リクエスト/IP の共有枠です。NASA_API_KEY に"
-                f"無料の開発者キーを設定すると緩和されます。）{extra}")
+        head = (f"NASA API から一時的な制限（429）を受けました。{human_wait(wait)}後に自動で再試行します。")
+        if k == DEMO_KEY:
+            head += (f"（DEMO_KEY は1時間 {DEMO_LIMIT}リクエスト/IP の共有枠です。NASA_API_KEY に"
+                     "無料の開発者キーを設定すると緩和されます。）")
+        else:
+            head += "（設定済みの NASA_API_KEY に対する制限です。時間をおいて再試行してください。）"
+        return head + extra
     return wait_text(wait, used, k)
 
 
@@ -201,7 +210,7 @@ def status(key: Optional[str] = None) -> dict:
     with _lock:
         _prune(now)
         used = len(_calls)
-        cool = max(0.0, _cooldown_until - now)
+        cool = max(0.0, float(_cooldown_until.get(k, 0.0)) - now)
     return {"key": "DEMO_KEY" if k == DEMO_KEY else "custom",
             "limit_per_hour": limit_for(k), "used_last_hour": used,
             "cooldown_seconds": round(cool, 1),

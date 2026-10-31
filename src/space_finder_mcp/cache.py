@@ -41,6 +41,10 @@ _is_lock = threading.Lock()
 # （ツール側のタイムアウトより十分長く、無期限に待たない値）。
 COALESCE_WAIT = 300.0
 
+# 失敗・「該当なし」応答を並行呼び出しの間だけで共有する秒数。キャッシュ（store）とは
+# 別枠で、TTL の数百分の一にとどめる（障害が回復したらすぐ次の呼び出しで再取得できる）。
+NEGATIVE_TTL = 15.0
+
 
 def is_error_result(result) -> bool:
     """CallToolResult（または同等の dict）がエラーかどうか。
@@ -60,7 +64,8 @@ def ttl_cache(seconds: float, maxsize: int = 128,
 
     - 引数がハッシュ可能でない場合はキャッシュせず素通しする（誤ったキー衝突を避ける）
     - 呼び出しが例外を投げたらキャッシュしない
-    - skip_if(戻り値) が True なら保存しない（エラー応答を固定化しないため）
+    - skip_if(戻り値) が True なら保存しない（エラー応答を固定化しないため）。
+      **並行呼び出しの後続にだけ** 短期（``NEGATIVE_TTL``）共有し、N 並列の stampede を防ぐ。
     - **同じ引数の並行呼び出しは1回の実行にまとめる（single-flight / coalescing）**。
       LLM は同じツールを並行に何度も投げるので、これが無いと N 並列＝N 回の API 呼び出しに
       なる（レート制限を無駄に食う／CPU も N 倍）。先頭の呼び出しが実行し、後続は完了を
@@ -70,6 +75,24 @@ def ttl_cache(seconds: float, maxsize: int = 128,
     def deco(fn):
         store: dict = {}
         inflight: dict = {}                  # key -> threading.Event（実行中の印）
+        negative: dict = {}                  # key -> (期限, 値)。失敗・空応答の短期共有
+
+        def _store(key, value, now):
+            """キャッシュ可否を判定して保存する（呼び出し側が _is_lock を握っている）。"""
+            if skip_if is not None and skip_if(value):
+                # 失敗・「該当なし」は **並行呼び出しの後続にだけ** 短期共有する。保存しないと
+                # 後続が全員やり直して N 並列＝N 回 upstream を叩く（実測 2026-10-31: 20並行で
+                # 失敗経路は 20 回、成功経路は 1 回）。新規に来た呼び出し（＝先頭）は必ず
+                # 実行し直す（短命キャッシュで障害回復を遅らせない・系列テストを汚さない）。
+                negative[key] = (now + NEGATIVE_TTL, value)
+                return
+            if maxsize and maxsize > 0:
+                if len(store) >= maxsize:
+                    for k in [k for k, v in store.items() if v[0] <= now]:
+                        store.pop(k, None)
+                    if len(store) >= maxsize:
+                        store.pop(min(store, key=lambda k: store[k][0]), None)
+                store[key] = (now + seconds, value)
 
         @wraps(fn)
         def wrapper(*args, **kwargs):
@@ -95,22 +118,26 @@ def ttl_cache(seconds: float, maxsize: int = 128,
                 ev.wait(COALESCE_WAIT)
                 with _is_lock:
                     hit = store.get(key)
+                    neg = negative.get(key)
                 if hit is not None and hit[0] > time.time():
                     return hit[1]
-                return fn(*args, **kwargs)   # 先頭が失敗/間に合わなかった → 自力で実行
+                if neg is not None and neg[0] > time.time():
+                    return neg[1]
+                # 先頭が失敗/間に合わなかった → 自力で実行。結果は**自分でも保存する**
+                # （保存しないと、先頭が例外を投げた後は毎回フル実行のままになる。
+                #  実測 2026-10-31: 20 並行のうち 19 件が成功したのに entries=0 だった）。
+                value = fn(*args, **kwargs)
+                t = time.time()
+                with _is_lock:
+                    _store(key, value, t)
+                return value
             try:
                 value = fn(*args, **kwargs)  # 例外はそのまま伝播（finally で待機を解く）
                 # **保存してから待機を解く**（順序が逆だと、起きた後続がまだ空の store を見て
                 # 自分でも実行してしまう＝二重に API を叩く）
-                if skip_if is None or not skip_if(value):
-                    if maxsize and maxsize > 0:
-                        with _is_lock:
-                            if len(store) >= maxsize:
-                                for k in [k for k, v in store.items() if v[0] <= now]:
-                                    store.pop(k, None)
-                                if len(store) >= maxsize:
-                                    store.pop(min(store, key=lambda k: store[k][0]), None)
-                            store[key] = (now + seconds, value)
+                t = time.time()
+                with _is_lock:
+                    _store(key, value, t)
             finally:
                 with _is_lock:
                     inflight.pop(key, None)
@@ -120,6 +147,7 @@ def ttl_cache(seconds: float, maxsize: int = 128,
         def cache_clear():
             with _is_lock:
                 store.clear()
+                negative.clear()
 
         def cache_info():
             return {"entries": len(store), "ttl_seconds": seconds, "maxsize": maxsize,

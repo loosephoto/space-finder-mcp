@@ -19,7 +19,7 @@ from requests.adapters import HTTPAdapter
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, ttl_cache, is_error_result
-from .input_utils import as_int
+from .input_utils import as_int, as_list
 
 CKAN = "https://donnees-data.asc-csa.gc.ca/api/3/action"
 UA = {"User-Agent": "space-finder-mcp/0.2 (MCP; CSA Open Data)"}
@@ -75,9 +75,9 @@ def csa_dataset_search(query: str = "", limit: int = 10) -> CallToolResult:
             content=[TextContent(type="text", text="CSA ポータルの検索に失敗しました。")],
             structuredContent={"error": d.get("error", "unknown")},
         )
-    result = d.get("result", {})
+    result = d.get("result") or {}
     total = result.get("count", 0)
-    pkgs = result.get("results", [])
+    pkgs = as_list(result.get("results"))
     records = []
     for p in pkgs:
         rec = {
@@ -89,7 +89,7 @@ def csa_dataset_search(query: str = "", limit: int = 10) -> CallToolResult:
             "organization": (p.get("organization") or {}).get("title"),
             "url": f"https://donnees-data.asc-csa.gc.ca/dataset/{p.get('name','')}",
             "resources": [{"name": res.get("name"), "format": res.get("format"), "url": res.get("url")}
-                          for res in p.get("resources", [])[:5]],
+                          for res in as_list(p.get("resources"))[:5]],
         }
         records.append(rec)
 

@@ -10,7 +10,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_error_result
-from .input_utils import as_int
+from .input_utils import as_int, as_list
 
 ROOT = "https://data.earth.jaxa.jp/stac/cog/v1/catalog.json"
 UA = {"User-Agent": "space-finder-mcp/0.2 (MCP; JAXA Earth STAC)"}
@@ -30,9 +30,9 @@ def _child_collections(catalog_url: str = ROOT, depth: int = 0,
         cat = _get_json(catalog_url)
     except requests.RequestException:
         return out
-    for l in cat.get("links", []):
-        if l.get("rel") == "child":
-            href = l["href"]
+    for l in as_list(cat.get("links")):
+        if isinstance(l, dict) and l.get("rel") == "child":
+            href = l.get("href") or ""
             if "collection.json" in href:
                 if len(out) >= max_collections:
                     return out

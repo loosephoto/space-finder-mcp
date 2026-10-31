@@ -68,11 +68,19 @@ def compact_description(doc: str, cap: int = 300) -> str:
                 if ln.strip().startswith("例")]
     if examples:
         out.append("\n".join(examples))
-    # 引数の説明は一次情報なので一字も変えずに残す
+    # 引数の説明は一次情報なので一字も変えずに残す。`Args:` が単独ブロックの先頭に
+    # 無い docstring（例の行の直後に続くもの）でも落とさない（実測 2026-10-31:
+    # uk_stac_collections は「例:」と同じブロックに Args があり、配信から消えていた）。
     for b in blocks:
-        if b.startswith(_ARG_HEADS):
-            out.append(b)
-            break
+        lines_ = b.split("\n")
+        for i, ln in enumerate(lines_):
+            if ln.strip().startswith(_ARG_HEADS):
+                out.append("\n".join(lines_[i:]).strip())
+                return_block = True
+                break
+        else:
+            continue
+        break
     # 契約文（メディアのリンク提示・figure.notes の引用）を文単位で拾う
     for b in blocks:
         for ln in b.split("\n"):

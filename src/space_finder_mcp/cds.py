@@ -37,7 +37,7 @@ from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, TTL_FORECAST, is_error_result, ttl_cache
 from .input_utils import as_float, as_int
-from .name_common import expand_terms, resolve_object
+from .name_common import ResolverUnavailable, expand_terms, resolve_object
 
 SIMBAD_TAP = "https://simbad.cds.unistra.fr/simbad/sim-tap/sync"
 VIZIER_ASU = "https://vizier.cds.unistra.fr/viz-bin/asu-tsv"
@@ -197,7 +197,14 @@ def _coord_pair(header: list) -> tuple:
 def _resolve_position(object_name, ra, dec) -> tuple:
     """天体名または座標から (ra, dec, 由来の説明, エラー応答) を作る。"""
     if object_name:
-        hit = resolve_object(object_name)
+        try:
+            hit = resolve_object(object_name)
+        except ResolverUnavailable as e:
+            return None, None, "", _err(
+                "天体名の解決サービス（Sesame/CDS）に接続できませんでした: {}。"
+                "ネットワークを確認するか、座標（ra, dec）を直接指定してください。"
+                .format(str(e)[:140]),
+                {"error": "resolver_unavailable", "object_name": str(object_name)})
         if not hit:
             return None, None, "", _err(
                 "「{}」の座標を解決できませんでした（Sesame/CDS）。座標（ra, dec）を直接指定するか、"
@@ -278,7 +285,14 @@ def object_lookup(object_name: str, neighbors: int = 0,
     candidates = []
     if row is None:
         # 別名一致で引けない → Sesame で座標を出し SIMBAD を円錐検索（候補提示つき）
-        hit = resolve_object(name)
+        try:
+            hit = resolve_object(name)
+        except ResolverUnavailable as e:
+            return _err(
+                "天体名の解決サービス（Sesame/CDS）に接続できませんでした: {}。"
+                "ネットワークを確認するか、ra/dec（度）を直接指定してください。"
+                .format(str(e)[:140]),
+                {"error": "resolver_unavailable", "object_name": name})
         if hit:
             _, rows, err = _simbad_cone(hit["ra_deg"], hit["dec_deg"], 0.05, 12)
             if err:

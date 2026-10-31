@@ -212,7 +212,16 @@ _reg(_mars.mars_rover_status)
 
 # ---- NASA (APIキー要。環境変数 NASA_API_KEY があれば使う) ----
 def _nasa_apod(date: Optional[str] = None) -> CallToolResult:
-    """今日（または指定日）の NASA の今日の天文写真(APOD)を返す。NASA_API_KEY が必要。"""
+    """今日（または指定日）の NASA の今日の天文写真(APOD)を返す。NASA_API_KEY が必要。
+
+    例:「今日の天文写真」「2026-10-01 の APOD」
+    画像URLはアイコン付きのクリック可能リンク（🖼️）として content の先頭側に出します
+    （インライン画像を描画しない CLI系・Android系ハーネスでも開けるように）。
+    回答時はこのリンクをそのまま提示してください。
+
+    Args:
+        date: YYYY-MM-DD。省略時は今日（当日分が未公開なら前日へ自動フォールバック）。
+    """
     return _nasa.apod(_nasa_budget.current_key(), date)
 
 def _nasa_neo_today() -> CallToolResult:

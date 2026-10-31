@@ -17,6 +17,7 @@
 - **天体カタログと系外惑星、準天頂衛星に対応** — 天体の素性は SIMBAD、観測星表は VizieR（いずれも CDS・認証不要）、系外惑星は NASA Exoplanet Archive、**みちびき（QZSS）**の精密軌道は内閣府の公開アーカイブ API から取得します（QZSS は提供元明記の**非商用利用のみ**）
 - **引用元を明示** — 科学的な内容には必ずデータソースへのリンクを併記
 - **図の注記を機械可読で返す（figure/1）** — 描画系ツールは「どの面を・どの縮尺で・主天体を焦点に置いたか」と注記・自己検証を JSON で返し、LLM が図を誤読しないようにする
+- **時刻は天体暦（JPL DE421）の収録期間内**（1899-07-29〜2053-10-09）。範囲外の `when` / `year` は計算せず、範囲と対処を書いたエラー結果を返します（以前は Skyfield の `EphemerisRangeError` がツール外へ漏れていました）
 
 > ⚠️ **注（出力のどこまでが保証か）** — ツールが返す**`structuredContent` の JSON・数値・画像・リンクは、同じ引数で同じ時刻に呼べばどのモデルからでも同じ**内容です（データ取得と計算はサーバー側で完結し、モデルには依存しません）。一方、それを**読みやすい文章に組み立てる工程はホスト側の AI モデルに委ねられます**。説明の順序・語り口・要約の粒度・強調する点はモデルや設定によって変わるため、同じツール結果でも書き上がりは同一にはなりません。**数値や出典の最終的な根拠は `structuredContent` に置いてください**（表示文と食い違って見える場合は JSON 側が正で、その差は「モデルの文章化」のばらつきです）。
 
@@ -50,7 +51,7 @@ uv run python scripts/check-tools.py --stdio       # 実クライアント経路
 LLM は1ターンで複数のツールを並行に呼びます。**サーバー側がそれに応えられるかは別問題**で、FastMCP は同期関数をイベントループ上でそのまま呼ぶため、素のままだと1つのツールが API 待ちをしている間、他のツール呼び出しは1つも動き出しません（実測: 同一ツール4並列で wall = 各呼び出しの合計 2.55s）。
 
 - **同期ツールは `anyio` のワーカースレッドで実行**（`server.py` の `_threaded` / `_reg`）。同じ4並列が **wall 2.47s・4.0×** になりました。実ネットワークでも、別々の地名の `astronomy_weather` 3並列が **3.93s**（逐次合計 11.72s・3.0×）です。
-- **同じ引数の並行呼び出しは1回に集約**（`cache.ttl_cache` の single-flight）。8並列の同一呼び出しでも実行は1回・結果は共有なので、NASA の DEMO_KEY のような共有枠を N 倍消費しません。
+- **同じ引数の並行呼び出しは1回に集約**（`cache.ttl_cache` の single-flight）。8並列の同一呼び出しでも実行は1回・結果は共有なので、NASA の DEMO_KEY のような共有枠を N 倍消費しません。**失敗・「該当なし」も並行呼び出しの後続にだけ短期（15秒）共有**します（キャッシュには載せないので、次に来た呼び出しは必ず取り直す＝障害回復を遅らせません。実測: 失敗経路の20並列で upstream 20 回 → 1 回）。先頭が例外を投げた場合も、後続が成功した結果はキャッシュに残ります。
 - **描画は Pillow のみ**（matplotlib は使いません）。プロセス全体の状態を持つ pyplot を使わないので、図の描画はスレッド並列でも混ざりません（`--concurrency` が検査）。
 - **共有状態はロックで保護**（`cache` / `nasa_budget`）。キャッシュされた戻り値は呼び出し側で書き換えません（並行時に他人の結果を壊すため。書き換えるなら `deepcopy`）。
 - **CPU 律速の計算は GIL で並列化しません**（Skyfield・Pillow の計算）。並列化が効くのは I/O 待ち（API 呼び出し）で、それが並列ツール呼び出しの主目的です。
@@ -73,6 +74,7 @@ LLM は1ターンで複数のツールを並行に呼びます。**サーバー�
 - **現役衛星は `WELL_KNOWN` に NORAD ID を実測登録**（CelesTrak `GROUP=active` の OBJECT_NAME と突合）: ひまわり8/9号、だいち2/4号、いぶき/いぶき2号、しずく、しきさい、あじさい、あらせ、れいめい、ひさき、天和/問天/夢天、ISS、ハッブル、ひので 等 → **和名から NORAD ID までオフラインで解決**（衛星系キーの 21/61。残りは過去機・番号なしのファミリー名で、曖昧なら候補提示、退役機は「表示できない」と正直に返す）。
 - 適用先: `alma_search`（表記ゆれ＋候補提示）/ `cadc_observations`（名前→座標のフォールバック）/ `satellite_status`（和名展開＋一致件数の明示）/ `sat_tle`（和名→NORAD ID 解決＋候補提示）
 - ⚠️ 修正の根拠は実測: 以前は `cadc_observations("M104")` が即エラー、`satellite_status(query="ひまわり")` と `sat_tle(name="ひので")` が 0 件、`alma_search("HL Tau", band=7)` が 0 件でした（すべて現在は解決）。
+- **「名前が見つからない」と「サービスに繋がらない」を区別**します。Sesame/CDS に到達できないときは `name_common.ResolverUnavailable` を投げ、ツールは `structuredContent.error="resolver_unavailable"` と「ネットワークを確認するか ra/dec を直接指定してください」を返します（実測: 通信断を「M31 の表記が解決できない」と誤案内し、21秒待たせていた）。
 
 ## 🔗 メディアのリンク — インライン表示できないクライアント向け
 
@@ -174,6 +176,8 @@ export NASA_API_KEY="your_key_here"
 cp .env.example .env   # 編集して NASA_API_KEY=... を記入（.gitignore 済み・コミット禁止）
 ```
 優先順位は **MCPクライアントの env > リポジトリ直下の .env** です（未設定なら `DEMO_KEY`）。
+
+> **429 のクールダウンは API キーごと**に保持します。`DEMO_KEY` で 429 を受けたあとも、開発者キーを設定していれば `apod` / `neo_today` は止まりません（キー別の残枠・待ち時間は `nasa_budget.check()` / `status()` が返します）。
 
 
 > **キーの取り扱い**: 応答に含まれる API キーは伏せ字化します（`nasa_budget.redact()` → `api_key=***`、`budget.key` は `DEMO_KEY` / `custom` のみ）。requests の例外文字列が URL ごとキーを含むため、そのまま返すと利用者のキーが漏れるためです。
@@ -333,7 +337,7 @@ hermes config set 'mcp_servers.space-finder-mcp.args' '["run", "--project", "/�
 | `sat_ground_track` | 任意の人工衛星（ISS・ひので・ハッブル等）の現在位置と地上軌道を地球地図にプロットした画像を返す。CelesTrak TLE + Skyfield(SGP4) で真下の点・高度・速度を計算し、NASA Blue Marble 地図に軌道トレイルを重ねる | CelesTrak + Skyfield + Blue Marble | 不要 |
 | `planetary_orbiter_track` | 任意の天体（月・火星・水星・タイタン等）を周回する探査機の現在位置と軌道トレイルを、その天体の地図にプロットした画像を返す。JPL Horizons の状態ベクトルを IAU 自転モデルで天体固定座標（緯度経度・高度）に変換し、NASA Trek の等角図法地図に重ねる。`span_deg=360`で天体全面表示にも対応。**過去機（かぐや等）は運用終了を案内し、落点が公表されている機体は落点を地点マーカーで描いた地図（`figure.kind="impact_site_map"`）を返す**。`sites="apollo"`（または `"apollo11"`〜`"apollo17"`, `"all"`, `"newcrater"`）で **地点マーカー図**（`figure.kind="landing_site_map"`／木星は `impact_site_map`）も返す。**接近通過（フライバイ）対応**: `orbiter` にミッション名（`europa clipper`/`juice`/`bepicolombo`/`hera`/`psyche`/`lucy`/`new horizons`/`はやぶさ2`/`juno`/`parker solar probe`/`solar orbiter`/`mmx` と和名）を指定でき、`flyby=True` で**最接近（CA）を自動探索**して表示時刻と地図の中心を CA に置き直し、最接近時刻・高度・相対速度・最接近点を図と `structuredContent.closest_approach` に出す（`ca_hours` で探索範囲、既定 ±24 時間。天体半径の50倍より遠い「最小」は接近通過と呼ばない）。対象天体に**ガリレオ衛星（イオ・エウロパ・ガニメデ・カリスト）**を追加（全球画像ベースマップ）。**地点マーカー図（`sites=`）は18天体**（月・火星・水星・金星・タイタン・ベスタ・ケレス・イオ・エウロパ・ガニメデ・カリスト・木星・土星・天王星・海王星・冥王星・ベンヌ・リュウグウ）に対応し、**全球等角図がある天体は地形画像の上に、無い天体（リュウグウ）は緯度経度グリッドの上に**公表座標を描く（全球図は NASA Trek のタイル／USGS の全球モザイク／**Hubble OPAL の全球図**（気体惑星）／New Horizons・OSIRIS-REx のモザイクを天体ごとに自動選択） | JPL Horizons + NASA Trek / USGS Astrogeology / Hubble OPAL (STScI) / NASA NSSDC / PDS | 不要 |
 | `planetary_rover_location_map` | 任意の天体面を移動する探査ローバーの現在地をその天体の地図中心に示した画像（走行経路・着陸点）。火星は NASA MMGIS の位置データと NASA Trek の等角地図を合成。**同じ天体にあるほかの人工物着陸地点は黄枠●で重ねる**（`show_sites=false` で非表示。例: 火星のマルス2/3号・バイキング、月ではサーベイヤー3号）。**フォボス（MMX / IDEFIX）にも対応** — 着陸地点は未公表なので `site_lat`/`site_lon`（東向き正）または `site_lon_w`（西向き正）で任意の場所を描き、未指定なら**着陸候補条件の緯度帯 ±30°**を明示。IAU/U.S. Gazetteer に着陸地点が公表されれば自動検出。**月にも対応** — `body="moon"` でアポロ11〜17号・ルノホート1/2号・玉兔号/玉兔2号を表示。**2 段構えの図**（左: Trek の月面地図に着陸地点と近隣の着陸地点／右: **メートル単位の局地サイトプラン**）で、LM・ALSEP・LRRR・LRV 最終駐車地点・アメリカ国旗を**一次情報が公開する距離＋方位だけ**から求めた位置で描く。位置の公開値がない機材（例: アポロ11号の旗）は**図には描かず**凡例に「位置の公開値なし」と記す | NASA MMGIS + Trek WMTS ＋ USGS 公式全球図 + IAU Gazetteer ＋ **NASA NSSDCA（月面遺跡座標）** ＋ **NASA ALSJ（旗・LRV 最終駐車地点）** | 不要 |
-| `weather_satellite_now` | GEO/LEO気象衛星19機（ひまわり9号・GOES-18/19・Meteosat・FY・GK-2A・INSAT・NOAA-20/-21・SNPP・Metop-B/C・FY-3D）の公開画像。GEOは最新フレーム、LEOは日次全球合成。**ひまわり9号は気象庁 気象衛星センター（MSC）のリアルタイム画像（601×601・10分間隔・約23時間保持）から全帯域を取得**する: 可視 `b03`／赤外 `b13`／水蒸気 `b08`／夜間マイクロフィジクスRGB `ngt`／昼間RGB `dms`／自然色 `dnc`。**夜の観測可否を判断する図では可視は真っ暗なので `band="infrared"` か `"night_rgb"` を使う**。配信元は実画像の代わりに全黒のプレースホルダ（実測 550×550 1bit・444 バイト）を返すことがあるため、**JPEG マジック・バイト数・色数を測って実画像と確認できたフレームだけ**を返し（`structuredContent.image_verified`）、駄目なら次の時刻・予備源（himawari.asia の true color）へ送る。**`lat`/`lon`/`place` を渡すと、全円盤＋日本域拡大＋観測地点マーカー＋明暗スケールを1枚（1500×880）に焼き込んだ合成パネルを返す**（緯度経度→画素は静止軌道・東経140.7度からの透視投影。地点マーカーの実画素と切り出しの色数を `structuredContent.panel` に残す）。取得不可は `restricted`/`unavailable`/`non_image_product` の理由コードで返す | JMA MSC(himawari real-time)/himawari.asia(NOAA STAR)/EUMETSAT WMS/CMA-NSMC/KMA/IMD/NASA GIBS | 不要 |
+| `weather_satellite_now` | GEO/LEO気象衛星19機（ひまわり9号・GOES-18/19・Meteosat・FY・GK-2A・INSAT・NOAA-20/-21・SNPP・Metop-B/C・FY-3D）の公開画像。**ひまわり9号以外は配信元の固定プロダクトで、`size`/`band`/`lat`/`lon` は効かない**（実寸は `structuredContent.size_px`）。GEOは最新フレーム、LEOは日次全球合成。**ひまわり9号は気象庁 気象衛星センター（MSC）のリアルタイム画像（601×601・10分間隔・約23時間保持）から全帯域を取得**する: 可視 `b03`／赤外 `b13`／水蒸気 `b08`／夜間マイクロフィジクスRGB `ngt`／昼間RGB `dms`／自然色 `dnc`。**夜の観測可否を判断する図では可視は真っ暗なので `band="infrared"` か `"night_rgb"` を使う**。配信元は実画像の代わりに全黒のプレースホルダ（実測 550×550 1bit・444 バイト）を返すことがあるため、**JPEG マジック・バイト数・色数を測って実画像と確認できたフレームだけ**を返し（`structuredContent.image_verified`）、駄目なら次の時刻・予備源（himawari.asia の true color）へ送る。**`lat`/`lon`/`place` を渡すと、全円盤＋日本域拡大＋観測地点マーカー＋明暗スケールを1枚（1500×880）に焼き込んだ合成パネルを返す**（緯度経度→画素は静止軌道・東経140.7度からの透視投影。地点マーカーの実画素と切り出しの色数を `structuredContent.panel` に残す）。取得不可は `restricted`/`unavailable`/`non_image_product` の理由コードで返す | JMA MSC(himawari real-time)/himawari.asia(NOAA STAR)/EUMETSAT WMS/CMA-NSMC/KMA/IMD/NASA GIBS | 不要 |
 | `observing_sheet` | **天体観測の判断シートを1枚で**返す。判定（○/△/×＝その夜の予報雲量の最大値）＋雲量の推移（今夜／明日の夜・1時間ごと・月の出線・20/50% の色分け）＋ひまわり9号 赤外（日本域を拡大・観測地点マーカー）＋気象庁ナウキャスト（実況／+60分）。**予報（雲量の棒）と実況（衛星・雨雲）はタグで区別**し、雨雲は「現在」であることを明記（今夜の降水は雲量の予報を見る）。日本国外・気象庁の障害時は衛星だけの軽量版に落ちる | Open-Meteo + Skyfield / JMA ひまわり9号(MSC) / JMA ナウキャスト | 不要 |
 | `space_calendar` | **宇宙・天文イベントカレンダー**（月グリッド図＋JSON）。打ち上げ（LL2 の月範囲クエリ・日付精度 `net_precision` が Day/Hour/Minute/Second の行だけを日付セルに配置）・天文現象（Skyfield のローカル計算: 月相・二十四節気・惑星の衝/合/内合・最大離角・日食月食・流星群）・公開イベント（国立天文台＋**JAXA の施設一般公開・特別公開**＝ファン!ファン!JAXA! の施設見学ページと宇宙科学研究所のイベント表。告知済みのみを載せ、取得日を窓にして毎日取り直します）・**小天体イベント（小惑星接近・火球観測。`neo_close_approach` / `fireball_reports` の呼び出し結果を蓄積したもの＝カレンダー自身は JPL を叩かないので未蓄積の月は空）**・自分の予定を重ねて描く。取得結果は**蓄積ストア**に溜め、要求月 M に対して窓 [M-1, M+2] を確保し**未取得・期限切れの月だけ**取りに行く（2回目は API 0 回）。NASA の公式リスト（WP REST）と照合した行には公式URLを付与 | Launch Library 2 + JPL DE421/Skyfield + 国立天文台 + JAXA + nasa.gov | 不要 |
 | `calendar_events` | 蓄積済みイベントの一覧（**図を描かず外部APIも呼ばない**軽い経路）。打ち上げ・天文現象・**小惑星接近・火球観測（`neo_close_approach` / `fireball_reports` の呼び出しで蓄積されたぶん）**・公開イベント・自分の予定を日付順に返す | 蓄積ストア（ローカル） | 不要 |

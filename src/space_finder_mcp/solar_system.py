@@ -244,6 +244,15 @@ def _comet_position(name, jd):
     if typ == "horizons":
         return _horizons_position(cid, jd)
     el = _sbdb_elements(cid)
+    # 双曲線・放物線（e>=1）は `_kepler_position`（a/ma/n 前提の楕円専用）では
+    # sqrt(1-e) が domain error になる。SBDB 要素の e を見て円錐曲線の一般解へ振る
+    # （実測 2026-10-31: 2I/ボリソフ が「math domain error」で落ちていた）。
+    try:
+        if float(el.get("e") or 0.0) >= 1.0 and el.get("q") and (
+                el.get("tp") is not None or el.get("tp_jd") is not None):
+            return comet_xyz_from_elements(el, jd)
+    except (TypeError, ValueError):
+        pass
     return _kepler_position(el, jd)
 
 
@@ -2446,6 +2455,11 @@ def _comet_orbit_result(name, when_iso=None):
     try:
         if el["typ"] == "horizons":
             x, y, z, rr, lon, lat = _horizons_position(cid, jd)
+        elif el.get("e") is not None and float(el["e"]) >= 1.0:
+            # 双曲線・放物線（e>=1）は楕円のケプラー式では解けない（sqrt(1-e) が
+            # domain error）。SBDB 要素（q/tp・ラジアンの i/node/argp）で円錐曲線を解く。
+            # 実測 2026-10-31: comet="2I"（ボリソフ）が math domain error で落ちていた。
+            x, y, z, rr, lon, lat = comet_xyz_from_elements(el.get("_raw") or el, jd)
         else:
             x, y, z, rr, lon, lat = _kepler_position(el.get("_raw") or el, jd)
     except (requests.RequestException, ValueError, KeyError) as e:
@@ -2474,8 +2488,8 @@ def _comet_orbit_result(name, when_iso=None):
         "時刻: {}".format(tstr),
         "離心率 e={:.6f} ・ 近日点 {} AU ・ {}".format(
             el["e"], _au_fmt(el["q"]),
-            "遠日点 {} AU".format(_au_fmt(fig["conic"].get("apo"))) if not fig["conic"]["closed"]
-            else "遠日点 {} AU（閉じた楕円）".format(_au_fmt(fig["conic"].get("apo")))),
+            "遠日点 {} AU（閉じた楕円）".format(_au_fmt(fig["conic"].get("apo")))
+            if fig["conic"]["closed"] else "遠日点なし（閉じない軌道）"),
         "指定時刻の日心距離: {:.3f} AU ・ 黄経 {:.1f}° ・ 黄緯 {:.1f}°".format(rr, lon, lat),
         "",
         figure_text_block(fig),
@@ -2840,6 +2854,19 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
             content=[TextContent(type="text", text=scene["error"])],
             structuredContent={"error": scene["error"]},
         )
+    if not scene.get("planets") and scene.get("planet_errors"):
+        # 惑星が1つも計算できていない図を「正常な俯瞰図」として出さない
+        # （実測 2026-10-31: when=2100 で planets=0 / error=None / verify.ok=True になっていた）。
+        first = scene["planet_errors"][0]
+        msg = ("惑星位置を1つも計算できませんでした（{}: {}）。"
+               "when を天体暦（JPL DE421・1899-07-29〜2053-10-09）の範囲内で指定してください"
+               .format(first.get("name"), first.get("error")))
+        return CallToolResult(
+            content=[TextContent(type="text", text=msg)],
+            structuredContent={"error": "no_planets", "when": str(when),
+                               "planet_errors": scene["planet_errors"],
+                               "supported": ["1899-07-29", "2053-10-09"]},
+        )
     # 表示範囲の指定を解決する（数値 AU / 天体名「火星まで」「木星」/ "fit"=指定天体に合わせる）
     rng_au, rng_why = _resolve_range(range_au, scene)
     if rng_au is None:                       # 解決できない名前は推測せず候補を提示して停止する
@@ -2955,10 +2982,33 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
                 lines.append("- {}: 真距離 {:.1f}AU・黄緯 {:.1f}°（黄道面投影 {:.1f}AU）".format(
                     n, d["au"], d["eclLat"], d["proj_au"]))
     if scene.get("routes"):
-        lines.append("**彗星の通過経路**（図の破線＝黄道面への正射影）:")
+        # 破線は彗星の経路にも探査機の航路にも使う。本文の見出しを固定すると
+        # 「探査機なのに彗星の通過経路」と書いてしまう（実測 2026-10-31）。
+        _rn = list(scene["routes"])
+        _probes = [n for n in _rn
+                   if (scene["routes"][n] or {}).get("kind") == "spacecraft"
+                   or n in (scene.get("probes") or {})]
+        if _probes and len(_probes) == len(_rn):
+            route_label = "探査機の飛行経路"
+        elif _probes:
+            route_label = "通過経路（彗星・探査機）"
+        else:
+            route_label = "彗星の通過経路"
+        lines.append("**{}**（図の破線＝黄道面への正射影）:".format(route_label))
         for n, rt in scene["routes"].items():
             if rt.get("error"):
                 lines.append("- {}: 経路を取得できませんでした（{}）".format(n, rt["error"]))
+                continue
+            if rt.get("kind") == "spacecraft":
+                # 探査機は周期・楕円の概念が無いので、観測区間と最接近だけを書く。
+                _sp = rt.get("span") or []
+                _enc = [m for m in (rt.get("marks") or []) if m.get("label")]
+                _enc_txt = "／".join(
+                    "{} {}".format(m.get("label"), (m.get("date") or "")[:10]) for m in _enc[:4])
+                lines.append("- {}: {}〜{} の実測経路{}".format(
+                    rt.get("name") or n,
+                    (_sp[0][:10] if _sp else "?"), (_sp[1][:10] if len(_sp) > 1 else "?"),
+                    ("／最接近 " + _enc_txt) if _enc_txt else "（最接近の記録なし）"))
                 continue
             mk = "／".join(_mark_txt(m, with_proj=False) for m in (rt.get("marks") or []))
             lines.append("- {}: {}周期 {} 日（{}）".format(
@@ -3194,7 +3244,7 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
                 _n1, float(ldd.get("au") or LIGHT_DAY_AU), float(_d1.get("light_days") or 0.0)))
     if scene.get("routes"):
         why_txt = ("太陽を図の中心に置く俯瞰図のため、楕円軌道の焦点は主天体ではない"
-                   "（惑星の軌道の形は描かず、指定された彗星の通過経路だけを破線で重ねている）")
+                   "（惑星の軌道の形は描かず、指定された彗星・探査機の経路だけを破線で重ねている）")
     fig = figure_payload(
         kind="heliocentric_overview",
         title="太陽系の現在位置（太陽中心・黄道面俯瞰）",
@@ -3222,7 +3272,7 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
              + "彗星の尾は向き（反太陽方向）だけを示す模式表現で、長さ・明るさは実際の光度を反映しない"),
         ] + compat_notes + rng_notes + route_notes + ld_notes),
         caption="太陽を中心とした日心俯瞰図。数値は structuredContent の各値を参照。"
-                + ("破線＝彗星の通過経路。" if scene.get("routes") else ""),
+                + ("破線＝{}。".format(route_label) if scene.get("routes") else ""),
         verify=verify_out,
     )
     lines.append("")

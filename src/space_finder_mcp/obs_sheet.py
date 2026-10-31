@@ -28,9 +28,12 @@ W = 1560
 
 
 def _verdict(max_cloud, min_cloud=None, rain_near=False):
-    """雲量から観測可否を決める（雨雲が近ければ1段下げる）。
+    """雲量（予報）から観測可否を決める。
 
     しきい値は「深宇宙観測の実用」を基準にした目安: ≤20% 可 / ≤60% 条件付き / それ以上は不向き。
+    **判定は雲量だけで決める**のが既定で、雨雲（ナウキャスト＝実況）は判定に混ぜない
+    （実況を混ぜると「雨雲データが取れただけで×」になり、図の理由と食い違う）。
+    `rain_near=True` を渡したときだけ1段下げる（呼び出し側が実況を根拠に下げたい場合）。
     """
     if max_cloud is None:
         return "?", "判定不能", DIM
@@ -38,7 +41,7 @@ def _verdict(max_cloud, min_cloud=None, rain_near=False):
         return "○", "観測可", OKC
     if max_cloud <= 60 and not rain_near:
         return "△", "条件付きで可", WARNC
-    return "×", "不向き（雲が多い／雨雲が近い）", NGC
+    return "×", "不向き（雲が多い）", NGC
 
 
 def _hm(iso):
@@ -203,6 +206,16 @@ def observing_sheet(place=None, lat=None, lon=None, band="infrared"):
     雲量・月・薄明・観測窓は Open-Meteo + Skyfield、衛星は気象庁ひまわり9号（赤外）、
     雨雲は気象庁ナウキャスト（日本国内のみ）。**予報（雲量）と実況（衛星・雨雲）を
     タグで区別**し、判定（○/△/×）を先頭に出す。
+
+    インライン画像を表示できないハーネス向けに、content の先頭へ
+    「🖼️ [生成した画像を開く: 観測判断シート（地点）](file:///…)」を出す。
+    回答時はこのリンクをそのまま提示してください。
+
+    Args:
+        place: 観測地（例 "東京"）。**省略時はエラー**（地点は必須。lat/lon でも可）。
+        lat: 緯度（-90〜90）。lon と併用。
+        lon: 経度（-180〜180）。
+        band: 衛星パネルの帯域（既定 "infrared"＝夜でも読める。可視は夜に真っ暗）。
     """
     from . import weather_astro as wa
     from . import weather_sat as wsat

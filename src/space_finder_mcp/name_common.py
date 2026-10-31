@@ -29,6 +29,17 @@ from .cache import TTL_DAILY, ttl_cache
 UA = {"User-Agent": "space-finder-mcp/0.27 (MCP; name resolver)"}
 SESAME = "https://cds.unistra.fr/cgi-bin/nph-sesame/-oxp/S?{}"
 
+
+class ResolverUnavailable(requests.RequestException):
+    """名前解決サービス（Sesame/CDS）に**到達できなかった**ことを表す例外。
+
+    「名前が見つからない（`None`）」と「サービスに繋がらない（本例外）」を区別するために
+    置く。両者を同じ文言で返すと、通信断を「表記が違う」と誤案内する（実測 2026-10-31:
+    `catalog_search` が ConnectTimeout を 21 秒待った末に "name unresolved" と報告し、
+    本文も「別の表記でお試しください」と言っていた）。`requests.RequestException` の
+    派生なので、ネットワーク例外をまとめて扱う既存の `except` でも捕まる。
+    """
+
 _NAME_SPLIT = re.compile(r"[\s_]+")
 
 # 和名 → 英語名/略称（衛星・宇宙機・一部の天文台）。検索語の展開に使う。
@@ -189,10 +200,17 @@ def _sesame_lookup(name: str, timeout: int = 30) -> Optional[dict]:
         return None
     try:
         r = requests.get(SESAME.format(requests.utils.quote(o)), headers=UA, timeout=timeout)
-        if r.status_code != 200:
-            return None
+    except requests.RequestException as e:
+        raise ResolverUnavailable(str(e)[:140]) from e
+    if r.status_code >= 500:
+        # 5xx は「名前が無い」ではなく「サービスが応答できない」。呼び出し側が
+        # 「表記を変えて」と誤案内しないよう、失敗の種類を分けて伝える。
+        raise ResolverUnavailable("Sesame/CDS が HTTP {} を返しました".format(r.status_code))
+    if r.status_code != 200:
+        return None
+    try:
         root = ET.fromstring(r.content)
-    except (requests.RequestException, ET.ParseError):
+    except ET.ParseError:
         return None
 
     def _tag(e):

@@ -31,7 +31,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 from .cache import TTL_FORECAST, ttl_cache, is_error_result
 from .img_common import media_link_line, save_output
 from .input_utils import as_float, as_int
-from .name_common import resolve_object
+from .name_common import ResolverUnavailable, resolve_object
 
 INVOKE = "https://mast.stsci.edu/api/v0/invoke"
 DOWNLOAD = "https://mast.stsci.edu/api/v0.1/Download/file?uri="
@@ -295,7 +295,16 @@ def mast_observations(object_name: Optional[str] = None, ra: Optional[float] = N
     resolved, target_text = None, None
     if object_name:
         key = " ".join(str(object_name).split())
-        hit = resolve_object(key)
+        try:
+            hit = resolve_object(key)
+        except ResolverUnavailable as e:
+            return CallToolResult(
+                content=[TextContent(type="text", text=(
+                    "天体名の解決サービス（Sesame/CDS）に接続できませんでした: {}\n"
+                    "ra/dec（度）を直接指定するか、時間をおいて再試行してください。")
+                    .format(str(e)[:140]))],
+                structuredContent={"error": "resolver_unavailable", "object_name": key},
+            )
         if hit:
             ra_f, dec_f = as_float(hit.get("ra_deg"), None, -360.0, 360.0), \
                 as_float(hit.get("dec_deg"), None, -90.0, 90.0)

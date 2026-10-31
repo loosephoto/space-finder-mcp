@@ -12,7 +12,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, ttl_cache, is_error_result
-from .input_utils import as_int
+from .input_utils import as_int, as_list
 
 BASE = "https://isro.vercel.app/api"
 UA = {"User-Agent": "space-finder-mcp/0.2 (MCP; ISRO data)"}
@@ -31,10 +31,18 @@ def _fetch(kind: str) -> list[dict]:
     r = requests.get(f"{BASE}/{ep}", headers=UA, timeout=(25, 25))
     r.raise_for_status()
     d = r.json()
-    return d.get(key, [])
+    return as_list(d.get(key))
 
 
-@ttl_cache(TTL_DAILY, maxsize=64, skip_if=is_error_result)
+def _skip_unless_hits(result) -> bool:
+    """エラー応答と「0件」はキャッシュしない（24時間の空応答固定を防ぐ）。"""
+    if is_error_result(result):
+        return True
+    sc = getattr(result, "structuredContent", None) or {}
+    return not sc.get("results")
+
+
+@ttl_cache(TTL_DAILY, maxsize=64, skip_if=_skip_unless_hits)
 def isro_data(kind: str = "spacecrafts", query: Optional[str] = None,
               limit: int = 20) -> CallToolResult:
     """ISRO（インド宇宙研究機関）の公式データを返す（認証不要）。

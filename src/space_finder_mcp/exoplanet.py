@@ -144,7 +144,19 @@ def _candidates(prefix: str, limit: int = 12) -> list:
     return [r.get("hostname") for r in data if r.get("hostname")]
 
 
-@ttl_cache(TTL_DAILY, maxsize=128, skip_if=is_error_result)
+def _skip_unless_hits(result) -> bool:
+    """エラー応答と「0件」はキャッシュしない。
+
+    TTL_DAILY（24時間）で 0 件を保存すると、一時障害（HTTP 200 のエラー本文など）が
+    丸1日「該当なし」として固定される（実測 2026-10-31）。空はキャッシュしない。
+    """
+    if is_error_result(result):
+        return True
+    sc = getattr(result, "structuredContent", None) or {}
+    return not sc.get("records")
+
+
+@ttl_cache(TTL_DAILY, maxsize=128, skip_if=_skip_unless_hits)
 def exoplanet_search(object_name: Optional[str] = None,
                      discovery_method: Optional[str] = None,
                      max_distance_pc: Optional[float] = None,

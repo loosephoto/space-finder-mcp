@@ -16,7 +16,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import TTL_DAILY, TTL_FORECAST, disk_get, ttl_cache
 from .img_common import media_link_line
-from .input_utils import as_int
+from .input_utils import as_int, as_list
 
 # NASA Sounds from Beyond / 各ミッションの「宇宙の音」短尺キュレーション
 # (NASA公式が配布する効果音。ストリーミング/ダウンロード用の直接URL)。
@@ -118,10 +118,19 @@ def _asset_hrefs(nasa_id: str) -> list[str]:
     try:
         r = requests.get(f"{IMAGES_API}/asset/{nasa_id}", headers=UA, timeout=(20, 20))
         r.raise_for_status()
-        return [i.get("href") for i in r.json().get("collection", {}).get("items", [])
+        return [i.get("href") for i in _items(r.json())
                 if isinstance(i, dict) and isinstance(i.get("href"), str)]
     except requests.RequestException:
         return []
+
+
+def _items(d) -> list:
+    """NASA Image & Video Library の `collection.items` を安全に取り出す。
+
+    200 応答でも `items: null` や文字列が返り得る（実測 2026-10-31: `NoneType is not
+    iterable` が 3 ツール共通で外へ漏れた）。配列以外は空リストに落とす。
+    """
+    return as_list((d.get("collection") or {}).get("items") if isinstance(d, dict) else None)
 
 
 def _fetch_image_bytes(url: str, max_bytes: int = 3_500_000) -> Optional[bytes]:
@@ -202,7 +211,7 @@ def search_space_images(query: str, limit: int = 3, show_inline: bool = True,
     err, d = _search_or_error(query, "image", limit)
     if err is not None:
         return err
-    items = d.get("collection", {}).get("items", [])
+    items = _items(d)
     total = d.get("collection", {}).get("metadata", {}).get("total_hits", 0)
 
     records = []
@@ -315,7 +324,7 @@ def search_space_audio(query: str, limit: int = 3, kind: str = "auto") -> CallTo
     if want_podcast:
         try:
             d = _search(q, "audio", limit * 3)
-            for it in d.get("collection", {}).get("items", []):
+            for it in _items(d):
                 data = it.get("data", [{}])[0]
                 nid = data.get("nasa_id", "")
                 hrefs = _asset_hrefs(nid)
@@ -436,7 +445,7 @@ def search_space_videos(query: str, limit: int = 3, show_poster: bool = True) ->
     err, d = _search_or_error(query, "video", limit)
     if err is not None:
         return err
-    items = d.get("collection", {}).get("items", [])
+    items = _items(d)
     total = d.get("collection", {}).get("metadata", {}).get("total_hits", 0)
 
     records = []

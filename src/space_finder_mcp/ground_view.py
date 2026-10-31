@@ -253,6 +253,32 @@ def box_blur(a, r):
     return out
 
 
+# 天体暦（JPL DE421）の収録期間（UTC）。範囲外は Skyfield が EphemerisRangeError を
+# 投げるので、公開ツールの入口で先に弾いて「エラー結果」にする（例外を外へ漏らさない契約）。
+EPH_MIN_UTC = _dt.datetime(1899, 7, 29)
+EPH_MAX_UTC = _dt.datetime(2053, 10, 9)
+
+
+def ephemeris_range_error(when_parts):
+    """UTC の (y, mo, d, h, mi, s) が天体暦（de421）の収録期間外なら理由文を返す。
+
+    範囲内・判定不能なら None。`skyfield` は期間外で `EphemerisRangeError` を投げるが、
+    それは**ツール外へ漏れてはいけない**（CallToolResult を返す契約）。入口で先に弾く。
+    収録期間は de421 の実データに合わせる（実測: 1899-07-29 〜 2053-10-09）。
+    """
+    try:
+        parts = [int(v) for v in (when_parts or [])[:6]]
+        parts = (parts + [0] * (6 - len(parts)))[:6]
+        dt_ = _dt.datetime(parts[0], parts[1], parts[2], parts[3], parts[4], parts[5])
+    except (TypeError, ValueError):
+        return None
+    if EPH_MIN_UTC <= dt_ <= EPH_MAX_UTC:
+        return None
+    return ("天体暦（JPL DE421）は {} 〜 {} の期間だけを収録しています。"
+            "when をこの範囲内の日時で指定してください（範囲外は計算できません）"
+            .format(EPH_MIN_UTC.strftime("%Y-%m-%d"), EPH_MAX_UTC.strftime("%Y-%m-%d")))
+
+
 def _parse_when(when):
     """when（ISO8601）→ UTC の (y, mo, d, h, mi, s)。不正なら "bad"、省略なら現在時刻。
 
@@ -1289,6 +1315,13 @@ def sky_ground(place=None, lat=None, lon=None, when=None, span=360.0, az0=0.0,
             content=[TextContent(type="text",
                                  text="when は ISO8601（例 2026-10-10T12:00:00Z）で指定してください。")],
             structuredContent={"error": "bad when", "when": str(when)})
+    _ph_err = ephemeris_range_error(when_utc)
+    if _ph_err:
+        return CallToolResult(
+            content=[TextContent(type="text", text=_ph_err)],
+            structuredContent={"error": "ephemeris_range", "when": str(when),
+                               "supported": [EPH_MIN_UTC.strftime("%Y-%m-%d"),
+                                             EPH_MAX_UTC.strftime("%Y-%m-%d")]})
     lat_v, lon_v = float(ll[0]), float(ll[1])
 
     cat = _star_catalog()

@@ -43,10 +43,15 @@ def as_int(value, default=None, minimum=None, maximum=None):
         n = int(n)
     except (TypeError, ValueError, OverflowError):
         return default
-    if minimum is not None:
-        n = max(int(minimum), n)
-    if maximum is not None:
-        n = min(int(maximum), n)
+    if minimum is not None or maximum is not None:
+        try:
+            n = int(n)
+            if minimum is not None:
+                n = max(int(minimum), n)     # inf / nan の境界は int() が投げる
+            if maximum is not None:
+                n = min(int(maximum), n)
+        except (TypeError, ValueError, OverflowError):
+            pass
     return n
 
 
@@ -56,7 +61,10 @@ def as_float(value, default=None, minimum=None, maximum=None):
     if isinstance(value, bool):
         n = float(value)
     elif isinstance(value, (int, float)):
-        n = float(value)
+        try:
+            n = float(value)          # 10**400 のような巨大 int は OverflowError
+        except (TypeError, ValueError, OverflowError):
+            n = None
     else:
         try:
             n = float(str(value).strip())
@@ -72,3 +80,14 @@ def as_float(value, default=None, minimum=None, maximum=None):
     if maximum is not None:
         n = min(float(maximum), n)
     return n
+
+
+def as_list(value):
+    """API 応答の「配列であるべき値」を安全に list にする（dict/その他は空リスト）。
+
+    外部 API は HTTP 200 で `{"items": null}` や文字列を返すことがある。`data.get(k, [])`
+    だと None でも文字列でも `for` で落ちる（実測 2026-10-31: JAXA links=null →
+    `TypeError: 'NoneType' is not iterable`、media/CSA/INPE/ISRO も同型で例外が
+    ツール外へ漏れた）。応答形状の変化で落とさないために入口で正規化する。
+    """
+    return value if isinstance(value, list) else []

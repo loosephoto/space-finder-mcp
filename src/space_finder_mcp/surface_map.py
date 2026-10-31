@@ -114,24 +114,38 @@ def surface_view(body: dict, lon: float, lat: float, span_deg: float, zoom: int,
         if bottom > H: bottom, top = H, H - side
         m_l = max(0, left - tl[0]); m_t = max(0, top - tl[1])
         m_r = min(mosaic.size[0], m_l + side); m_b = min(mosaic.size[1], m_t + side)
-        deg_per_px_y = 180.0 / (H * (out_px / float(side)))
         crop = mosaic.crop((m_l, m_t, m_r, m_b))
         img = crop.resize((out_px, out_px), Image.LANCZOS)
         if regional_dim is not None:
             img = img.point(lambda p: int(p * regional_dim))
         scale = out_px / float(side)
+        # 窓が地図の端／極に当たると crop は正方形にならない（切り詰められる）。
+        # `scale`（=out_px/side）で写像すると引き伸ばした画像と座標が食い違い、
+        # マーカーが別の場所に載る（実測 2026-10-31: span=359° で 326px ずれ）。
+        # **実際の crop の起点と寸法**で写像する（正方形の通常ケースでは従来と同じ値）。
+        # 起点はモザイク内座標にタイル原点 tl を足して「地図全体の座標」へ戻す
+        # （gx 側は `(lo+180)/360*W`＝地図全体の座標なので、片方だけ足すと数百pxずれる）。
+        cw_px, ch_px = crop.size
+        gx0_px = tl[0] + m_l
+        gy0_px = tl[1] + m_t
+        scale_x = out_px / float(max(1, cw_px))
+        scale_y = out_px / float(max(1, ch_px))
 
         def g2px(lo, la):
-            return ((lo + 180) / 360.0 * W - left) * scale, ((90 - la) / 180.0 * H - top) * scale
+            return (((lo + 180) / 360.0 * W - gx0_px) * scale_x,
+                    ((90 - la) / 180.0 * H - gy0_px) * scale_y)
 
 
         def inv(x, y):
-            return (((x / scale) + left) / W * 360.0 - 180.0,
-                    90.0 - ((((y / scale) + top) / H) * 180.0))
+            return (((x / scale_x) + gx0_px) / W * 360.0 - 180.0,
+                    90.0 - ((((y / scale_y) + gy0_px) / H) * 180.0))
 
         geom.update({"mode": "regional", "left": left, "top": top, "scale": scale,
-                     "side": side, "span_px": span_px,
-                     "deg_per_px": 360.0 / (W * scale), "deg_per_px_y": deg_per_px_y})
+                     "scale_x": scale_x, "scale_y": scale_y,
+                     "side": side, "span_px": span_px, "crop_px": [cw_px, ch_px],
+                     "clamped": bool(cw_px != side or ch_px != side),
+                     "deg_per_px": 360.0 / (W * scale_x),
+                     "deg_per_px_y": 180.0 / (H * scale_y)})
     return {"img": img, "g2px": g2px, "inv": inv, "mosaic": mosaic, "center_px": center_px,
             "tl": tl, "zoom": min(int(zoom), body["maxzoom"]),
             "tiles_failed": t_failed, "tiles_total": t_total, **geom}
@@ -151,6 +165,19 @@ def tile_failure_note(sv: dict) -> Optional[str]:
     return ("地図タイル {}/{} 枚を取得できませんでした（提供元にタイルが無い＝404、"
             "または一時的な取得失敗）。図の該当領域は地図ではなく背景色のままです。"
             .format(failed, total))
+
+
+def clamp_note(sv: dict) -> Optional[str]:
+    """窓が地図の端／極に接して切り詰められたことを注記にする（無ければ None）。
+
+    切り詰めても**マーカーは地形と同じ位置**に描けるよう写像を補正しているが、
+    「指定した span より狭い範囲を描いた」ことは図から読み取れないため注記に出す。
+    """
+    if not sv.get("clamped"):
+        return None
+    cw, ch = (sv.get("crop_px") or [0, 0])[:2]
+    return ("指定範囲が地図の端／極に接するため、切り詰めて描いた（切り出し {}×{} px）。"
+            "マーカー位置は切り出し実寸に合わせて補正済み".format(int(cw), int(ch)))
 
 
 def draw_marker(draw, xy: Tuple[float, float], radius: int, *, fill=(255, 60, 30),
@@ -364,17 +391,26 @@ def _regional_view(src, tl, gx, gy, W, H, span_deg, out_px, dim):
     if dim is not None:
         img = img.point(lambda p: int(p * dim))
     scale = out_px / float(side)
+    # 端／極で窓が切り詰められると crop は正方形にならない。`scale` ではなく
+    # **実際の crop 寸法**で写像しないとマーカーが地形と別の場所に載る
+    # （surface_view と同じ理由。実測: span 360° 近くで最大 326px のずれ）。
+    cw_px, ch_px = crop.size
+    scale_x = out_px / float(max(1, cw_px))
+    scale_y = out_px / float(max(1, ch_px))
 
     def g2px(lo, la):
-        return ((lo + 180) / 360.0 * W - left) * scale, ((90 - la) / 180.0 * H - top) * scale
+        return (((lo + 180) / 360.0 * W - m_l) * scale_x,
+                ((90 - la) / 180.0 * H - m_t) * scale_y)
 
     def inv(x, y):
-        return (((x / scale) + left) / W * 360.0 - 180.0,
-                90.0 - ((((y / scale) + top) / H) * 180.0))
+        return (((x / scale_x) + m_l) / W * 360.0 - 180.0,
+                90.0 - ((((y / scale_y) + m_t) / H) * 180.0))
 
     return {"img": img, "g2px": g2px, "inv": inv, "mode": "regional", "W": W, "H": H,
-            "left": left, "top": top, "scale": scale, "side": side, "span_px": span_px,
-            "deg_per_px": 360.0 / (W * scale), "deg_per_px_y": 180.0 / (H * scale)}
+            "left": left, "top": top, "scale": scale, "scale_x": scale_x, "scale_y": scale_y,
+            "side": side, "span_px": span_px, "crop_px": [cw_px, ch_px],
+            "clamped": bool(cw_px != side or ch_px != side),
+            "deg_per_px": 360.0 / (W * scale_x), "deg_per_px_y": 180.0 / (H * scale_y)}
 
 
 def image_view(url: str, lon: float, lat: float, span_deg: float, out_px: int, *,
