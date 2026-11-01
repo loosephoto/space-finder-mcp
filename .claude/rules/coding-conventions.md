@@ -66,7 +66,9 @@ observing_sheet）は、
 - 検査: `uv run python scripts/check-tools.py --figures`（注記が空・`verify.ok` が偽なら exit 1）。
 ## 構造
 
-- 共通処理は `img_common.py`（フォント探索/JPEG化/アンチメリジアン分割）、`stac_common.py`（bbox/雲量検証）、`cache.py`、`env_config.py` に集約し、各ツールへ重複実装しない。
+- 共通処理は `img_common.py`（フォント探索/JPEG化/アンチメリジアン分割）、`stac_common.py`（bbox/雲量検証）、`cache.py`、`env_config.py`、`jsonio.py`（JSON 正規化）、`places.py`（地名解決）に集約し、各ツールへ重複実装しない。
+- **`structuredContent` は JSON の7型だけで構成する**。変換は `server._delivered` の `jsonio.to_json` **1 か所**で行う（numpy は Skyfield から普通に混入する。実測: `constellation_now` に 45 個の `float64`）。各ツールに型変換を書かない・書かせない。
+- **層の分離**: 計算（`solar_model.py`）→ 組み立て（`solar_system.py`）→ 描画（`solar_render.py`）は**JSON 化できる dict（scene）だけで受け渡す**。描画層は通信せず、取得層は PIL に依存しない（`tests/test_places_and_split.py` が import を検査）。
 - 依存方向は一方向（例: `planetary_rover → planetary_map → img_common/cache`）。循環 import を作らない。
 - 依存追加は最小限（標準ライブラリ優先）。Pillow / sgp4 / requests は関数内で遅延 import（起動を速く保つ）。**ただし numpy / skyfield は起動前に import**（遅延 import すると stdio で無応答。上記「並列処理」参照）。`server.py` が直接 import する `anyio`・`numpy` は `pyproject.toml` の依存に明示する。
 

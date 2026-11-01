@@ -115,6 +115,7 @@ uv run python scripts/check-tools.py --only sat_tle,apod   # 特定ツールの�
 ## コーディング規約（要点）
 
 - 各ツールは必ず `CallToolResult` を返す（**例外を外へ漏らさない**）。`content` に人間向け表示（画像は `ImageContent`）、`structuredContent` に LLM向け純粋JSON。
+- **`structuredContent` は JSON の7型だけ**（numpy 型・`NaN` を含めない）。正規化は `server._delivered` の `jsonio.to_json` 1 か所で行い、各ツールには書かない。**層は計算→組み立て→描画に分け、間は JSON 化できる dict で渡す**（`solar_model.py` / `solar_system.py` / `solar_render.py`）。
 - 数値変換は防御的に。**ツール入口の数値引数は必ず `input_utils.as_int` / `as_float` を通す**（不正値 `"5件"` を `int()` へ直に渡すと例外が外へ漏れる）。API応答値も同様。`d[key]` より `.get()`。
 - キャッシュは `cache.py` の `ttl_cache` / `disk_get` を使い、**エラー応答はキャッシュしない**（`skip_if=is_error_result`）。キャッシュ値を呼び出し側で書き換えるなら `deepcopy`。
 - **日本語フォントは OS 非依存で解決する**（画像内の日本語が豆腐=□になるのを防ぐ）。`img_common.load_font()` が *環境変数 `SPACE_FINDER_FONT`(`_BOLD`) → OS 標準パス（Windows メイリオ / macOS ヒラギノ / Linux Noto CJK・IPA・VL・Takao）→ 標準フォントディレクトリの走査* の順に探し、採用前に **cmap を読んで日本語グリフの有無を検証**する（名前では判定できない。例: DejaVu Sans は日本語なし）。Windows のパスだけを列挙すると macOS / Linux で PIL 既定フォントに落ちて日本語が全部化ける。検査は `scripts/check-tools.py --fonts`。

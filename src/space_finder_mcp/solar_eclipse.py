@@ -29,6 +29,7 @@ from .img_common import (as_image, figure_notes, figure_payload,
                          figure_text_block, load_font, media_link_line,
                          save_output, scale_spec, view_spec)
 from .input_utils import as_float
+from .places import resolve_place as _resolve_place
 
 _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
 os.makedirs(_DATA_DIR, exist_ok=True)
@@ -75,48 +76,11 @@ def _tz_label(off):
     return "JST" if abs(off - 9.0) < 0.01 else "UTC{:+g}".format(off)
 
 
-_KNOWN_COORDS = {
-    "東京": (35.68, 139.69), "tokyo": (35.68, 139.69),
-    "大阪": (34.69, 135.50), "osaka": (34.69, 135.50),
-    "札幌": (43.06, 141.35), "sapporo": (43.06, 141.35),
-    "那覇": (26.21, 127.68), "naha": (26.21, 127.68),
-    "ニューヨーク": (40.71, -74.01), "new york": (40.71, -74.01),
-    "ロンドン": (51.51, -0.13), "london": (51.51, -0.13),
-    "シドニー": (-33.87, 151.21), "sydney": (-33.87, 151.21),
-    "ハワイ": (19.82, -155.47), "hawaii": (19.82, -155.47),
-}
-
-
 def _load():
     from skyfield.api import Loader
     loader = Loader(_DATA_DIR, verbose=False)
     eph = loader("de421.bsp")
     return loader, eph
-
-
-def _resolve_place(place, lat, lon):
-    """place 文字列 or lat/lon 数値から (lat, lon)。任意の地名は Open-Meteo でジオコーディング。
-
-    lat/lon が数値として解釈できない場合は None を返す（呼び出し側でエラーにする）。
-    """
-    if lat is not None and lon is not None:
-        la, lo = as_float(lat, None, -90.0, 90.0), as_float(lon, None, -180.0, 180.0)
-        if la is None or lo is None:
-            return None
-        return la, lo
-    if place:
-        key = str(place).strip().lower()
-        if key in _KNOWN_COORDS:
-            return _KNOWN_COORDS[key]
-        # 既知リストにない任意の地名 → オンラインで緯度経度を解決（キャッシュ込み）
-        try:
-            from .weather_astro import _geocode
-            g = _geocode(place)
-            if g:
-                return float(g["latitude"]), float(g["longitude"])
-        except Exception:
-            pass
-    return None
 
 
 def _geom_many(site, times, sun, moon):

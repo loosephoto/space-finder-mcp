@@ -111,7 +111,7 @@ class GlowTileTests(unittest.TestCase):
     def test_tile_glow_equals_full_canvas_blur(self):
         """タイルでぼかした光暈が、全画面をぼかした結果と同じ画素になる。"""
         from PIL import Image, ImageChops, ImageDraw, ImageFilter
-        from space_finder_mcp.solar_system import _glow
+        from space_finder_mcp.solar_render import _glow
 
         W = H = 420
         color = (240, 190, 90)
@@ -137,7 +137,7 @@ class GlowTileTests(unittest.TestCase):
     def test_tile_glow_line_matches_full_canvas(self):
         """彗星の尾（線分）でも同じ画素になる。"""
         from PIL import Image, ImageChops, ImageDraw, ImageFilter
-        from space_finder_mcp.solar_system import _glow
+        from space_finder_mcp.solar_render import _glow
 
         W = H = 300
         color = (120, 220, 255)

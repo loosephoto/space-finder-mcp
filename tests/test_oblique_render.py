@@ -13,6 +13,7 @@ sys.path.insert(0, "src")
 from PIL import Image  # noqa: E402
 
 from space_finder_mcp import solar_system as ss  # noqa: E402
+from space_finder_mcp import solar_render as sr  # noqa: E402
 
 
 def make_scene(range_au=None, with_route=False):
@@ -48,7 +49,7 @@ class ObliqueRenderTests(unittest.TestCase):
         scene = make_scene()
         png = ss._render_oblique(scene)
         img = Image.open(io.BytesIO(png))
-        self.assertEqual(img.size, (ss.OBLIQUE_W, ss.OBLIQUE_W))
+        self.assertEqual(img.size, (sr.OBLIQUE_W, sr.OBLIQUE_W))
         v = ss._verify_oblique(scene, png)
         self.assertTrue(v["ok"], v)
         self.assertEqual(v["checked"], 7)          # 惑星4＋小惑星1＋彗星1＋探査機1
@@ -65,13 +66,13 @@ class ObliqueRenderTests(unittest.TestCase):
         self.assertEqual([m["name"] for m in v["missing"]], ["パラス"])
 
     def test_range_au_fixes_frame(self):
-        hi, lo, kind = ss._oblique_hi(make_scene(range_au=2.0))
+        hi, lo, kind = sr._oblique_hi(make_scene(range_au=2.0))
         self.assertEqual(kind, "log")
         self.assertAlmostEqual(hi, 2.0, places=6)
         self.assertAlmostEqual(lo, 0.10, places=6)
 
     def test_auto_frame_covers_probe(self):
-        hi, _lo, _kind = ss._oblique_hi(make_scene())
+        hi, _lo, _kind = sr._oblique_hi(make_scene())
         self.assertGreaterEqual(hi, 172.0 * 1.12 - 1e-9)      # 探査機の真距離まで広がる
 
     def test_route_is_drawn(self):
@@ -90,11 +91,11 @@ class ObliqueRenderTests(unittest.TestCase):
         scene = make_scene()
         png = ss._render_oblique(scene)
         img = Image.open(io.BytesIO(png)).convert("RGB")
-        view = ss._oblique_view(scene)
+        view = sr._oblique_view(scene)
         c = scene["comets"]["ハレー彗星"]
-        pos = ss._xyz_from_au_lonlat(c["au"], c["eclLon"], c["eclLat"])
+        pos = sr._xyz_from_au_lonlat(c["au"], c["eclLon"], c["eclLat"])
         px, py, _ = view.project(pos)
-        cx = cy = ss.OBLIQUE_W / 2.0
+        cx = cy = sr.OBLIQUE_W / 2.0
         vx, vy = px - cx, py - cy
         n = (vx * vx + vy * vy) ** 0.5
         ux, uy = vx / n, vy / n                      # 太陽→彗星 = 反太陽方向
@@ -103,7 +104,7 @@ class ObliqueRenderTests(unittest.TestCase):
             total = 0
             for t in range(18, 76, 3):
                 x, y = int(px + dx * t), int(py + dy * t)
-                if 0 <= x < ss.OBLIQUE_W and 0 <= y < ss.OBLIQUE_W:
+                if 0 <= x < sr.OBLIQUE_W and 0 <= y < sr.OBLIQUE_W:
                     r, g, b = img.getpixel((x, y))
                     total += g + b
             return total

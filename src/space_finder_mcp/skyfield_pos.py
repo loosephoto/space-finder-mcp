@@ -10,6 +10,7 @@ import os
 
 from mcp.types import CallToolResult, TextContent
 from .input_utils import as_float
+from .places import CITY_COORDS as _KNOWN_COORDS
 
 _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
 os.makedirs(_DATA_DIR, exist_ok=True)
@@ -22,18 +23,6 @@ BODY_JA = {
 }
 BODIES = ["sun", "moon", "mercury", "venus", "mars",
           "jupiter_barycenter", "saturn_barycenter", "uranus_barycenter", "neptune_barycenter"]
-
-_KNOWN_COORDS = {
-    "東京": (35.68, 139.69), "tokyo": (35.68, 139.69),
-    "大阪": (34.69, 135.50), "osaka": (34.69, 135.50),
-    "札幌": (43.06, 141.35), "sapporo": (43.06, 141.35),
-    "福岡": (33.59, 130.40), "fukuoka": (33.59, 130.40),
-    "那覇": (26.21, 127.68), "naha": (26.21, 127.68),
-    "ニューヨーク": (40.71, -74.01), "new york": (40.71, -74.01),
-    "ロンドン": (51.51, -0.13), "london": (51.51, -0.13),
-    "シドニー": (-33.87, 151.21), "sydney": (-33.87, 151.21),
-    "ハワイ": (19.82, -155.47), "hawaii": (19.82, -155.47),
-}
 
 CONSTELLATION_JA = {
     "And": "アンドロメダ座", "Ant": "ポンプ座", "Aps": "ふうちょう座", "Aqr": "みずがめ座",

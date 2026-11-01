@@ -22,7 +22,6 @@ import os
 import requests
 
 from .celestrak import CELESTRAK_SOURCE, fetch_tle_ex
-from .input_utils import as_float
 
 _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
 os.makedirs(_DATA_DIR, exist_ok=True)
@@ -46,18 +45,6 @@ _BRIGHT_STARS = [
     ("ポルックス", 7.7553, 28.026), ("フォーマルハウト", 22.9610, -29.622),
     ("デネブ", 20.6919, 45.280), ("レグルス", 10.1396, 11.967),
 ]
-_KNOWN_COORDS = {
-    "東京": (35.68, 139.69), "tokyo": (35.68, 139.69),
-    "大阪": (34.69, 135.50), "osaka": (34.69, 135.50),
-    "札幌": (43.06, 141.35), "sapporo": (43.06, 141.35),
-    "那覇": (26.21, 127.68), "naha": (26.21, 127.68),
-    "ニューヨーク": (40.71, -74.01), "new york": (40.71, -74.01),
-    "ロンドン": (51.51, -0.13), "london": (51.51, -0.13),
-    "シドニー": (-33.87, 151.21), "sydney": (-33.87, 151.21),
-    "ハワイ": (19.82, -155.47), "hawaii": (19.82, -155.47),
-}
-
-
 def _fetch_tle(catnr):
     """TLE 2行 (line1, line2) と出典を取得（失敗時は (None, "")）。
 
@@ -102,31 +89,6 @@ def _tle_source_summary(sources: dict) -> str:
     if hosts == [CELESTRAK_SOURCE]:
         return "CelesTrak TLE"
     return "TLE出典: {}".format("、".join(hosts))
-
-
-def _resolve_place(place, lat, lon):
-    """place 文字列 or lat/lon 数値から (lat, lon)。任意の地名は Open-Meteo でジオコーディング。
-
-    lat/lon が数値として解釈できない場合は None を返す（呼び出し側でエラーにする）。
-    """
-    if lat is not None and lon is not None:
-        la, lo = as_float(lat, None, -90.0, 90.0), as_float(lon, None, -180.0, 180.0)
-        if la is None or lo is None:
-            return None
-        return la, lo
-    if place:
-        key = str(place).strip().lower()
-        if key in _KNOWN_COORDS:
-            return _KNOWN_COORDS[key]
-        # 既知リストにない任意の地名 → オンラインで緯度経度を解決（キャッシュ込み）
-        try:
-            from .weather_astro import _geocode
-            g = _geocode(place)
-            if g:
-                return float(g["latitude"]), float(g["longitude"])
-        except Exception:
-            pass
-    return None
 
 
 def sky_map_with_satellites(place=None, lat=None, lon=None, when=None,

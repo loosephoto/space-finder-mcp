@@ -13,6 +13,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, TextContent
 
 from . import img_common
+from . import jsonio
 from . import tool_docs
 from .wikidata_lookup import reverse_lookup
 from . import nasa as _nasa
@@ -102,32 +103,42 @@ def _threaded(fn):
 def _delivered(result):
     """ツールの戻り値を、そのままクライアントへ出せる形に整えて返す。
 
-    唯一の出口（`_threaded`）で content のテキストを整形する。現状はメディアの
-    リンク行を独立した段落にすることだけを行う（`img_common.layout_media_links`）。
-    各ツールが個別に空行を入れる運用だと、1箇所忘れただけで複数の画像を返したときに
-    リンクが1行に畳み込まれる。呼び出し元の結果は ttl_cache で共有され得るので
-    書き換えず、変化があったときだけ新しい CallToolResult を組む。
+    唯一の出口（`_threaded`）で 2 つを行う:
+    1. `content` のテキスト整形（メディアのリンク行を独立した段落にする。
+       `img_common.layout_media_links`）。各ツールが個別に空行を入れる運用だと、
+       1箇所忘れただけで複数の画像を返したときにリンクが1行に畳み込まれる。
+    2. `structuredContent` の JSON ネイティブ化（`jsonio.to_json`）。Skyfield の
+       numpy 型がそのまま JSON-RPC へ流れるのを防ぐ（型の変換はここ 1 か所だけ。
+       個々のツールに書かせない＝受け渡しの契約を分散させない）。
+
+    呼び出し元の結果は ttl_cache で共有され得るので書き換えず、変化があったときだけ
+    新しい CallToolResult を組む（`to_json` も新しいコンテナを作る）。
     """
+    updates = {}
     blocks = getattr(result, "content", None)
-    if not blocks:
-        return result
-    new_blocks = []
-    changed = False
-    for b in blocks:
-        if getattr(b, "type", "") == "text":
-            text = getattr(b, "text", "") or ""
-            laid = img_common.layout_media_links(text)
-            if laid != text:
-                b = TextContent(type="text", text=laid)
-                changed = True
-        new_blocks.append(b)
-    if not changed:
+    if blocks:
+        new_blocks = []
+        changed = False
+        for b in blocks:
+            if getattr(b, "type", "") == "text":
+                text = getattr(b, "text", "") or ""
+                laid = img_common.layout_media_links(text)
+                if laid != text:
+                    b = TextContent(type="text", text=laid)
+                    changed = True
+            new_blocks.append(b)
+        if changed:
+            updates["content"] = new_blocks
+    sc = getattr(result, "structuredContent", None)
+    if sc is not None:
+        updates["structuredContent"] = jsonio.to_json(sc)
+    if not updates:
         return result
     try:
-        return result.model_copy(update={"content": new_blocks})
+        return result.model_copy(update=updates)
     except Exception:  # pragma: no cover - pydantic でない場合の保険
-        return CallToolResult(content=new_blocks,
-                              structuredContent=getattr(result, "structuredContent", None))
+        return CallToolResult(content=updates.get("content", blocks),
+                              structuredContent=updates.get("structuredContent", sc))
 
 
 def _reg(fn, name: Optional[str] = None):

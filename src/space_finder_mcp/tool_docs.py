@@ -57,6 +57,64 @@ def _summary(block: str, cap: int = 300) -> str:
     return out or block[:cap].strip()
 
 
+def _unwrap(block: str) -> str:
+    """折り返された段落を 1 行に戻す（日本語は詰め、英数字の境目だけ空白を残す）。"""
+    out = ""
+    for ln in block.split("\n"):
+        s = ln.strip()
+        if not s:
+            continue
+        if out and out[-1].isascii() and out[-1].isalnum() and s[0].isascii() and s[0].isalnum():
+            out += " "
+        out += s
+    return out
+
+
+def _sentences(block: str) -> list:
+    """段落を文単位に分ける（`。` 区切り）。"""
+    return [p.strip() for p in re.split(r"(?<=。)", _unwrap(block)) if p.strip()]
+
+
+def _contract_clause(sentence: str, limit: int = 160) -> str:
+    """契約を含む「節」に切り詰める（長い段落の途中でも文として読める長さに）。
+
+    段落全体を文単位で拾うと、背景説明の長い文がそのまま載って description が
+    膨らむ（実測: 文単位にしただけで +559 バイト）。契約の手がかりを含む節だけを
+    残し、`、` で区切って最も短い単位にする。
+    """
+    if len(sentence) <= limit:
+        return sentence
+    clauses = [c.strip() for c in sentence.split("、") if c.strip()]
+    hits = [c for c in clauses if any(k in c for k in _CONTRACT_KEYS)]
+    if hits:
+        clause = min(hits, key=len)
+        return clause if clause.endswith("。") else clause + "。"
+    return sentence[:limit].rstrip() + "…"
+
+
+def _contract_sentences(blocks, already=()) -> list:
+    """契約文（メディアのリンク提示・figure.notes の引用）を文単位で拾う。
+
+    行単位で拾うと、折り返された長い段落の途中の行が孤立した断片として出る
+    （実測 2026-11-01: `solar_system_now` の description に「描き、その旨を
+    figure.notes に出す。」「その旨は figure.notes に数値から生成して入る）。」が
+    載り、計 11 行 / 4 ツールが意味の通らない断片を含んでいた）。文に戻してから
+    節単位で拾い、要約・例・Args と重複する内容は落とす。
+    """
+    out = []
+    for b in blocks:
+        if any(head in b for head in _ARG_HEADS):     # Args は別途そのまま出す
+            continue
+        for s in _sentences(b):
+            if not any(k in s for k in _CONTRACT_KEYS):
+                continue
+            clause = _contract_clause(s)
+            if clause in out or clause in already:
+                continue
+            out.append(clause)
+    return out[:2]
+
+
 def compact_description(doc: str, cap: int = 300) -> str:
     """docstring から「要約＋例＋Args＋契約文」を作る（元の docstring は変更しない）。"""
     blocks = _blocks(doc)
@@ -82,11 +140,7 @@ def compact_description(doc: str, cap: int = 300) -> str:
             continue
         break
     # 契約文（メディアのリンク提示・figure.notes の引用）を文単位で拾う
-    for b in blocks:
-        for ln in b.split("\n"):
-            s = ln.strip()
-            if s and any(k in s for k in _CONTRACT_KEYS) and s not in out:
-                out.append(s)
+    out += _contract_sentences(blocks, tuple(out))
     return "\n\n".join(x for x in out if x)
 
 

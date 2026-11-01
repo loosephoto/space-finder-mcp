@@ -11,7 +11,7 @@
 ## ✨ 特徴
 
 - **画像・動画・音声をそのまま返せる** — 画像はチャット内にインライン表示、音声・動画は再生URLを返却
-- **tokyo-transit方式のJSON応答** — 人間向け表示（`content`）とLLM向け純粋JSON（`structuredContent`）を分離し、情報を失わずに構造化データを渡せる
+- **tokyo-transit方式のJSON応答** — 人間向け表示（`content`）とLLM向け純粋JSON（`structuredContent`）を分離し、情報を失わずに構造化データを渡せる。`structuredContent` は**JSON の7型だけ**（全ツール共通の出口 `jsonio.to_json` が numpy 型・`NaN` を変換するので、クライアント側で型が揺れない）
 - **認証不要のツールが大半** — APIキーの管理なしですぐ動く（NASA の一部ツールのみ任意キー。ESA/Copernicus は検索・プレビューのみで、認証付きダウンロードは非対応）
 - **他国の宇宙機関データに対応** — インド ISRO・欧州 ESA/Copernicus・日本 JAXA・カナダ CSA・ブラジル INPE・英国 EO DataHub・フランス CNES・**ドイツ DLR EOC**・**ロシア Roscosmos オープンデータ**・中国 CNSA 系ポータル・全衛星軌道(CelesTrak)・EO Dashboard(NASA/ESA/JAXA共同) を横断検索
 - **天体カタログと系外惑星、準天頂衛星に対応** — 天体の素性は SIMBAD、観測星表は VizieR（いずれも CDS・認証不要）、系外惑星は NASA Exoplanet Archive、**みちびき（QZSS）**の精密軌道は内閣府の公開アーカイブ API から取得します（QZSS は提供元明記の**非商用利用のみ**）

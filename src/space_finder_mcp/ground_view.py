@@ -1294,7 +1294,8 @@ def sky_ground(place=None, lat=None, lon=None, when=None, span=360.0, az0=0.0,
             本文に「この視野の外」として列挙する（図に無いものを「見えている」と
             書かないため）。
     """
-    from .sky_overlay import _resolve_place, _SAT_CATALOG as _sat_catalog
+    from .places import resolve_place as _resolve_place
+    from .sky_overlay import _SAT_CATALOG as _sat_catalog
     span = as_float(span, 360.0, 30.0, 360.0) or 360.0
     az0 = as_float(az0, 0.0, -360.0, 360.0) or 0.0
     focus = [f.strip() for f in str(show).split(",") if f.strip()] if show else None

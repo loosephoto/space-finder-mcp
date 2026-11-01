@@ -87,7 +87,12 @@ src/space_finder_mcp/
 ├── server.py        # FastMCP サーバー定義・67ツール登録
 ├── cache.py         # キャッシュ基盤（TTLメモリ / ディスク資産）
 ├── img_common.py    # 画像共通（フォント探索 / JPEG化 / アンチメリジアン分割）
+├── jsonio.py        # structuredContent の JSON 正規化（唯一の境界。numpy型/NaN を JSON 七型へ）
+├── places.py        # 地名→緯度経度の共有テーブルと解決（skyfield_pos / solar_eclipse が使う）
 ├── orbit_view.py    # 斜め俯瞰の投影部品（正射影/弱い透視・対数/線形動径・円錐曲線・深度）
+├── solar_model.py   # 太陽系のデータモデルと軌道計算（SBDB 要素・ケプラー伝播・円錐曲線）
+├── solar_render.py  # 太陽系の斜め俯瞰レンダラと画素検証（Pillow・通信しない）
+├── solar_system.py  # solar_system_now（Horizons 取得・scene の組み立て・ツールハンドラ）
 ├── surface_map.py   # 天体面地図の共通描画（タイル合成 / 等角投影 / 地点マーカー / 画素検証）
 ├── stac_common.py   # STAC系の入力検証（bbox / 雲量）
 ├── name_common.py   # 天体名・衛星名の解決（表記ゆれ / 和名→英語 / Sesame で名前→座標）

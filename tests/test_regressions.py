@@ -7,6 +7,10 @@ import requests
 sys.path.insert(0, "src")
 
 
+from space_finder_mcp import solar_model as sm
+from space_finder_mcp import solar_render as sr
+
+
 class OverviewLabelBoxTests(unittest.TestCase):
     """表示範囲を絞った俯瞰図で、彗星・小惑星・探査機のラベル箱が惑星マーカーを覆わないこと。
 
@@ -29,8 +33,8 @@ class OverviewLabelBoxTests(unittest.TestCase):
     def _xy(self, au, lon):
         """斜め俯瞰の投影での画素位置（図と検証が同じ View を使う）。"""
         ss, scene = self._last
-        v = ss._oblique_view(scene)
-        px, py, _d = v.project(ss._xyz_from_au_lonlat(au, lon, 0.0))
+        v = sr._oblique_view(scene)
+        px, py, _d = v.project(sr._xyz_from_au_lonlat(au, lon, 0.0))
         return px, py
 
     def _scene(self, planet_lon=25.0, comet_lon=17.0, comet_au=2.0):
@@ -970,22 +974,48 @@ class OrbitRouteTests(unittest.TestCase):
         self.assertEqual(len(r.content), 2)
         self.assertIn("file:///", r.content[0].text.splitlines()[0])   # 画像より前にリンク（規約13）
 
-    def test_route_mark_inside_sun_disk_is_not_claimed(self):
-        # 近日点が誇張した太陽円盤の内側に入る彗星では、目印を描かず「図からは確認できない」を
-        # 注記に出す（描いていないのに描いたと言わない）。
-        from space_finder_mcp.solar_system import solar_system_now
+    def test_sun_disk_occlusion_claim_is_verified_from_pixels(self):
+        """「太陽円盤の内側だから描いていない」という主張を画素で検算できること。
 
-        r = solar_system_now(comet="紫金山・アトラス彗星", route=True, projection="top")
-        sc = r.structuredContent or {}
-        self.assertNotIn("error", sc)
-        v = (sc.get("figure") or {}).get("verify") or {}
-        self.assertTrue(v.get("ok"), v.get("missing"))
-        marks = v["routes"][0]["marks"]
-        self.assertEqual(marks[0]["label"], "近日点")
-        self.assertFalse(marks[0]["drawn"])
-        self.assertEqual(marks[0]["reason"], "sun_disk")
+        実測 2026-11-01: 旧テストは実データ（紫金山・アトラス彗星の近日点）が太陽円盤に
+        入ることに依存していたが、v0.47 で太陽の描画半径を最内惑星より小さくしてからは
+        近日点が円盤の外に出て **HEAD でも落ちていた**（`pixels_found: 52`）。日付で
+        結果が変わるテストは時限式に壊れるので、合成シーンで契約だけを固定する。
+        """
+        import io as _io
+        from PIL import Image
+
+        from space_finder_mcp.solar_render import _verify_route_draw
+
+        buf = _io.BytesIO()
+        Image.new("RGB", (1000, 1000), (11, 16, 38)).save(buf, format="PNG")
+        png = buf.getvalue()
+
+        def scene_with(mark_px):
+            return {
+                "route_draw": {"C/2023 A3": {
+                    "name": "C/2023 A3", "color": [120, 220, 230], "segments": 12,
+                    "dash_samples": [], "sun_disk_px": 60.0,
+                    "marks": [{"id": "perihelion", "label": "近日点", "au": 0.39,
+                               "px": list(mark_px), "date": "2024-09-27",
+                               "drawn": False, "reason": "sun_disk"}]}},
+                "routes": {"C/2023 A3": {"points": []}},
+            }
+
+        v = _verify_route_draw(png, scene_with((500, 520)))     # 中心から 20px（円盤内）
+        self.assertTrue(v["ok"], v.get("missing"))
+        mark = v["routes"][0]["marks"][0]
+        self.assertEqual(mark["label"], "近日点")
+        self.assertFalse(mark["drawn"])
+        self.assertEqual(mark["reason"], "sun_disk")
         self.assertTrue(v["routes"][0]["occluded"][0]["verified"])
-        self.assertTrue(any("確認できない" in n for n in sc["figure"]["notes"]))
+
+        # 円盤の外なのに「内側だから描いていない」と言ったら不合格（主張を測って否定する）
+        v2 = _verify_route_draw(png, scene_with((500, 900)))
+        self.assertFalse(v2["ok"])
+        self.assertTrue(any("太陽円盤の内側という説明が位置と合わない" in m
+                            for m in v2["missing"]))
+
 
     def test_route_marks_are_visible_in_linear_scale(self):
         """線形縮尺（engine="accurate" 互換）でも経路の◇が画素として残ること。
@@ -1626,8 +1656,8 @@ class CometRenderRegressionTests(unittest.TestCase):
 
     def _comet_marker_px(self, ss, scene, co):
         """彗星マーカーの画素位置（描画と同じ View で投影した 3D の実位置）。"""
-        v = ss._oblique_view(scene)
-        px, py, _d = v.project(ss._xyz_from_au_lonlat(co["au"], co["eclLon"],
+        v = sr._oblique_view(scene)
+        px, py, _d = v.project(sr._xyz_from_au_lonlat(co["au"], co["eclLon"],
                                                       co.get("eclLat") or 0.0))
         return px, py
 
@@ -1714,7 +1744,7 @@ class CometRenderRegressionTests(unittest.TestCase):
         png = ss._render_oblique(scene)
         im = Image.open(io.BytesIO(png)).convert("RGB")
         box = im.load()
-        view = ss._oblique_view(scene)
+        view = sr._oblique_view(scene)
 
         def bright(pxy, r=6):
             n = 0
@@ -1724,8 +1754,8 @@ class CometRenderRegressionTests(unittest.TestCase):
                         n += 1
             return n
 
-        at_3d = expected_px(view, ss._xyz_from_au_lonlat(10.0, 0.0, 60.0))
-        at_proj = expected_px(view, ss._xyz_from_au_lonlat(5.0, 0.0, 0.0))
+        at_3d = expected_px(view, sr._xyz_from_au_lonlat(10.0, 0.0, 60.0))
+        at_proj = expected_px(view, sr._xyz_from_au_lonlat(5.0, 0.0, 0.0))
         self.assertGreater(bright(at_3d), 20, "3D の実位置に彗星マーカーが無い")
         self.assertLess(bright(at_proj), 5,
                         "彗星マーカーが黄緯を落とした正射影位置に置かれている")
@@ -1772,7 +1802,7 @@ class CometRenderRegressionTests(unittest.TestCase):
         y = sum(_B[1][k] * (xp, yp, 0.0)[k] for k in range(3))
         z2 = sum(_B[2][k] * (xp, yp, 0.0)[k] for k in range(3))
         # 逆変換が正しいことを確認（実装の順変換へ戻して perifocal 座標が一致すること）
-        _bx, _by = ss._ecliptic_to_perifocal(x, y, z2, el["i_deg"], el["node_deg"],
+        _bx, _by = sm._ecliptic_to_perifocal(x, y, z2, el["i_deg"], el["node_deg"],
                                              el["argp_deg"])
         self.assertAlmostEqual(_bx, xp, places=6)
         self.assertAlmostEqual(_by, yp, places=6)
