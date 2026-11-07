@@ -140,11 +140,13 @@ class MastTests(unittest.TestCase):
     def test_bad_numeric_args_do_not_raise(self):
         """ゲートの fuzz（不正値注入）で例外を漏らさない。"""
         with mock.patch.object(self.mast, "_invoke", return_value=({"data": []}, None)) as inv:
-            res = self.mast.mast_observations(ra=83.82, dec="-5.39", radius="x", limit="3件",
-                                              start_date="?")
+            res = self.mast.mast_observations(ra=83.82, dec="-5.39", radius="x", limit="3件")
         self.assertIsInstance(res.structuredContent, dict)
         self.assertNotIn("error", res.structuredContent)
         self.assertEqual(inv.call_args[0][1]["position"].split(", ")[2], "0.05")
+        # 日付として解析できない値は例外ではなくエラー結果（黙って無視しない。v0.50.0 監査修正）
+        bad_date = self.mast.mast_observations(ra=83.82, dec=-5.39, start_date="?")
+        self.assertEqual(bad_date.structuredContent["error"], "invalid start_date")
         # 座標が解決できない入力は例外ではなくエラー結果
         bad = self.mast.mast_observations(ra="?", dec="?", radius="x", limit="?")
         self.assertEqual(bad.structuredContent["error"], "location required")

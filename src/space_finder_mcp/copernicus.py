@@ -13,7 +13,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_error_result
-from .stac_common import parse_bbox, parse_cloud_cover
+from .stac_common import expand_datetime, parse_bbox, parse_cloud_cover
 from .input_utils import as_int
 
 STAC = "https://stac.dataspace.copernicus.eu/v1"
@@ -90,6 +90,7 @@ def copernicus_search(collection: str = "sentinel-2-l2a", bbox: Optional[str] = 
         collection: STAC コレクションID（既定 "sentinel-2-l2a"）。copernicus_collections で確認可。
         bbox: 空間範囲（"lon_min,lat_min,lon_max,lat_max"、例 東京: "139.6,35.5,139.9,35.8"）。
         datetime: 時間範囲（"YYYY-MM-DD" または "start/end"、例 "2026-01-01/2026-03-31"）。省略で最新。
+                 日付のみの指定は RFC3339（T00:00:00Z）へ展開して送る（CDSE は date-only を 400 で拒否するため）。
         max_cloud_cover: 雲量の上限（%）（Sentinel-2 等 eo:cloud_cover を持つ場合）。
         limit: 返す件数（既定 5、最大 10）。
     """
@@ -104,7 +105,8 @@ def copernicus_search(collection: str = "sentinel-2-l2a", bbox: Optional[str] = 
     if bbox_vals:
         body["bbox"] = bbox_vals
     if datetime:
-        body["datetime"] = datetime
+        # CDSE は date-only を 400 で拒否する（"invalid datetime separator, expected `T`"）
+        body["datetime"] = expand_datetime(datetime)
     cloud, cloud_err = parse_cloud_cover(max_cloud_cover)
     if cloud_err:
         return CallToolResult(

@@ -13,7 +13,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_error_result
-from .stac_common import parse_bbox, parse_cloud_cover
+from .stac_common import expand_datetime, parse_bbox, parse_cloud_cover
 from .input_utils import as_int
 
 STAC = "https://earth-search.aws.element84.com/v1"
@@ -98,6 +98,7 @@ def stac_search(collection: str = "sentinel-2-l2a", bbox: Optional[str] = None,
         bbox: 空間範囲（"lon_min,lat_min,lon_max,lat_max"）。
         place: 地名（bbox より優先。Open-Meteo のジオコーディングで解決）。
         datetime: 時間範囲（"YYYY-MM-DD" または "start/end"）。省略で最近。
+                 日付のみの指定は RFC3339（T00:00:00Z）へ展開して送る（当 API は date-only を 400 で拒否するため）。
         max_cloud_cover: 雲量上限（%）（eo:cloud_cover を持つ場合）。
         limit: 返す件数（既定 5、最大 10）。
     """
@@ -129,7 +130,8 @@ def stac_search(collection: str = "sentinel-2-l2a", bbox: Optional[str] = None,
             body["bbox"] = [139.6, 35.5, 139.9, 35.8]
 
     if datetime:
-        body["datetime"] = datetime
+        # AWS Earth Search は date-only を 400 で拒否する（"does not match RFC3339 format"）
+        body["datetime"] = expand_datetime(datetime)
     cloud, cloud_err = parse_cloud_cover(max_cloud_cover)
     if cloud_err:
         return CallToolResult(

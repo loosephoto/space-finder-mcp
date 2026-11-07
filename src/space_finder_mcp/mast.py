@@ -325,6 +325,15 @@ def mast_observations(object_name: Optional[str] = None, ra: Optional[float] = N
                 structuredContent={"error": "location required",
                                    "note": "object_name か ra/dec が必要"})
 
+    for _which, _raw in (("start_date", start_date), ("end_date", end_date)):
+        if _raw and _mjd_from_date(_raw) is None:
+            return CallToolResult(
+                content=[TextContent(type="text", text=(
+                    "{} は 'YYYY-MM-DD'（UTC）で指定してください（例: 2024-01-31。"
+                    "年のみ '2024'・年月 '2024-01' も可）。受け取った値: {!r}").format(
+                    _which, str(_raw).strip()))],
+                structuredContent={"error": "invalid " + _which, _which: str(_raw)},
+            )
     filters = _build_filters(mission, instrument, product_type, start_date, end_date, target_text,
                              include_calibration=bool(include_calibration))
     params = {"columns": COLS, "filters": filters}

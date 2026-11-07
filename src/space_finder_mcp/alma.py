@@ -187,11 +187,13 @@ def alma_search(object_name: Optional[str] = None,
     matched_via = "target_name（完全一致）"
     like_used = []
     first_word = ""
+    name_cond = ""
     if object_name:
         obj = " ".join(str(object_name).split())
         first_word = first_token(obj)
         variants = name_variants(obj)
-        where += " AND target_name IN ({})".format(",".join(_sql_str(v) for v in variants))
+        name_cond = " AND target_name IN ({})".format(",".join(_sql_str(v) for v in variants))
+        where += name_cond
     else:
         if ra is None or dec is None:
             return CallToolResult(
@@ -243,14 +245,16 @@ def alma_search(object_name: Optional[str] = None,
     if object_name and len(rows) <= 1:
         pats = like_patterns(object_name)
         if pats:
-            cond = where + " AND (" + " OR ".join(
+            # 再試行は完全一致の IN 句を外す（残ると元の結果の部分集合にしかならず
+            # 0 件を拾い直せない = 再試理が一度も発動しないデッドコードになっていた）
+            cond = where.replace(name_cond, "", 1) + " AND (" + " OR ".join(
                 f"target_name LIKE {_sql_str(x)}" for x in pats) + ")"
             rows2, err2 = _run(cond)
             if not err2 and len(rows2) > 1:
                 rows, like_used = rows2, pats
                 matched_via = "target_name（表記ゆれを許容した部分一致）"
     if len(rows) <= 1:
-        cands = _candidate_names(first_word) if first_token else []
+        cands = _candidate_names(first_word) if first_word else []  # first_token は関数オブジェクト（常に真）
         target = object_name or f"{ra:.3f}, {dec:.3f}"
         msg = [f"「{target}」に一致する ALMA 観測データは見つかりませんでした。"]
         if cands:

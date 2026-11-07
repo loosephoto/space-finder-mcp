@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 import unittest
+from unittest import mock
 
 import requests
 
@@ -263,6 +264,211 @@ class MediaShapeTests(unittest.TestCase):
             self.assertEqual(jaxa._child_collections(), [])
         finally:
             jaxa._get_json = old
+
+
+class ExpandDatetimeTests(unittest.TestCase):
+    """CDSE / AWS Earth Search は date-only を 400 で拒否するため RFC3339 へ展開する。"""
+
+    def test_single_date_expands_to_full_day_range(self):
+        from space_finder_mcp.stac_common import expand_datetime
+        self.assertEqual(expand_datetime("2026-01-01"),
+                         "2026-01-01T00:00:00Z/2026-01-01T23:59:59Z")
+
+    def test_start_end_expands_both_sides(self):
+        from space_finder_mcp.stac_common import expand_datetime
+        self.assertEqual(expand_datetime("2026-01-01/2026-03-31"),
+                         "2026-01-01T00:00:00Z/2026-03-31T23:59:59Z")
+
+    def test_full_timestamp_and_open_end_are_untouched(self):
+        from space_finder_mcp.stac_common import expand_datetime
+        full = "2026-01-01T00:00:00Z/2026-03-31T23:59:59Z"
+        self.assertEqual(expand_datetime(full), full)
+        self.assertEqual(expand_datetime("2026-01-01/"), "2026-01-01T00:00:00Z/")
+
+    def test_month_and_year_forms(self):
+        from space_finder_mcp.stac_common import expand_datetime
+        self.assertEqual(expand_datetime("2026-02"),
+                         "2026-02-01T00:00:00Z/2026-02-28T23:59:59Z")
+        self.assertEqual(expand_datetime("2024"),
+                         "2024-01-01T00:00:00Z/2024-12-31T23:59:59Z")
+
+    def test_nonexistent_calendar_date_passes_through_unchanged(self):
+        from space_finder_mcp.stac_common import expand_datetime
+        self.assertEqual(expand_datetime("2026-02-30"), "2026-02-30")
+
+    def test_stac_bodies_carry_expanded_datetime_offline(self):
+        """date-only を渡すとリクエスト body は RFC3339 になる（上流 400 の防止・オフライン）。"""
+        from space_finder_mcp import copernicus, stac_search
+        bodies = []
+
+        class _Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"features": []}
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            bodies.append(json)
+            return _Resp()
+
+        for mod, fn in ((copernicus, "copernicus_search"), (stac_search, "stac_search")):
+            with mock.patch.object(mod.requests, "post", fake_post):
+                res = getattr(mod, fn).__wrapped__(datetime="2026-10-01/2026-10-02")
+            self.assertNotIn("error", res.structuredContent)
+        self.assertEqual(len(bodies), 2)
+        for b in bodies:
+            self.assertEqual(b["datetime"], "2026-10-01T00:00:00Z/2026-10-02T23:59:59Z")
+
+
+class AlmaRetryTests(unittest.TestCase):
+    """完全一致 0 件の再試行は IN 句を外して部分一致だけで拾い直す。"""
+
+    def test_retry_drops_exact_in_clause(self):
+        from space_finder_mcp import alma
+        queries = []
+        hdr = ["obs_publisher_did", "target_name", "s_ra", "s_dec", "band_list", "em_min",
+               "em_max", "proposal_id", "data_rights", "dataproduct_type", "s_resolution",
+               "t_exptime", "pwv", "qa2_passed", "obs_release_date", "pi_name", "pub_title",
+               "publication_year", "access_url"]
+        row1 = ["uid://a1", "HL Tau", "202.5", "-18.3", "6", "1.3", "1.0", "2023.1.001",
+                "Public", "cube", "0.5", "300", "0.6", "T", "2024-05-01", "PI", "Title",
+                "2025", ""]
+        row2 = ["uid://a2", "HL_Tau", "202.5", "-18.3", "6", "1.3", "1.0", "2023.1.002",
+                "Public", "cube", "0.5", "300", "0.6", "T", "2024-05-02", "PI", "Title",
+                "2025", ""]
+
+        def fake_query(q, limit):
+            queries.append(q)
+            if "target_name IN" in q:
+                return [], None          # 完全一致は 0 件
+            return [hdr, row1, row2], None  # 再試行（部分一致）で 2 件
+
+        with mock.patch.object(alma, "_do_query", fake_query):
+            res = alma.alma_search.__wrapped__(object_name="HL TAU")
+        self.assertEqual(len(queries), 2)
+        self.assertIn("target_name IN", queries[0])
+        self.assertNotIn("target_name IN", queries[1])
+        self.assertIn("LIKE", queries[1])
+        text = res.content[0].text
+        self.assertIn("表記ゆれ", text)
+        self.assertIn("2件 表示", text)
+
+    def test_coordinate_search_does_not_suggest_unrelated_names(self):
+        """座標検索 0 件では _candidate_names("")（LIKE '%'）を呼ばない。"""
+        from space_finder_mcp import alma
+        calls = []
+
+        def fake_query(q, limit):
+            calls.append(q)
+            return [], None
+
+        with mock.patch.object(alma, "_do_query", fake_query):
+            res = alma.alma_search.__wrapped__(ra=10.1234, dec=-10.5678, radius=0.0001)
+        self.assertEqual(res.structuredContent["count"], 0)
+        self.assertEqual(res.structuredContent["candidates"], [])
+        self.assertEqual(len(calls), 1)   # 円錐検索 1 本だけ（名前の候補抽出はしない）
+
+
+class CsaZeroResultNotCachedTests(unittest.TestCase):
+    """csa の 0 件応答は 24 時間キャッシュしない（一時的な空応答の固定化防止）。"""
+
+    def test_zero_total_is_not_cached(self):
+        from space_finder_mcp import csa
+        calls = {"n": 0}
+
+        def fake_ckan(action, params=None):
+            calls["n"] += 1
+            return {"success": True, "result": {"count": 0, "results": []}}
+
+        with mock.patch.object(csa, "_ckan", fake_ckan):
+            csa.csa_dataset_search(query="zzqqxxnotexist-v0500-2")   # デコレータ経由
+            csa.csa_dataset_search(query="zzqqxxnotexist-v0500-2")
+        self.assertEqual(calls["n"], 2, "0 件応答がキャッシュされてはならない")
+
+
+class MastDateValidationTests(unittest.TestCase):
+    """存在しない日付（02-30 等）は黙って無視せずエラーにする（roscosmos と同じ扱い）。"""
+
+    def test_nonexistent_date_returns_error_without_http(self):
+        from space_finder_mcp import mast
+        calls = {"n": 0}
+
+        def boom(*a, **k):
+            calls["n"] += 1
+            raise requests.ConnectionError("blocked")
+
+        with mock.patch.object(mast.requests, "post", boom), \
+                mock.patch.object(mast.requests, "get", boom), \
+                mock.patch.object(requests.Session, "request", boom):
+            res = mast.mast_observations.__wrapped__(ra=10.68, dec=41.27,
+                                                     start_date="2026-02-30")
+        self.assertEqual(calls["n"], 0)
+        self.assertIn("error", res.structuredContent)
+        self.assertIn("2026-02-30", res.content[0].text)
+        self.assertIn("YYYY-MM-DD", res.content[0].text)
+
+    def test_valid_dates_still_reach_filters(self):
+        from space_finder_mcp import mast
+        built = {}
+
+        def fake_filters(*a, **k):
+            built["args"] = a
+            return []
+
+        with mock.patch.object(mast, "_build_filters", fake_filters):
+            res = mast.mast_observations.__wrapped__(ra=10.68, dec=41.27,
+                                                     start_date="2026-02-28",
+                                                     end_date="2026-03-31")
+        self.assertEqual(built["args"][3], "2026-02-28")
+        self.assertEqual(built["args"][4], "2026-03-31")
+
+
+class EsoSeeingWindowTests(unittest.TestCase):
+    """API が窓外のサンプルを返しても集計は窓内だけに使う。"""
+
+    def test_out_of_window_samples_are_excluded(self):
+        import datetime as dt
+        from space_finder_mcp import eso
+        now = dt.datetime.now(dt.timezone.utc)
+        old_ms = int((now - dt.timedelta(hours=9)).timestamp() * 1000)
+        in_ms = int((now - dt.timedelta(hours=1)).timestamp() * 1000)
+
+        class _Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"dimm_paranal-fwhm": [[old_ms, 0.9], [in_ms, 0.7]]}
+
+        with mock.patch.object(eso.requests, "get",
+                               lambda url, params=None, headers=None, timeout=None: _Resp()):
+            res = eso.eso_seeing.__wrapped__(hours=6)
+        sc = res.structuredContent
+        self.assertEqual(sc["fields"]["dimm_paranal-fwhm"]["samples"], 1)
+        self.assertAlmostEqual(sc["fields"]["dimm_paranal-fwhm"]["avg"], 0.7, places=3)
+        self.assertIn("除外しました", res.content[0].text)
+
+    def test_only_stale_data_reports_window_miss(self):
+        import datetime as dt
+        from space_finder_mcp import eso
+        now = dt.datetime.now(dt.timezone.utc)
+        old_ms = int((now - dt.timedelta(hours=9)).timestamp() * 1000)
+
+        class _Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"dimm_paranal-fwhm": [[old_ms, 0.9]]}
+
+        with mock.patch.object(eso.requests, "get",
+                               lambda url, params=None, headers=None, timeout=None: _Resp()):
+            res = eso.eso_seeing.__wrapped__(hours=6)
+        self.assertNotIn("dimm_paranal-fwhm", res.structuredContent["fields"])
+        self.assertIn("指定した期間内のデータなし", res.content[0].text)
+        self.assertIn("窓外", res.content[0].text)
+
 
 
 if __name__ == "__main__":

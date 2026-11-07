@@ -48,7 +48,19 @@ def _ckan(action: str, params: Optional[dict] = None) -> dict:
     return r.json()
 
 
-@ttl_cache(TTL_DAILY, maxsize=64, skip_if=is_error_result)
+def _skip_unless_hits(r):
+    """error または total=0（0 件）の応答はキャッシュしない。
+
+    CKAN 側の一時的な空応答を TTL_DAILY（24 時間）で固定化すると、復旧しても
+    「該当なし」が出続ける。exoplanet の _skip_unless_hits と同じ理由。
+    """
+    if is_error_result(r):
+        return True
+    sc = getattr(r, "structuredContent", None) or {}
+    return not sc.get("total")
+
+
+@ttl_cache(TTL_DAILY, maxsize=64, skip_if=_skip_unless_hits)
 def csa_dataset_search(query: str = "", limit: int = 10) -> CallToolResult:
     """CSA（カナダ宇宙庁）オープンデータポータルでデータセットを検索する（認証不要）。
 

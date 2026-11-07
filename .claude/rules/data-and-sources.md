@@ -30,6 +30,7 @@
 | WMO OSCAR | 衛星カタログは約1000件・取得が重い（実測50秒）→ 24時間キャッシュ |
 | DLR EOC STAC | `POST /search` は `numberMatched` を返す。**`filter`（CQL2）は 400・`sortby` は無視**（実測）＝雲量の絞り込みは取得後にクライアント側で行い、`excluded_by_cloud` / `without_cloud_info` を分けて返す。ライセンスはコレクションごとの申告値（CC-BY-4.0 / CC-BY-NC-4.0 / proprietary 混在）なので利用条件を明示する |
 | Roscosmos オープンデータ STAC | **静的 STAC**（`/search`・`/collections` は 404）。`catalog.json → コレクション → 年 → 月 → 日` を辿り日ノードの `rel=item` を列挙する（日ノードは親を辿らず直接 GET 可）。ホストは `s3.gptl.ru` / `s3ext.gptl.ru` の 2 つで、接続不可の側は記憶して切替。GeoTIFF の EPSG は `proj:epsg` が無ければアセットキー `image.tif.ms.4326._` から読む |
+| Copernicus CDSE / AWS Earth Search（STAC /search） | **`datetime` は RFC3339 の full timestamp が必須**（date-only の `2026-10-01` は 400："invalid datetime separator, expected `T`" ￰ "does not match RFC3339 format"）。`stac_common.expand_datetime` で date-only を展開してから送る（単日指定はその日の 00:00:00Z～23:59:59Z に展開）。INPE / DLR / UK は date-only も受理 |
 | ESO / ALMA / CADC / TART | 観測データ・大気コンディション。ESO/TART は短め（10分）、ALMA/CADC は30分のTTL |
 
 ## 画像の扱い

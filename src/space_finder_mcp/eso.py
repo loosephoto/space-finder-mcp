@@ -55,6 +55,8 @@ def eso_seeing(hours: int = 12, fields: str = _DEFAULT_FIELDS) -> CallToolResult
     now = datetime.now(timezone.utc)
     fr = (now - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%S") + "Z"
     to = now.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+    _fr_ms = (now - timedelta(hours=hours)).timestamp() * 1000
+    _to_ms = now.timestamp() * 1000
     field_list = [f.strip() for f in fields.split(",") if f.strip()]
     # 全フィールド取得してフィルタ（APIは複数fieldを,区切りで受けるが、1つずつの方が安定）
     results = {}
@@ -79,9 +81,23 @@ def eso_seeing(hours: int = 12, fields: str = _DEFAULT_FIELDS) -> CallToolResult
     for f in field_list:
         if f not in results:
             continue
-        rows = results[f]
+        raw_rows = results[f]
+        # API は from/to を緩く解釈し、窓外（数時間〜日前）のサンプルを返すことがある
+        # （実測: hours=6 の指定に 9 時間前のサンプル）。集計は窓内だけに使う。
+        rows = []
+        for _r in raw_rows:
+            try:
+                _ms = float(_r[0])
+            except (TypeError, ValueError):
+                continue
+            if _fr_ms <= _ms <= _to_ms:
+                rows.append(_r)
         if not rows:
-            lines.append(f"- **{FIELDS.get(f, (f,'',''))[0]}**: データなし")
+            if raw_rows:
+                lines.append(f"- **{FIELDS.get(f, (f,'',''))[0]}**: 指定した期間内のデータなし"
+                             f"（API が返した最新は {_parse_ts(raw_rows[-1][0])} UTC＝窓外）")
+            else:
+                lines.append(f"- **{FIELDS.get(f, (f,'',''))[0]}**: データなし")
             continue
         label, unit, desc = FIELDS.get(f, (f, "", ""))
         vals = [x for x in (as_float(v) for _, v in rows) if x is not None]
@@ -92,6 +108,8 @@ def eso_seeing(hours: int = 12, fields: str = _DEFAULT_FIELDS) -> CallToolResult
             lines.append(f"- **{label}**: 平均 {avg:.3f} {unit}（{len(vals)}サンプル）")
         latest_ts = _parse_ts(rows[-1][0]) if rows else ""
         lines.append(f"   最新: {rows[-1][1]} {unit}（{latest_ts} UTC）")
+        if len(rows) < len(raw_rows):
+            lines.append(f"   （窓外のサンプル {len(raw_rows) - len(rows)} 件は集計から除外しました）")
     # シーイング評価
     if "dimm_paranal-fwhm" in summaries:
         s = summaries["dimm_paranal-fwhm"]["avg"]
