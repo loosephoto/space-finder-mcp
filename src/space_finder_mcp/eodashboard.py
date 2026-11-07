@@ -10,13 +10,17 @@ EO Dashboard のデータは GitHub リポジトリで無料公開されてい�
 """
 from __future__ import annotations
 
+import concurrent.futures as _cf
+import json
+import os
+import time
 from typing import Optional
 import base64
 
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
-from .cache import TTL_HOURLY, ttl_cache, is_error_result
+from .cache import TTL_DAILY, TTL_HOURLY, disk_cache_path, ttl_cache, is_error_result
 from .input_utils import as_int
 from .img_common import media_link_line
 
@@ -39,13 +43,58 @@ _THEMES_JA = {
 # テーマ別の代表的なカテゴリマッピング（コレクションJSONのThemesから）
 # コレクションJSONを集めて一覧を作るためのキャッシュ
 _collections_cache: list[dict] | None = None
+_DISK_KEY = "eodashboard_collections_v1"
+_FETCH_WORKERS = 12              # 173 件の JSON を並列取得する（順次だと約 47 秒）
+
+
+def _disk_read(ttl: float):
+    """ディスクキャッシュからコレクション一覧を読む（TTL 内のみ。壊れていれば None）。
+
+    173 件の JSON を毎プロセス起動時に取り直すと 47 秒かかる（実測）。oscar の
+    カタログと同じく、完全な一覧をディスクにも残して2回目以降を即時にする。
+    """
+    path = disk_cache_path(_DISK_KEY, subdir="catalogue")
+    try:
+        if time.time() - os.path.getmtime(path) > ttl:
+            return None
+        with open(path, encoding="utf-8") as f:
+            rows = json.load(f)
+        if isinstance(rows, list) and rows and all(isinstance(r, dict) and r.get("id") for r in rows):
+            return rows
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _disk_write(rows: list) -> None:
+    """一覧をディスクへ保存する（書き込み失敗は無視して動作は続ける）。"""
+    path = disk_cache_path(_DISK_KEY, subdir="catalogue")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(rows, f, ensure_ascii=False)
+        os.replace(tmp, path)
+    except OSError:
+        pass
 
 
 def _fetch_collection_list(force: bool = False) -> list[dict]:
-    """コレクション一覧（ID・タイトル・テーマ・機関）を取得する。キャッシュあり。"""
+    """コレクション一覧（ID・タイトル・テーマ・機関）を取得する。キャッシュあり。
+
+    - プロセス内 → ディスク（TTL_DAILY）の順に見る（再起動しても 47 秒を払わない）
+    - 各 JSON は 12 並列で取得する（実測: 173 件の順次取得で約 47 秒）
+    - **一部の取得に失敗した不完全な一覧はディスクに固定しない**（欠けたまま
+      1 日使われないように。呼び出し側はその場の結果で動く）
+    """
     global _collections_cache
     if _collections_cache and not force:
         return _collections_cache
+    if not force:
+        from_disk = _disk_read(TTL_DAILY)
+        if from_disk is not None:
+            _collections_cache = from_disk
+            return from_disk
     out: list[dict] = []
     try:
         r = requests.get(TREE_API, headers=UA, timeout=(30, 30))
@@ -54,13 +103,20 @@ def _fetch_collection_list(force: bool = False) -> list[dict]:
         ids = [t["path"].split("/")[-1][:-5] for t in tree
                if t["path"].startswith("collections/") and t["path"].endswith(".json")
                and "/" not in t["path"].split("collections/")[1][:-5]]
-        # 各JSONを取得（並列ではなく順次・多めのタイムアウト）
-        for cid in ids:
-            meta = _fetch_meta(cid)
-            if meta:
-                out.append(meta)
-        # 検索可能な状態でキャッシュ
-        _collections_cache = out
+        # 各JSONを並列取得（順序は tree の順を保つ）
+        metas: dict = {}
+        with _cf.ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as ex:
+            futures = {ex.submit(_fetch_meta, cid): cid for cid in ids}
+            for fut in _cf.as_completed(futures):
+                try:
+                    metas[futures[fut]] = fut.result()
+                except Exception:
+                    metas[futures[fut]] = None
+        out = [metas[cid] for cid in ids if metas.get(cid)]
+        if out:
+            _collections_cache = out
+            if len(out) == len(ids):     # 完全な一覧だけディスクに固定する
+                _disk_write(out)
     except requests.RequestException:
         pass
     return out

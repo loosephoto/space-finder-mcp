@@ -240,8 +240,20 @@ def bv_to_rgb(bv):
 
 
 def box_blur(a, r):
-    """分離ボックスぼかし（cumsum のみ。scipy 非依存）。"""
-    out = a.astype(np.float32, copy=True)
+    """分離ボックスぼかし（cumsum のみ。scipy 非依存）。
+
+    0 でない領域の外接矩形＋半径ぶんだけをぼかして貼り戻す。外接矩形の外は
+    全チャンネル 0 なので、全画面をぼかした結果と厳密に同じになる（地面側の
+    0 領域を計算しない。実測: 光背の 2 回でウォーム時間の約 12%）。
+    """
+    if a.ndim < 2:
+        return a.astype(np.float32, copy=True)
+    rows = np.flatnonzero(np.any(a != 0, axis=tuple(range(1, a.ndim))))
+    if rows.size == 0:
+        return a.astype(np.float32, copy=True)
+    y0 = max(0, int(rows[0]) - r)
+    y1 = min(a.shape[0], int(rows[-1]) + r + 1)
+    out = a[y0:y1].astype(np.float32, copy=True)
     k = 2 * r + 1
     for ax in (0, 1):
         n = out.shape[ax]
@@ -250,7 +262,9 @@ def box_blur(a, r):
         c = np.cumsum(np.pad(out, pad, mode="edge"), axis=ax)
         c = np.concatenate([np.zeros_like(np.take(c, [0], axis=ax)), c], axis=ax)
         out = (np.take(c, np.arange(k, k + n), axis=ax) - np.take(c, np.arange(n), axis=ax)) / k
-    return out
+    res = a.astype(np.float32, copy=True)
+    res[y0:y1] = out
+    return res
 
 
 # 天体暦（JPL DE421）の収録期間（UTC）。範囲外は Skyfield が EphemerisRangeError を
@@ -373,15 +387,22 @@ def _sky_background(sky_h, W, span, az0, sun_alt, sun_az, lp):
 
 
 def galactic_lb(sky_h, W, span, az0, lat, lon, lst_hours):
-    """各画素（高度・方位）→ 銀経 l・銀緯 b（J2000）。"""
+    """各画素（高度・方位）→ 銀経 l・銀緯 b（J2000）。
+
+    高度は行だけで・方位は列だけで決まるので、sin/cos は 1 次元で計算して放送する
+    （2 次元配列への三角関数呼び出しを減らす。式と演算順は同じなので結果は同一）。
+    """
     rows = np.arange(sky_h, dtype=np.float64)
     alt = np.repeat((90.0 * (1.0 - rows / sky_h))[:, None], W, 1)
-    az = np.repeat((az0 + (np.arange(W) + 0.5) / W * span)[None, :], sky_h, 0)
-    a, d, phi = np.radians(az), np.radians(alt), math.radians(lat)
-    sin_dec = np.sin(d) * math.sin(phi) + np.cos(d) * math.cos(phi) * np.cos(a)
+    a = np.radians(az0 + (np.arange(W) + 0.5) / W * span)
+    d = np.radians(alt[:, 0])                 # 行ごとの高度（alt は行一定）
+    phi = math.radians(lat)
+    sin_d, cos_d = np.sin(d), np.cos(d)
+    sin_a, cos_a = np.sin(a), np.cos(a)
+    sin_dec = sin_d[:, None] * math.sin(phi) + cos_d[:, None] * math.cos(phi) * cos_a[None, :]
     dec = np.arcsin(np.clip(sin_dec, -1.0, 1.0))
-    ha = np.arctan2(-np.sin(a) * np.cos(d),
-                    np.sin(d) * math.cos(phi) - np.cos(d) * math.sin(phi) * np.cos(a))
+    ha = np.arctan2(-sin_a[None, :] * cos_d[:, None],
+                    sin_d[:, None] * math.cos(phi) - cos_d[:, None] * math.sin(phi) * cos_a[None, :])
     ra = np.radians(((lst_hours - np.degrees(ha) / 15.0) % 24.0) * 15.0)
     aG, dG = math.radians(192.85948), math.radians(27.12825)
     y = np.cos(dec) * np.sin(ra - aG)
@@ -407,7 +428,8 @@ def milky_way_layer(l, b, alt):
              + 0.70 * np.exp(-((l - 80.0) / 12.0) ** 2 - (b / 6.0) ** 2)     # はくちょう座
              + 0.55 * np.exp(-(d_car / 16.0) ** 2 - (b / 7.0) ** 2))         # りゅうこつ座
     mw = band * lane * rift * tex * clump
-    mw = mw * 10.0 ** (-0.4 * EXT_K * (airmass(alt) - 1.0))      # 大気減光
+    ext = 10.0 ** (-0.4 * EXT_K * (airmass(alt) - 1.0))          # 大気減光（1 回だけ計算）
+    mw = mw * ext
     mw = mw * np.clip(alt / 12.0, 0.0, 1.0)                      # 低空は光害で見えない
     warm = 0.30 + 0.70 * np.exp(-(dl / 60.0) ** 2)               # 銀河中心側は赤っぽい
     col = np.stack([np.full_like(mw, 1.00), 1.00 - 0.05 * warm, 1.00 - 0.14 * warm], -1)
@@ -415,7 +437,7 @@ def milky_way_layer(l, b, alt):
     g = np.random.default_rng(20261010)
     prob = np.clip(band / max(1e-9, float(band.max())) * 0.30, 0.0, 0.45)
     grain = (g.random(mw.shape) < prob) * g.uniform(0.35, 1.0, mw.shape)
-    grain = grain * np.clip(alt / 20.0, 0.0, 1.0) * 10.0 ** (-0.4 * EXT_K * (airmass(alt) - 1.0))
+    grain = grain * np.clip(alt / 20.0, 0.0, 1.0) * ext
     return mw, col, grain * 0.014
 
 

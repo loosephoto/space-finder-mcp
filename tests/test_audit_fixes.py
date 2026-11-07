@@ -613,5 +613,160 @@ class JsonKeyCollisionTests(unittest.TestCase):
 
 
 
+class EodashboardCacheTests(unittest.TestCase):
+    """173 件のコレクション JSON は並列取得＋ディスクキャッシュ（冷時 40 秒→1.5 秒）。"""
+
+    def setUp(self):
+        import shutil
+        import tempfile
+        from space_finder_mcp import cache, eodashboard
+        self.cache, self.eo = cache, eodashboard
+        self._old_root = cache.CACHE_ROOT
+        self.tmp = tempfile.mkdtemp()
+        cache.CACHE_ROOT = self.tmp
+        eodashboard._collections_cache = None
+        self._orig_get = eodashboard.requests.get
+
+    def tearDown(self):
+        import shutil
+        self.cache.CACHE_ROOT = self._old_root
+        self.eo.requests.get = self._orig_get
+        self.eo._collections_cache = None
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _fake_get(self, fail_one=False):
+        calls = {"n": 0}
+
+        class R:
+            status_code = 200
+
+            def __init__(self, payload):
+                self._p = payload
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return self._p
+
+        def get(url, **kw):
+            calls["n"] += 1
+            if url == self.eo.TREE_API:
+                return R({"tree": [{"path": "collections/c{}.json".format(i)}
+                                   for i in range(20)]})
+            cid = url.rsplit("/", 1)[-1][:-5]
+            if fail_one and cid == "c3":
+                r = R({})
+                r.status_code = 404
+                return r
+            return R({"Name": cid, "Title": cid.upper(), "Themes": ["T"], "Agency": ["A"]})
+        return get, calls
+
+    def test_list_is_written_to_disk_and_read_back_without_requests(self):
+        get, calls = self._fake_get()
+        self.eo.requests.get = get
+        rows = self.eo._fetch_collection_list()
+        self.assertEqual(len(rows), 20)
+        self.assertEqual(len({r["id"] for r in rows}), 20)
+        self.eo._collections_cache = None                  # プロセス内キャッシュも捨てる
+
+        def boom(*a, **k):
+            raise requests.ConnectionError("offline")
+        self.eo.requests.get = boom
+        rows2 = self.eo._fetch_collection_list()           # ディスクから読む（HTTP 0 回）
+        self.assertEqual(len(rows2), 20)
+        self.assertEqual(rows2[0]["id"], rows[0]["id"])
+
+    def test_incomplete_list_is_not_fixed_on_disk(self):
+        get, _calls = self._fake_get(fail_one=True)
+        self.eo.requests.get = get
+        rows = self.eo._fetch_collection_list()
+        self.assertEqual(len(rows), 19)                    # 1 件は取得失敗
+        from space_finder_mcp.cache import disk_cache_path
+        self.assertFalse(os.path.exists(
+            disk_cache_path("eodashboard_collections_v1", subdir="catalogue")))
+
+    def test_corrupt_disk_cache_is_ignored(self):
+        from space_finder_mcp.cache import disk_cache_path
+        path = disk_cache_path("eodashboard_collections_v1", subdir="catalogue")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("{not json")
+        get, _calls = self._fake_get()
+        self.eo.requests.get = get
+        rows = self.eo._fetch_collection_list()            # 壊れたキャッシュは無視して再取得
+        self.assertEqual(len(rows), 20)
+
+
+class BoxBlurCropTests(unittest.TestCase):
+    """box_blur は 0 領域を切り落としても全画面版と厳密に同じ結果になる。"""
+
+    def test_crop_equals_full_image_blur(self):
+        import numpy as np
+        from space_finder_mcp.ground_view import box_blur
+        rng = np.random.default_rng(11)
+        a = (rng.random((240, 320, 3)) * 0.4).astype(np.float32)
+        a[180:] = 0.0                       # 地面側（0）を切り落とす経路を通す
+        a[:, :30] = 0.0
+        r = 5
+
+        def full(x, r):
+            out = x.astype(np.float32, copy=True)
+            k = 2 * r + 1
+            for ax in (0, 1):
+                n = out.shape[ax]
+                pad = [(0, 0)] * out.ndim
+                pad[ax] = (r, r)
+                c = np.cumsum(np.pad(out, pad, mode="edge"), axis=ax)
+                c = np.concatenate([np.zeros_like(np.take(c, [0], axis=ax)), c], axis=ax)
+                out = (np.take(c, np.arange(k, k + n), axis=ax)
+                       - np.take(c, np.arange(n), axis=ax)) / k
+            return out
+
+        self.assertEqual(float(np.max(np.abs(full(a, r) - box_blur(a, r)))), 0.0)
+
+    def test_all_zero_input_returns_zeros(self):
+        import numpy as np
+        from space_finder_mcp.ground_view import box_blur
+        a = np.zeros((50, 60, 3), np.float32)
+        self.assertFalse(np.any(box_blur(a, 3)))
+
+
+class GalacticLbIdentityTests(unittest.TestCase):
+    """1 次元三角関数化しても galactic_lb の値は厳密に同じ（式・演算順を変えない）。"""
+
+    def test_matches_reference_formula(self):
+        import math
+        import numpy as np
+        from space_finder_mcp.ground_view import galactic_lb
+
+        def reference(sky_h, W, span, az0, lat, lon, lst_hours):
+            rows = np.arange(sky_h, dtype=np.float64)
+            alt = np.repeat((90.0 * (1.0 - rows / sky_h))[:, None], W, 1)
+            az = np.repeat((az0 + (np.arange(W) + 0.5) / W * span)[None, :], sky_h, 0)
+            a, d, phi = np.radians(az), np.radians(alt), math.radians(lat)
+            sin_dec = np.sin(d) * math.sin(phi) + np.cos(d) * math.cos(phi) * np.cos(a)
+            dec = np.arcsin(np.clip(sin_dec, -1.0, 1.0))
+            ha = np.arctan2(-np.sin(a) * np.cos(d),
+                            np.sin(d) * math.cos(phi) - np.cos(d) * math.sin(phi) * np.cos(a))
+            ra = np.radians(((lst_hours - np.degrees(ha) / 15.0) % 24.0) * 15.0)
+            aG, dG = math.radians(192.85948), math.radians(27.12825)
+            y = np.cos(dec) * np.sin(ra - aG)
+            x = np.sin(dec) * math.cos(dG) - np.cos(dec) * math.sin(dG) * np.cos(ra - aG)
+            b = np.degrees(np.arcsin(np.clip(
+                np.sin(dec) * math.sin(dG) + np.cos(dec) * math.cos(dG) * np.cos(ra - aG),
+                -1.0, 1.0)))
+            l = (122.93192 - np.degrees(np.arctan2(y, x))) % 360.0
+            return l, b, alt
+
+        args = (37, 53, 120.0, 15.0, 35.68, 139.77, 10.5)
+        l1, b1, a1 = reference(*args)
+        l2, b2, a2 = galactic_lb(*args)
+        self.assertTrue(np.array_equal(l1, l2))
+        self.assertTrue(np.array_equal(b1, b2))
+        self.assertTrue(np.array_equal(a1, a2))
+
+
+
 if __name__ == "__main__":
     unittest.main()
