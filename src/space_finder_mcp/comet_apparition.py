@@ -409,9 +409,12 @@ def _draw_chart(series: Sequence[dict], info: dict) -> dict:
         mark_x[m["label"]] = x
         for i in range(len(panels)):
             py0 = _HDR + i * (_PH + _GAP)
-            for yy in range(int(py0 + 30), int(py0 + _PH - 16), 6):
+            y_top = int(py0 + 30 + (14 if i == 0 else 0))   # panel0 はマーカー名の下から
+            for yy in range(y_top, int(py0 + _PH - 16), 6):
                 dd.line([(x, yy), (x, yy + 3)], fill=m["color"])
-        dd.text((min(max(x - 20, 4), _W - 96), _HDR + 6), m["label"], font=f_m,
+        # マーカー名は凡例（panel 先頭行 y=_HDR+6）と同一段に置くと重なる（実測 419px²）
+        # ので凡例の下段へずらす
+        dd.text((min(max(x - 20, 4), _W - 96), _HDR + 22), m["label"], font=f_m,
                 fill=m["color"])
 
     # 極値は「点を全部打ってからラベルを置く」の2段階にする。先に点を打たないと、

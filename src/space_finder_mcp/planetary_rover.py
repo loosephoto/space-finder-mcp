@@ -95,6 +95,38 @@ LUNAR_ROVER_KEYS = {
     "yutu2": "玉兔2号（嫦娥4号）",
 }
 
+def _resolve_rover_key(value) -> str:
+    """ローバー名（キー・日本語名・英語名）を正規のキーへ寄せる。
+
+    docstring の例「パーサヴィアランス」「キュリオシティ」が unsupported rover に
+    なっていた（キーは英字のみで ja 名での照会が無かった）。表記ゆれは ROVERS の
+    ja/en と LUNAR_ROVER_KEYS のラベルから機械的に作る（手作業の別名表を作らない）。
+    """
+    v = str(value or "").strip()
+    if not v:
+        return ""
+    vl = v.lower()
+    if vl in ROVERS or vl in LUNAR_ROVER_KEYS:
+        return vl
+    alias = {}
+    for k, cfg in ROVERS.items():
+        for cand in (str(cfg.get("ja", "")).split("（")[0].strip(),
+                     str(cfg.get("en", "")).strip().lower()):
+            if cand:
+                alias[cand] = k
+    for k, label in LUNAR_ROVER_KEYS.items():
+        alias[label.lower()] = k            # 表のラベルそのもの（"LRV（Apollo 15）"等）も可
+        base = label.split("（")[0].strip()
+        if base:
+            alias[base] = k
+        inner = label[label.find("（") + 1:label.rfind("）")].strip() if "（" in label else ""
+        if inner:
+            alias[inner.lower()] = k
+        if k.startswith("apollo"):
+            alias["アポロ{}号".format(k.replace("apollo", ""))] = k
+    return alias.get(v, alias.get(vl, vl))
+
+
 # ベースマップの種類: "trek"（タイル合成）か "image"（1枚の全球等角図）か
 ROVER_BODIES: dict[str, dict] = {
     "mars": {"ja": "火星", "en": "Mars", "basemap": "trek"},
@@ -441,6 +473,7 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
         body: 天体名（既定 "mars"。"mars" / "phobos" / "moon"）。
         rover: ローバー名（"perseverance"=既定, "curiosity", "idefix"、
             "apollo11"〜"apollo17", "lunokhod1", "lunokhod2", "yutu", "yutu2"）。
+            日本語名（「パーサヴィアランス」「玉兔2号」「アポロ15号」等）も可。
         zoom: 地図ズーム（タイル系のみ）。省略時は天体の最大ズーム。
         span_deg: 表示する画角(経度幅・度)。大きいほど広範囲・解像度低下。既定0.5。
         out_px: 出力画像の長辺ピクセル(既定1000, 最大2000)。
@@ -469,7 +502,7 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
         )
     body_cfg = ROVER_BODIES[b]
 
-    rv = str(rover).strip().lower()
+    rv = _resolve_rover_key(rover)   # 日本語名・英語名もキーへ寄せる
     # 月面ローバーは site_plan.py のデータから解決する（ROVERS には無い）
     lunar_site = None
     if rv in LUNAR_ROVER_KEYS:

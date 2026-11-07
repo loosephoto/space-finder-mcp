@@ -63,7 +63,9 @@ UA = {"User-Agent": "curl/8.5.0 (compatible; space-finder-mcp/0.31; "
                     "+https://github.com/loosephoto/space-finder-mcp)"}
 
 # 格子の寸法（描画と自己検証が同じ値を使う＝検証が別レイアウトを測らない）
-CELL_W, CELL_H, HDR, WD, FOOT = 320, 190, 190, 46, 116
+# セル高は「3 イベント（y0+50 開始・各 62px）＋『＋N 件』（1 行）」が収まる高さ。
+# 190 のままでは 3 件目と「＋N 件」が隣のセルに溢れて文字が重なっていた（実測 14 組）。
+CELL_W, CELL_H, HDR, WD, FOOT = 320, 258, 190, 46, 116
 _WEEKDAYS = ("日", "月", "火", "水", "木", "金", "土")
 _BG, _FG, _DIM = (8, 10, 22), (232, 236, 244), (150, 158, 175)
 _LIT, _DARK, _GRID = (232, 236, 248), (26, 30, 46), (44, 50, 68)
@@ -506,7 +508,8 @@ def _render(year: int, month: int, place: str, tz_label: str, off: float,
                   if sum(abs(px[xx, y][k] - p["color"][k]) for k in range(3)) < 30)
         if hit < 30:
             missing.append({"title": p["title"], "date": p["date"], "pixels": hit})
-    return img, {"checked": len(placed), "missing": missing, "ok": not missing}
+    return img, {"checked": len(placed), "omitted": more, "missing": missing,
+                 "ok": not missing}
 
 
 def _err(message: str, **extra) -> CallToolResult:
@@ -541,8 +544,10 @@ def _event_line(ev: dict) -> str:
     stamp = "終日" if ev["all_day"] else ev["dt"].strftime("%H:%M")
     span = (" 〜{:02d}/{:02d}".format(ev["end"].month, ev["end"].day)
             if ev.get("end") and ev["end"] != ev["date"] else "")
-    bits = ["| {} {} | {} | {} |".format(ev["date"].isoformat(), stamp, store.KINDS.get(ev["kind"], ("?",))[0],
-                                         ev["title"].replace("|", "/"))]
+    # ヘッダは「日付・時刻・カテゴリ・内容」の4列なので、行も4セルに分ける
+    bits = ["| {} | {} | {} | {} |".format(ev["date"].isoformat(), stamp,
+                                          store.KINDS.get(ev["kind"], ("?",))[0],
+                                          ev["title"].replace("|", "/"))]
     tail = []
     if ev.get("venue"):
         tail.append(ev["venue"])
@@ -636,8 +641,11 @@ def space_calendar(year: Optional[int] = None, month: Optional[int] = None, plac
     nasa_hits = sum(1 for e in drawn + tray if e.get("corroborated"))
     notes = figure_notes(extra=[
         "対象: {}年{}月 ／ 基準地 {}（{}）".format(year_i, month_i, place, tz_label),
-        "日付セルに描いたイベント {} 件: ".format(len(drawn)) + "、".join(
-            "{} {} 件".format(store.KINDS[k][0], counts[k]) for k in store.KIND_ORDER),
+        "イベントは月間で {} 件（{}）。日付セルに描いたのは {} 件（1 日 3 件を超えるセルは"
+        "「＋N 件」にまとめ、{} 件は図に描いていない）".format(
+            len(drawn),
+            "、".join("{} {} 件".format(store.KINDS[k][0], counts[k]) for k in store.KIND_ORDER),
+            verify["checked"], verify.get("omitted") or 0),
         "日付が確定していない打ち上げ {} 件は日付セルに置かず本文に列挙（LL2 の net_precision が"
         "Day/Hour/Minute/Second 以外、または年末のプレースホルダ）".format(len(tray)),
         "NASA 公式リスト（WP REST・event-type=12929）と照合できた打ち上げは {} 件（公式ページURLを付与）".format(nasa_hits)
@@ -666,7 +674,7 @@ def space_calendar(year: Optional[int] = None, month: Optional[int] = None, plac
         notes=notes,
         caption="{}年{}月の宇宙・天文カレンダー（基準地 {}・{}）。日付セルに描いたイベント {} 件"
                 "（{}）、日付が確定していない打ち上げ {} 件。".format(
-                    year_i, month_i, place, tz_label, len(drawn),
+                    year_i, month_i, place, tz_label, verify["checked"],
                     "、".join("{} {} 件".format(store.KINDS[k][0], counts[k]) for k in store.KIND_ORDER),
                     len(tray)),
         verify=verify)

@@ -13,7 +13,8 @@ from .cache import TTL_SHORT, ttl_cache
 from .surface_map import (add_legend_band, clamp_note, draw_marker, draw_markers,
                          fit_font_for_width,
                          graticule_view, image_view, marker_scan_radius, panel_placement,
-                         surface_view, tile_failure_note, verify_marker, verify_markers)
+                         pixel_near, surface_view, tile_failure_note, verify_marker,
+                         verify_markers)
 from .name_common import split_names
 from .img_common import (encode_jpeg, figure_notes, figure_payload,
                          figure_text_block, load_font, media_link_line,
@@ -2021,10 +2022,20 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
 
     d = ImageDraw.Draw(img)
 
+    track_samples = []          # 軌道ポリラインの画素検証用の代表点（描きながら残す）
+
     def _drawseg(seg):
         if len(seg) >= 2:
-            d.line([g2px(a, b) for a, b in seg], fill=(255, 140, 0),
+            pl = [g2px(a, b) for a, b in seg]
+            d.line(pl, fill=(255, 140, 0),
                    width=max(3, img.size[0] // 300), joint="curve")
+            if len(pl) >= 3:
+                _st = max(1, len(pl) // 20)
+                _iw, _ih = img.size
+                # キャンバス外の点は描いていないので検証対象にしない（span が軌道の
+                # 一周より狭いと大半が範囲外になる）
+                track_samples.extend(p for p in pl[_st::_st]
+                                     if 0 <= p[0] < _iw and 0 <= p[1] < _ih)
 
     for seg in split_at_antimeridian(trail):
         _drawseg(seg)
@@ -2118,6 +2129,16 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
     mv["marker_visible"] = bool(marker_visible)
     mv["panel_overlaps_marker"] = bool(panel_hidden)
     mv["ok"] = bool(marker_visible and mv["ok"])
+    # 軌道ポリライン（オレンジ線）も画素で検証する。マーカーだけ検証すると主要素の
+    # 線が描けていなくても ok になる（代表点の周囲にオレンジ画素が残っているかを数える）
+    if track_samples and len({(round(p[0]), round(p[1])) for p in track_samples}) >= 2:
+        # 退化ポリライン（全点が同一画素に潰れる＝線が描けない）は検査しない
+        _picks = track_samples[::max(1, len(track_samples) // 60)][:60]
+        _hits = sum(1 for p in _picks if pixel_near(img, p, (255, 140, 0), tol=60, r=3) > 0)
+        mv["track"] = {"checked": len(_picks), "hits": _hits,
+                       "ok": bool(_picks) and _hits >= 0.6 * len(_picks)}
+        if not mv["track"]["ok"]:
+            mv["ok"] = False
     fig = figure_payload(
         kind="ground_track_map",
         title=f"{ja} の{body_cfg['ja']}面位置（{body_cfg['attrib']}）",

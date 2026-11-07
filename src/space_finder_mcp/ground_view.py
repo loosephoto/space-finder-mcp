@@ -1007,7 +1007,13 @@ def draw_satellites(img, sats, span, az0, sky_h, header, font):
         dr.ellipse([x - 14, y - 14, x + 14, y + 14], fill=(120, 20, 18))
         dr.ellipse([x - 9, y - 9, x + 9, y + 9], fill=SAT_RGB, outline=(255, 255, 255), width=3)
     for nm, (x, y) in pts.items():
-        dr.text((x + 14, y - 30), nm, font=font, fill=SAT_LABEL,
+        # 名札はキャンバス右端で切れないようにクランプする（月・惑星の _fit_label と同じ
+        # 規約。実測: span=90 で「ひまわり9号」の名札 339px 中 334px が画面外だった）
+        tw = dr.textlength(nm, font=font)
+        lx = x + 14
+        if lx + tw > W - 6:
+            lx = max(6.0, x - 14 - tw)
+        dr.text((lx, y - 30), nm, font=font, fill=SAT_LABEL,
                 stroke_width=3, stroke_fill=(0, 0, 0))
     return pts
 

@@ -471,5 +471,80 @@ class EsoSeeingWindowTests(unittest.TestCase):
 
 
 
+class RoverNameResolveTests(unittest.TestCase):
+    """planetary_rover_location_map は日本語名・英語名もキーへ寄せる（docstring の例が通ること）。"""
+
+    def test_japanese_names_resolve_to_keys(self):
+        from space_finder_mcp.planetary_rover import _resolve_rover_key as r
+        self.assertEqual(r("パーサヴィアランス"), "perseverance")
+        self.assertEqual(r("キュリオシティ"), "curiosity")
+        self.assertEqual(r("イデフィクス"), "idefix")
+        self.assertEqual(r("玉兔2号"), "yutu2")
+        self.assertEqual(r("ルノホート1号"), "lunokhod1")
+        self.assertEqual(r("アポロ15号"), "apollo15")
+
+    def test_english_and_key_forms_resolve_to_themselves(self):
+        from space_finder_mcp.planetary_rover import _resolve_rover_key as r
+        self.assertEqual(r("Perseverance"), "perseverance")
+        self.assertEqual(r("perseverance"), "perseverance")
+        self.assertEqual(r("LRV（Apollo 15）"), "apollo15")
+        self.assertEqual(r(""), "")
+
+    def test_unknown_name_passes_through_lowercased(self):
+        from space_finder_mcp.planetary_rover import _resolve_rover_key as r
+        self.assertEqual(r("SOMEUNKNOWN"), "someunknown")
+
+
+class CalendarLayoutTests(unittest.TestCase):
+    """セル高は 3 イベント＋「＋N 件」が収まること。本文表はヘッダと同じ 4 セル。"""
+
+    def test_cell_height_fits_three_events_and_overflow_note(self):
+        from space_finder_mcp import space_calendar as sc
+        # 内枠（-4）の中に「y0+50 開始・各 62px の 3 イベント＋＋N 件 1 行」が入ること
+        self.assertGreaterEqual(sc.CELL_H - 4, 50 + 3 * 62 + 16)
+
+    def test_event_line_has_four_cells(self):
+        import datetime as dt
+        from space_finder_mcp import space_calendar as sc
+        ev = {"date": dt.date(2026, 11, 7), "all_day": False,
+              "dt": dt.datetime(2026, 11, 7, 9, 5), "kind": "launch",
+              "title": "打ち上げ", "end": None, "certainty": "confirmed"}
+        line = sc._event_line(ev)
+        self.assertEqual(line.count("|"), 5, line)      # | 日付 | 時刻 | カテゴリ | 内容 |
+        self.assertTrue(line.startswith("| 2026-11-07 | 09:05 |"))
+
+
+class Orbit3dTagTests(unittest.TestCase):
+    """_tag は既存の矩形（見出し・先のラベル）と重ならない位置へずれる。"""
+
+    def test_tag_avoids_existing_boxes(self):
+        from PIL import Image, ImageDraw
+        from space_finder_mcp.orbit3d import _tag
+        from space_finder_mcp.img_common import load_font
+        img = Image.new("RGB", (220, 160), (0, 0, 0))
+        dr = ImageDraw.Draw(img)
+        placed = [(0, 0, 210, 30)]
+        _tag(dr, (10, 10), "ラベル", (255, 255, 255), load_font(14), placed=placed)
+        box = placed[-1]
+        r = (0, 0, 210, 30)
+        disjoint = box[2] < r[0] or box[0] > r[2] or box[3] < r[1] or box[1] > r[3]
+        self.assertTrue(disjoint, box)
+        # ずらした先もキャンバス内
+        self.assertGreaterEqual(box[0], 4)
+        self.assertGreaterEqual(box[1], 4)
+
+    def test_tag_without_placed_draws_at_given_position(self):
+        from PIL import Image, ImageDraw
+        from space_finder_mcp.orbit3d import _tag
+        from space_finder_mcp.img_common import load_font
+        img = Image.new("RGB", (220, 160), (0, 0, 0))
+        dr = ImageDraw.Draw(img)
+        _tag(dr, (10, 10), "ラベル", (255, 255, 255), load_font(14))
+        px = img.load()
+        # 背景矩形が描かれている
+        self.assertEqual(px[12, 12], (8, 10, 18))
+
+
+
 if __name__ == "__main__":
     unittest.main()

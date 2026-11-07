@@ -79,13 +79,34 @@ def _shade(col: Tuple[int, int, int], depth: float, span: float) -> Tuple[int, i
     return tuple(int(max(0, min(255, c * k))) for c in col)
 
 
-def _tag(draw, xy: Tuple[float, float], text: str, colour, font) -> None:
-    """背景付きの小ラベル（図中の文字がグリッドに埋もれるのを防ぐ）。"""
+def _tag(draw, xy: Tuple[float, float], text: str, colour, font, placed=None) -> None:
+    """背景付きの小ラベル（図中の文字がグリッドに埋もれるのを防ぐ）。
+
+    placed（既に置いたラベル・見出しの矩形リスト）を渡すと、重ならない位置を
+    近傍オフセットの順に探してから描く（実測: 既定カメラで北極周辺のラベルが
+    見出し行・互いに 5 組重なっていた）。空きが無ければ元の位置に描く。
+    """
     x, y = xy
     bb = draw.textbbox((0, 0), text, font=font)
     w, h = bb[2] - bb[0], bb[3] - bb[1]
+    cw, ch = draw.im.size
+    # 見出しは 3 行（タイトル・カメラ・時刻）で y≈104 まで続くので、縦の逃げ幅は
+    # 78px まで用意する（52px までだと 3 行ヘッダから逃げ切れず全候補不成立になる）
+    for dx, dy in ((0, 0), (0, 26), (26, 0), (-26, 0), (0, 52), (26, 26), (-26, 26),
+                   (0, -26), (26, 52), (-26, 52), (0, 78), (26, 78), (-26, 78), (0, 104)):
+        bx, by = x + dx, y + dy
+        box = (bx - 4, by - 2, bx + w + 4, by + h + 4)
+        if bx < 4 or by < 4 or box[2] > cw - 4 or box[3] > ch - 4:
+            continue
+        if placed and any(not (box[2] < r[0] or box[0] > r[2] or box[3] < r[1] or box[1] > r[3])
+                          for r in placed):
+            continue
+        x, y = bx, by
+        break
     draw.rectangle([x - 4, y - 2, x + w + 4, y + h + 4], fill=(8, 10, 18), outline=None)
     draw.text((x, y), text, font=font, fill=colour)
+    if placed is not None:
+        placed.append((x - 4, y - 2, x + w + 4, y + h + 4))
 
 
 def _dashed(draw, pts: List[Tuple[float, float]], colour, width: int, on: int = 7, off: int = 6):
@@ -143,6 +164,20 @@ def render(body_cfg: Dict, trail: Sequence[Dict], cur: Dict, *, ja: str, en: str
 
     img = Image.new("RGB", (W, W), (6, 8, 14))
     d = ImageDraw.Draw(img)
+    # 見出し（タイトル・カメラ行・時刻行）は図の最後に描くが、幾何ラベルはこの帯を
+    # 避ける。先に文字列・フォント・矩形を確定しておく。
+    f_big = load_font(max(17, W // 36), bold=True)
+    f_mid = load_font(max(13, W // 48))
+    title = f"🛰 {ja}（{en}）の{body_ja}周回軌道 — 斜め俯瞰 3D"
+    cam_line = "カメラ: 仰角{:g}°・方位{:g}°・{}／奥ほど暗い".format(
+        float(elevation), float(azimuth),
+        "透視 dolly={:g}".format(float(dolly)) if float(dolly) > 0 else "正射影")
+    when_line = f"時刻 {when_str} ・トレイル 前後 {minutes:g} 分" if when_str else ""
+    _lh = f_big.getbbox(title)[3] - f_big.getbbox(title)[1]
+    avoid = [d.textbbox((18, 14), title, font=f_big),
+             d.textbbox((18, 14 + _lh + 8), cam_line, font=f_mid)]
+    if when_line:
+        avoid.append(d.textbbox((18, 14 + 2 * (_lh + 8)), when_line, font=f_mid))
     rnd = random.Random(20261031)
     for _ in range(340):                            # 背景の星（決定論的）
         x, y = rnd.randrange(W), rnd.randrange(W)
@@ -228,17 +263,17 @@ def render(body_cfg: Dict, trail: Sequence[Dict], cur: Dict, *, ja: str, en: str
             d.line([px_in, px_out], fill=col, width=max(3, W // 300))
             d.ellipse([tx - 4, ty - 4, tx + 4, ty + 4], fill=col)
             _tag(d, (tx + dx / nn * 18, ty + dy / nn * 18),
-                 "{} {:,.0f} km".format(lab, r_target - R), col, f_lab)
+                 "{} {:,.0f} km".format(lab, r_target - R), col, f_lab, placed=avoid)
     # 赤道面（自転軸に直交する面）は基準なので実線＋シアンで明示する
     eq_ring = _ring3d(R * 1.0, (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
     d.line(eq_ring, fill=(70, 190, 220), width=max(2, W // 520))
     eq_lab = "赤道面"
     ex, ey = eq_ring[0]
-    _tag(d, (ex + 6, ey - 22), eq_lab, (110, 205, 230), f_lab)
+    _tag(d, (ex + 6, ey - 22), eq_lab, (110, 205, 230), f_lab, placed=avoid)
     # 軌道面のリング（遠点リングと同じ半径）に名札
     op_ring = _ring3d(r_max, u, w)
     ox, oy = op_ring[len(op_ring) // 2]
-    _tag(d, (ox + 6, oy + 4), "軌道面", (150, 175, 215), f_lab)
+    _tag(d, (ox + 6, oy + 4), "軌道面", (150, 175, 215), f_lab, placed=avoid)
 
     # 傾斜角の弧（赤道面 ↔ 軌道面）。両平面の共通軸まわりに短い弧を描く。
     try:
@@ -266,7 +301,8 @@ def render(body_cfg: Dict, trail: Sequence[Dict], cur: Dict, *, ja: str, en: str
             d.line(arc_pts, fill=(255, 235, 150), width=max(2, W // 420))
             mx, my = arc_pts[len(arc_pts) // 2]
             f_arc = load_font(max(17, W // 44), bold=True)
-            _tag(d, (mx + 10, my - 14), "i={:.1f}°".format(incl), (255, 245, 190), f_arc)
+            _tag(d, (mx + 10, my - 14), "i={:.1f}°".format(incl), (255, 245, 190), f_arc,
+                 placed=avoid)
             for dd in (d1, d2):
                 p0 = tuple(R * 1.05 * c for c in dd)
                 p1 = tuple(R * 1.40 * c for c in dd)
@@ -306,24 +342,16 @@ def render(body_cfg: Dict, trail: Sequence[Dict], cur: Dict, *, ja: str, en: str
     px_s, py_s, _ = view.project((0.0, 0.0, -R * 1.35))
     d.line([(px_s, py_s), (px_n, py_n)], fill=(70, 82, 104), width=max(1, W // 700))
     f_tiny = load_font(max(12, W // 62))
-    d.text((px_n + 6, py_n - 16), "自転軸", font=f_tiny, fill=(96, 108, 130))
+    _tag(d, (px_n + 6, py_n - 16), "自転軸", (96, 108, 130), f_tiny, placed=avoid)
     d.text((cx - d.textlength(body_ja, font=load_font(max(14, W // 50), bold=True)) / 2,
             cy + r_body_px + 8), body_ja, font=load_font(max(14, W // 50), bold=True),
            fill=(200, 208, 226))
 
-    # 見出し
-    f_big = load_font(max(17, W // 36), bold=True)
-    f_mid = load_font(max(13, W // 48))
-    title = f"🛰 {ja}（{en}）の{body_ja}周回軌道 — 斜め俯瞰 3D"
+    # 見出し（文字列・フォント・矩形は冒頭で確定済み。ここは描画だけ）
     d.text((18, 14), title, font=f_big, fill=(240, 244, 252))
-    cam_line = "カメラ: 仰角{:g}°・方位{:g}°・{}／奥ほど暗い".format(
-        float(elevation), float(azimuth),
-        "透視 dolly={:g}".format(float(dolly)) if float(dolly) > 0 else "正射影")
-    d.text((18, 14 + (f_big.getbbox(title)[3] - f_big.getbbox(title)[1]) + 8), cam_line,
-           font=f_mid, fill=(150, 162, 186))
-    if when_str:
-        d.text((18, 14 + 2 * ((f_big.getbbox(title)[3] - f_big.getbbox(title)[1]) + 8)),
-               f"時刻 {when_str} ・トレイル 前後 {minutes:g} 分", font=f_mid, fill=(150, 162, 186))
+    d.text((18, 14 + _lh + 8), cam_line, font=f_mid, fill=(150, 162, 186))
+    if when_line:
+        d.text((18, 14 + 2 * (_lh + 8)), when_line, font=f_mid, fill=(150, 162, 186))
 
     # 数値パネル（左下）
     lines = [

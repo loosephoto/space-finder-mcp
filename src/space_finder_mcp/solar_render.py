@@ -389,7 +389,7 @@ def _oblique_scene(scene):
                 if j + 1 >= len(pts):
                     break
                 dr.line([pts[j], pts[j + 1]], fill=color, width=width)
-            if record and (i // step) % 40 == 0:
+            if record and (i // step) % 4 == 0:   # 代表点は 40 段おきだと 1 点だけになる
                 j = min(i + 1, n)
                 samples.append([round((pts[i][0] + pts[j][0]) / 2.0),
                                 round((pts[i][1] + pts[j][1]) / 2.0)])
