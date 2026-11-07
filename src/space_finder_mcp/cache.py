@@ -44,6 +44,7 @@ COALESCE_WAIT = 300.0
 # 失敗・「該当なし」応答を並行呼び出しの間だけで共有する秒数。キャッシュ（store）とは
 # 別枠で、TTL の数百分の一にとどめる（障害が回復したらすぐ次の呼び出しで再取得できる）。
 NEGATIVE_TTL = 15.0
+_NEGATIVE_MAX = 512                   # 失敗記録の上限（TTL 内の急増もこれで抑える）
 
 
 def is_error_result(result) -> bool:
@@ -84,6 +85,12 @@ def ttl_cache(seconds: float, maxsize: int = 128,
                 # 後続が全員やり直して N 並列＝N 回 upstream を叩く（実測 2026-10-31: 20並行で
                 # 失敗経路は 20 回、成功経路は 1 回）。新規に来た呼び出し（＝先頭）は必ず
                 # 実行し直す（短命キャッシュで障害回復を遅らせない・系列テストを汚さない）。
+                # 期限切れの失敗記録を掃除する（掃除が無いと異なる引数への失敗が
+                # 際限なく溜まる。実測: 500 引数→500 エントリが cache_clear まで残る）
+                for k in [k for k, v in negative.items() if v[0] <= now]:
+                    negative.pop(k, None)
+                if len(negative) >= _NEGATIVE_MAX:
+                    negative.pop(min(negative, key=lambda k: negative[k][0]), None)
                 negative[key] = (now + NEGATIVE_TTL, value)
                 return
             if maxsize and maxsize > 0:
@@ -151,7 +158,7 @@ def ttl_cache(seconds: float, maxsize: int = 128,
 
         def cache_info():
             return {"entries": len(store), "ttl_seconds": seconds, "maxsize": maxsize,
-                    "inflight": len(inflight)}
+                    "inflight": len(inflight), "negatives": len(negative)}
 
         wrapper.cache_clear = cache_clear
         wrapper.cache_info = cache_info

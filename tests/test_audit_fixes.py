@@ -546,5 +546,72 @@ class Orbit3dTagTests(unittest.TestCase):
 
 
 
+class NegativeCacheBoundedTests(unittest.TestCase):
+    """ttl_cache の失敗記録（negative）は掃除されずに際限なく溜まらない。"""
+
+    def test_negative_entries_are_bounded(self):
+        from space_finder_mcp import cache
+
+        @cache.ttl_cache(60, maxsize=8, skip_if=lambda v: bool(v.get("error")))
+        def failing(key):
+            return {"error": "x"}
+
+        for i in range(700):
+            failing(i)
+        info = failing.cache_info()
+        self.assertLessEqual(info["negatives"], 512, info)
+
+    def test_expired_negative_entries_are_purged_on_write(self):
+        from space_finder_mcp import cache
+
+        @cache.ttl_cache(60, maxsize=8, skip_if=lambda v: not v)
+        def empty(key):
+            return []
+
+        with mock.patch.object(cache, "NEGATIVE_TTL", 0.05):
+            empty("a")
+            empty("b")
+            time.sleep(0.2)
+            empty("c")                    # この書き込みのタイミングで期限切れ分を掃除する
+        self.assertLessEqual(empty.cache_info()["negatives"], 1)
+
+
+class SlimSchemaRefTests(unittest.TestCase):
+    """$ref + null は畳まない（"type": "null" を付けると意味が変わるため）。"""
+
+    def test_ref_plus_null_stays_anyof(self):
+        from space_finder_mcp.tool_docs import slim_schema
+        node = {"anyOf": [{"$ref": "#/x"}, {"type": "null"}]}
+        out = slim_schema(node)
+        self.assertIn("anyOf", out)
+        self.assertNotIn("type", out)
+        self.assertEqual(out["anyOf"][0], {"$ref": "#/x"})
+        self.assertEqual(slim_schema(out), out)      # 冪等
+
+    def test_plain_type_plus_null_still_folds(self):
+        from space_finder_mcp.tool_docs import slim_schema
+        out = slim_schema({"anyOf": [{"type": "string"}, {"type": "null"}]})
+        self.assertEqual(out.get("type"), ["string", "null"])
+        self.assertNotIn("anyOf", out)
+
+
+class JsonKeyCollisionTests(unittest.TestCase):
+    """非 str キーの変換先が既存キーと衝突しても黙って落とさない（str キーを優先）。"""
+
+    def test_int_and_str_key_both_survive(self):
+        from space_finder_mcp.jsonio import to_json
+        out = to_json({1: "int値", "1": "str値"})
+        self.assertEqual(out["1"], "str値")          # 元が str のキーを優先
+        self.assertIn("_1", out)
+        self.assertEqual(out["_1"], "int値")
+
+    def test_result_is_insertion_order_independent(self):
+        from space_finder_mcp.jsonio import to_json
+        a = to_json({1: "int値", "1": "str値"})
+        b = to_json({"1": "str値", 1: "int値"})
+        self.assertEqual(a, b)
+
+
+
 if __name__ == "__main__":
     unittest.main()

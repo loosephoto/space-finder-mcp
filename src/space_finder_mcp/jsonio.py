@@ -65,8 +65,18 @@ def to_json(value: Any, *, _depth: int = 0) -> Any:
         return value if math.isfinite(value) else None
     if isinstance(value, dict):
         out = {}
+        # 元が str のキーを優先し、非 str キーの変換先が衝突するときは "_<キー>" へ
+        # 退避する（{1: "a", "1": "b"} の類で片方が黙って消えるのを防ぐ。挿入順に
+        # よらず同じ結果になるよう str キーを先に置く）
         for k, v in value.items():
-            out[k if isinstance(k, str) else str(k)] = to_json(v, _depth=_depth + 1)
+            if isinstance(k, str):
+                out[k] = to_json(v, _depth=_depth + 1)
+        for k, v in value.items():
+            if not isinstance(k, str):
+                kk = str(k)
+                while kk in out:
+                    kk = "_" + kk
+                out[kk] = to_json(v, _depth=_depth + 1)
         return out
     if isinstance(value, (list, tuple, set, frozenset)):
         items = value

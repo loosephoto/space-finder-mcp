@@ -168,8 +168,11 @@ def slim_schema(node):
                 if len(other) == 1 and isinstance(other[0], dict):
                     base = dict(other[0])
                     base.update({k: v for k, v in out.items() if k != "anyOf"})
-                    base["type"] = [base["type"], "null"] if base.get("type") else "null"
-                    return base
+                    if base.get("type"):
+                        base["type"] = [base["type"], "null"]
+                        return base
+                    # type を持たない項（$ref 等）は null と畳めない（"type": "null" を
+                    # 付けると「null のみ許容」に意味が変わる）→ anyOf のまま返す
         return out
     if isinstance(node, list):
         return [slim_schema(x) for x in node]
