@@ -1165,7 +1165,9 @@ class RangeAuTests(unittest.TestCase):
         # 範囲外は黙って消さず、数値付きで注記に列挙する
         joined = "\n".join(sc["figure"]["notes"])
         self.assertIn("表示範囲10 AU の外にあるため描いていない", joined)
-        self.assertIn("19.44 AU", joined)                      # 天王星の実際の日心距離
+        from space_finder_mcp.solar_render import _au_fmt
+        ur = next(o for o in sc["out_of_range"] if o["name"] == "天王星")
+        self.assertIn("{} AU".format(_au_fmt(ur["au"])), joined)  # 天王星の日心距離（暦で動くので実値から組む）
         self.assertIn("表示範囲の外の惑星軌道の円は描いていない", joined)
 
     def test_both_engines_honor_range_au(self):

@@ -39,7 +39,7 @@ def _default_window(days: int = CME_DEFAULT_DAYS) -> dict:
     （実測。FLR/GST/SEP は省略してもサーバ側の既定＝直近30日を返す）。旧 URL は
     301 で到達していなかったため気付かなかった潜在バグ。
     """
-    end = datetime.date.today()
+    end = datetime.datetime.now(datetime.timezone.utc).date()  # DONKI の日付境界は UTC
     return {"startDate": (end - datetime.timedelta(days=days)).isoformat(),
             "endDate": end.isoformat()}
 

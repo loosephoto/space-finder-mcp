@@ -276,11 +276,15 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
     lines_txt = [
         f"🛰 {sat_name}",
         f"現在地: {ns} {abs(lat0):.2f}度 / {ew} {abs(lon0):.2f}度（高度 {alt0:.0f} km）",
-        f"速度 約{speed0*3600:.0f} km/h ・ 観測時刻 {tstr} UTC",
+        f"速度 約{speed0*3600:.0f} km/h ・ 観測時刻 {tstr}",
     ]
-    d.text((px0 + 14, py0 + 8), lines_txt[0], font=f_big, fill=(255, 255, 255))
-    d.text((px0 + 14, py0 + 8 + int(out_px / 26)), lines_txt[1], font=f_mid, fill=(225, 228, 248))
-    d.text((px0 + 14, py0 + 8 + int(out_px / 19)), lines_txt[2], font=f_sm, fill=(200, 210, 240))
+    # 行位置は textbbox の実測高さで積む（固定オフセットだと out_px 縮小時に文字が重なる）
+    _ly = py0 + 8
+    for _txt, _lf, _fill in ((lines_txt[0], f_big, (255, 255, 255)),
+                             (lines_txt[1], f_mid, (225, 228, 248)),
+                             (lines_txt[2], f_sm, (200, 210, 240))):
+        d.text((px0 + 14, _ly), _txt, font=_lf, fill=_fill)
+        _ly = d.textbbox((px0 + 14, _ly), _txt, font=_lf)[3] + max(4, out_px // 250)
     if panel_hidden:
         # どの隅でも重なる場合は、隠れるマーカーをパネルの上に描き直す
         d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(255, 40, 30),

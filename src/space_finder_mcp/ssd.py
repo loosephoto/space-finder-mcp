@@ -550,7 +550,8 @@ def fireball_reports(days: int = 30, min_impact_energy_kt: Optional[float] = Non
         ("ℹ️ この結果 {} 件をカレンダーの蓄積ストアへ反映しました"
          "（`space_calendar` / `calendar_events` に表示されます）".format(stored)
          if stored else
-         "ℹ️ カレンダーへの蓄積はできませんでした（蓄積ストアに書き込めませんでした）"),
+         ("ℹ️ 該当 0 件のため、カレンダーへの蓄積はありません" if not results else
+          "ℹ️ カレンダーへの蓄積はできませんでした（蓄積ストアに書き込めませんでした）")),
         "出典: NASA/JPL CNEOS（ssd-api.jpl.nasa.gov）",
     ]
     if not results:
@@ -780,7 +781,8 @@ def neo_close_approach(days: int = 7, max_distance_au: float = 0.05, limit: int 
         ("ℹ️ この結果 {} 件をカレンダーの蓄積ストアへ反映しました"
          "（`space_calendar` / `calendar_events` に表示されます）".format(stored)
          if stored else
-         "ℹ️ カレンダーへの蓄積はできませんでした（蓄積ストアに書き込めませんでした）"),
+         ("ℹ️ 該当 0 件のため、カレンダーへの蓄積はありません" if not results else
+          "ℹ️ カレンダーへの蓄積はできませんでした（蓄積ストアに書き込めませんでした）")),
         "出典: NASA/JPL CNEOS（ssd-api.jpl.nasa.gov）／ 各天体の詳細は JPL SBDB で確認できます。",
     ]
     if kind_unknown:

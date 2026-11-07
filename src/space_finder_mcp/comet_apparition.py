@@ -490,7 +490,16 @@ def _draw_chart(series: Sequence[dict], info: dict) -> dict:
             if a < b and mark_x[a] and mark_x[b] and abs(mark_x[a] - mark_x[b]) <= 2.0:
                 same_day.append(sorted([a, b]))
 
-    dd.text((_ML, _H - 26), info["footer"], font=f_m, fill=_DIM)
+    # 出典行はキャンバス右端で切れないように、幅に合わせて縮小・省略する
+    _ftxt, _ffont = info["footer"], f_m
+    if _ML + dd.textbbox((0, 0), _ftxt, font=_ffont)[2] > _W - 10:
+        _ffont = load_font(13)
+    if _ML + dd.textbbox((0, 0), _ftxt, font=_ffont)[2] > _W - 10:
+        _ffont = load_font(12)
+        while _ftxt and dd.textbbox((0, 0), _ftxt + "…", font=_ffont)[2] > _W - 10 - _ML:
+            _ftxt = _ftxt[:-1]
+        _ftxt += "…"
+    dd.text((_ML, _H - 26), _ftxt, font=_ffont, fill=_DIM)
     return {"img": img, "checks": checks, "label_boxes": label_boxes,
             "skipped_labels": skipped, "marker_pixels": mark_px, "mark_same_day": same_day}
 

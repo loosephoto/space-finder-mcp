@@ -10,7 +10,6 @@ EO Dashboard のデータは GitHub リポジトリで無料公開されてい�
 """
 from __future__ import annotations
 
-import io
 from typing import Optional
 import base64
 

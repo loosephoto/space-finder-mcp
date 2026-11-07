@@ -228,6 +228,12 @@ class FireballTests(unittest.TestCase):
         self.assertEqual(res.structuredContent["shown"], 0)
         self.assertIn("ありませんでした", res.content[0].text)
 
+    def test_zero_hits_does_not_claim_store_failure(self):
+        """0 件のとき「書き込めませんでした」（失敗）と表示しない（蓄積する物が無いだけ）。"""
+        res = self._run(FIREBALL_EMPTY)
+        self.assertIn("該当 0 件のため、カレンダーへの蓄積はありません", res.content[0].text)
+        self.assertNotIn("書き込めませんでした", res.content[0].text)
+
     def test_connection_failure_returns_error_result(self):
         def boom(*a, **k):
             raise requests.ConnectionError("simulated network failure")
