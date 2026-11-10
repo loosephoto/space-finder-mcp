@@ -132,6 +132,8 @@ def apod(key: str, date: Optional[str] = None) -> CallToolResult:
 def neo_today(key: str) -> CallToolResult:
     """今日地球に接近する小惑星（Near Earth Object）の一覧を返す。
 
+    例:「今日地球に近づく小惑星は？」「NEOの接近情報」
+
     認証不要（DEMO_KEY）または無料開発者キー。content に表示用サマリ、structuredContent に JSON を返す。
 
     Args:

@@ -741,8 +741,9 @@ def _apparition_notes(d: dict, verify: dict, skipped: Sequence[str]) -> List[str
          "ずれる（169P/NEAT・2026年8〜9月）"),
         "この期間の最小地心距離 Δ＝{:.4f} AU（約 {:.0f} 万 km）は {} UTC。{}".format(
             dmin["delta_au"], dmin["delta_au"] * _AU_KM / 1e4, dmin["utc"], ca_txt),
-        "この期間の最小日心距離 r＝{:.4f} AU は {} UTC（近日点）。{}".format(
-            rmin["r_au"], rmin["utc"], r_txt),
+        "この期間の最小日心距離 r＝{:.4f} AU は {} UTC（{}）。{}".format(
+            rmin["r_au"], rmin["utc"],
+            "近日点" if not d["edge_r"] else "期間の端の最小", r_txt),
         mag_note,
         "太陽離角の最大は {:.0f}°（{} UTC{}）。**離角が小さいほど薄明の中に沈み、地球から"
         "観測しにくい**（目安として 30° 未満では事実上観測できない）".format(

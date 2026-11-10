@@ -40,7 +40,9 @@ MAX_COOLDOWN = WINDOW        # 実際に待つ上限（秒）。NASA の Retry-A
                              # 半日停止してしまうため上限を設けて「1時間後に再試行」する。
 
 _lock = threading.Lock()
-_calls: "collections.deque[float]" = collections.deque()
+# 使用数は**キーごと**に数える。単一の deque だと別キーの呼び出しが DEMO_KEY の
+# 共有枠を消費してしまう（実測: record('custom-key')x30 で check('DEMO_KEY') が False）。
+_calls: dict = {}          # key -> collections.deque[float]
 # 429 の待機は**キーごと**に持つ。単一の値だと DEMO_KEY の 429 が、開発者キーで
 # 呼ぶ apod / neo_today まで最大1時間止めてしまう（実測 2026-10-31: note_429(DEMO_KEY)
 # の直後に check("custom-key") が (False, 120.0, 0) を返した）。
@@ -70,9 +72,14 @@ def limit_for(key: Optional[str]) -> int:
     return DEMO_LIMIT if (key or DEMO_KEY) == DEMO_KEY else KEY_LIMIT
 
 
-def _prune(now: float) -> None:
-    while _calls and _calls[0] <= now - WINDOW:
-        _calls.popleft()
+def _prune(now: float, key: str) -> None:
+    q = _calls.get(key)
+    if not q:
+        return
+    while q and q[0] <= now - WINDOW:
+        q.popleft()
+    if not q:
+        _calls.pop(key, None)
 
 
 def check(key: Optional[str] = None) -> tuple:
@@ -80,24 +87,26 @@ def check(key: Optional[str] = None) -> tuple:
     k = key or current_key()
     now = time.time()
     with _lock:
-        _prune(now)
-        used = len(_calls)
+        _prune(now, k)
+        q = _calls.get(k)
+        used = len(q) if q else 0
         cool = float(_cooldown_until.get(k, 0.0))
         if now < cool:
             return False, cool - now, used
         if used >= limit_for(k):
             # 最も古い呼び出しが窓から外れるまで待てば枠が空く
-            wait = max(0.0, (_calls[0] + WINDOW) - now) if _calls else 0.0
+            wait = max(0.0, (q[0] + WINDOW) - now) if q else 0.0
             return False, wait, used
         return True, 0.0, used
 
 
 def record(key: Optional[str] = None) -> None:
     """これから1回投げる（投げた）ことを記録する。"""
+    k = key or current_key()
     now = time.time()
     with _lock:
-        _prune(now)
-        _calls.append(now)
+        _prune(now, k)
+        _calls.setdefault(k, collections.deque()).append(now)
 
 
 def note_429(key: Optional[str] = None, retry_after=None) -> float:
@@ -208,8 +217,9 @@ def status(key: Optional[str] = None) -> dict:
     k = key or current_key()
     now = time.time()
     with _lock:
-        _prune(now)
-        used = len(_calls)
+        _prune(now, k)
+        q = _calls.get(k)
+        used = len(q) if q else 0
         cool = max(0.0, float(_cooldown_until.get(k, 0.0)) - now)
     return {"key": "DEMO_KEY" if k == DEMO_KEY else "custom",
             "limit_per_hour": limit_for(k), "used_last_hour": used,

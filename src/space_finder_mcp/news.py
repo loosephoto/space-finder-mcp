@@ -96,7 +96,7 @@ def _parse_feed(url: str) -> list[dict]:
 def astronomy_news(limit: int = 8, section: str = "all") -> CallToolResult:
     """天文ニュース・観測ガイドを返す（複数フィードのフォールバック付き・認証不要）。
 
-    「今日の天文ニュース」「今週の星空ガイド」「惑星観測の見どころ」など。
+    例:「今日の天文ニュース」「今週の星空ガイド」「惑星観測の見どころ」など。
     第一候補は Sky & Telescope の公式RSS。取得できない場合は他ソース
     (Universe Today / NASA / Phys.org) に自動でフォールバックする。
     content に表示用サマリ、structuredContent に JSON を返す。

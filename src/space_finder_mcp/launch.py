@@ -56,6 +56,8 @@ def blocked_message() -> str:
 def upcoming_launches(limit: int = 5) -> CallToolResult:
     """今後予定されているロケット打ち上げの一覧を返す。
 
+    例:「今後のロケット打ち上げは？」「来月の打ち上げ予定」
+
     認証不要。content に表示用サマリ、structuredContent に JSON を返す。
 
     Args:

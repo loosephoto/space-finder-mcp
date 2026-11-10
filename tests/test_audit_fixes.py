@@ -416,10 +416,18 @@ class MastDateValidationTests(unittest.TestCase):
             built["args"] = a
             return []
 
-        with mock.patch.object(mast, "_build_filters", fake_filters):
-            res = mast.mast_observations.__wrapped__(ra=10.68, dec=41.27,
-                                                     start_date="2026-02-28",
-                                                     end_date="2026-03-31")
+        def boom(*a, **k):
+            raise requests.ConnectionError("blocked")
+
+        # HTTP は必ず遮断する（このテストは「有効な日付が filters に届くか」だけを見る。
+        # 実通信にするとネットワークの状態で import ロックの競合が起きてERRORになる）
+        with mock.patch.object(mast, "_build_filters", fake_filters), \
+                mock.patch.object(mast.requests, "post", boom), \
+                mock.patch.object(mast.requests, "get", boom), \
+                mock.patch.object(requests.Session, "request", boom):
+            mast.mast_observations.__wrapped__(ra=10.68, dec=41.27,
+                                               start_date="2026-02-28",
+                                               end_date="2026-03-31")
         self.assertEqual(built["args"][3], "2026-02-28")
         self.assertEqual(built["args"][4], "2026-03-31")
 
@@ -766,6 +774,180 @@ class GalacticLbIdentityTests(unittest.TestCase):
         self.assertTrue(np.array_equal(b1, b2))
         self.assertTrue(np.array_equal(a1, a2))
 
+
+
+
+
+class ToolDocsBoldSentenceTests(unittest.TestCase):
+    """太字を行またぐ段落を `。` で割ると `****` になる（2026-11-10 監査）。"""
+
+    def test_adjacent_bold_lines_split_into_balanced_sentences(self):
+        s = tool_docs._sentences("**A。**\n**B。**")
+        self.assertEqual(s, ["**A。**", "**B。**"])
+        # 文は "\n\n" で接合される（"".join だと境界に **** が出るだけ）
+        self.assertNotIn("****", "\n\n".join(s))
+        for one in s:
+            self.assertEqual(one.count("**") % 2, 0)
+
+    def test_bold_span_with_two_sentences_stays_one(self):
+        self.assertEqual(tool_docs._sentences("**A。B。**"), ["**A。B。**"])
+
+    def test_plain_text_still_splits(self):
+        self.assertEqual(tool_docs._sentences("A。B。"), ["A。", "B。"])
+
+    def test_calendar_description_has_no_quad_asterisk(self):
+        from space_finder_mcp import server
+        d = server.mcp._tool_manager._tools["space_calendar"].description
+        self.assertNotIn("****", d)
+        self.assertIn("figure.notes", d)
+
+    def test_examples_before_args_kept_and_not_duplicated(self):
+        doc = ("要約。\n\n例:「テスト」\n\n"
+               "Args:\n    x: 引数。\n        例: \"a\", \"b\"。\n")
+        d = tool_docs.compact_description(doc)
+        self.assertEqual(d.count("例:「テスト」"), 1)
+        self.assertEqual(d.count('例: "a", "b"。'), 1)
+
+    def test_example_in_same_block_as_args_is_kept(self):
+        doc = "英国のコレクション。\n\n例:「英国の衛星データ」\nArgs:\n    limit: 件数。\n"
+        d = tool_docs.compact_description(doc)
+        self.assertIn("例:「英国の衛星データ」", d)
+        self.assertIn("Args:", d)
+
+    def test_every_tool_has_example(self):
+        from space_finder_mcp import server
+        names = [t.name for t in server.mcp._tool_manager.list_tools()
+                 if "例" not in (t.description or "")]
+        self.assertEqual(names, [])
+
+
+class JsonioDecimalTests(unittest.TestCase):
+    def test_nonfinite_decimal_becomes_none(self):
+        import decimal
+        from space_finder_mcp import jsonio
+        for v in ("NaN", "Infinity", "-Infinity", "sNaN"):
+            self.assertIsNone(jsonio.to_json({"v": decimal.Decimal(v)})["v"])
+
+    def test_finite_decimal_unchanged(self):
+        import decimal
+        from space_finder_mcp import jsonio
+        self.assertEqual(jsonio.to_json({"v": decimal.Decimal("2")})["v"], 2)
+        self.assertEqual(jsonio.to_json({"v": decimal.Decimal("1.5")})["v"], 1.5)
+
+
+class FmtNumTests(unittest.TestCase):
+    def test_small_nonzero_and_nonfinite(self):
+        from space_finder_mcp import img_common as ic
+        self.assertEqual(ic._fmt_num(0.0), "0")
+        self.assertEqual(ic._fmt_num(-0.0), "0")
+        self.assertNotEqual(ic._fmt_num(1e-5), "0")
+        self.assertNotEqual(ic._fmt_num(-1e-5), "-0")
+        self.assertEqual(ic._fmt_num(float("inf")), "-")
+        self.assertEqual(ic._fmt_num(float("-inf")), "-")
+        self.assertEqual(ic._fmt_num(float("nan")), "-")
+        self.assertEqual(ic._fmt_num(None), "-")
+
+    def test_normal_values_unchanged(self):
+        from space_finder_mcp import img_common as ic
+        self.assertEqual(ic._fmt_num(1234.0), "1,234")
+        self.assertEqual(ic._fmt_num(1.5), "1.50")
+        self.assertEqual(ic._fmt_num(0.5), "0.5")
+
+
+class EncodeJpegTests(unittest.TestCase):
+    def test_respects_max_bytes(self):
+        import numpy as np
+        from PIL import Image
+        from space_finder_mcp import img_common as ic
+        im = Image.fromarray(np.random.default_rng(0).integers(
+            0, 256, (2000, 2500, 3), dtype=np.uint8))
+        data = ic.encode_jpeg(im, max_bytes=800_000)
+        self.assertLessEqual(len(data), 800_000)
+
+
+class ParseDotenvTests(unittest.TestCase):
+    def test_inline_comment_stripped(self):
+        from space_finder_mcp import env_config
+        self.assertEqual(env_config.parse_dotenv("A=1 # comment"), {"A": "1"})
+        self.assertEqual(env_config.parse_dotenv("A=abc #c"), {"A": "abc"})
+        self.assertEqual(env_config.parse_dotenv("A=abc#def"), {"A": "abc#def"})
+        self.assertEqual(env_config.parse_dotenv('A="abc" # c'), {"A": "abc"})
+        self.assertEqual(env_config.parse_dotenv("A=  x  "), {"A": "x"})
+
+
+class NasaBudgetPerKeyTests(unittest.TestCase):
+    def setUp(self):
+        nasa_budget._calls.clear()
+        nasa_budget._cooldown_until.clear()
+
+    def tearDown(self):
+        nasa_budget._calls.clear()
+        nasa_budget._cooldown_until.clear()
+
+    def test_other_key_usage_does_not_block_demo_key(self):
+        for _ in range(30):
+            nasa_budget.record("custom-key")
+        ok, _wait, used = nasa_budget.check("DEMO_KEY")
+        self.assertTrue(ok)
+        self.assertEqual(used, 0)
+
+    def test_demo_key_usage_does_not_block_custom_key(self):
+        for _ in range(30):
+            nasa_budget.record("DEMO_KEY")
+        ok, _wait, used = nasa_budget.check("custom-key")
+        self.assertTrue(ok)
+        self.assertEqual(used, 0)
+        ok2, _w2, used2 = nasa_budget.check("DEMO_KEY")
+        self.assertFalse(ok2)
+        self.assertEqual(used2, 30)
+
+
+class JaxaPublicWindowTests(unittest.TestCase):
+    def test_window_uses_observer_local_date(self):
+        import datetime as dt
+        from space_finder_mcp import space_calendar as sc
+        seen = {}
+
+        def fake_fresh(src, ttl, window=None):
+            seen["window"] = window
+            return True
+
+        with mock.patch.object(sc.store, "source_is_fresh", fake_fresh):
+            sc._jaxa_public_events(9.0)
+        expect = (dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+                  + dt.timedelta(hours=9)).date().isoformat()
+        self.assertEqual(seen.get("window"), expect)
+
+
+class GeocodeDedupeTests(unittest.TestCase):
+    def test_same_query_not_sent_twice(self):
+        from space_finder_mcp import weather_astro as wa
+        calls = []
+
+        class R:
+            status_code = 200
+            headers = {}
+            content = b'{"results":[]}'
+            text = '{"results":[]}'
+
+            def json(self):
+                return {"results": []}
+
+            def raise_for_status(self):
+                pass
+
+        def fake_get(url, params=None, headers=None, timeout=None):
+            calls.append(dict(params or {}))
+            return R()
+
+        wa._geocode.cache_clear()
+        try:
+            with mock.patch.object(wa.requests, "get", fake_get), \
+                 mock.patch.object(wa, "_geocode_nominatim", lambda p: None):
+                wa._geocode("白馬")
+        finally:
+            wa._geocode.cache_clear()
+        self.assertEqual(len(calls), 1)
 
 
 if __name__ == "__main__":

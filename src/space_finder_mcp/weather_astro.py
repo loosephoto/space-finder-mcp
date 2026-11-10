@@ -512,7 +512,7 @@ def _geocode(place: str) -> Optional[dict]:
     # 日本語→英語変換
     if q in _JA_PLACES:
         q = _JA_PLACES[q]
-    for name in (q, place.strip()):
+    for name in dict.fromkeys((q, place.strip())):   # 同一地名の二重リクエストを避ける
         try:
             r = requests.get("https://geocoding-api.open-meteo.com/v1/search",
                              params={"name": name, "count": 1, "format": "json"},

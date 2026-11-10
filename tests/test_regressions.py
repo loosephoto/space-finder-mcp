@@ -622,7 +622,7 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(len(seen), 1)                 # 1カテゴリ＝1リクエスト
         url, params = seen[0]
         self.assertTrue(url.endswith("/CME"))
-        today = datetime.date.today()
+        today = datetime.datetime.now(datetime.timezone.utc).date()
         self.assertEqual(params.get("endDate"), today.isoformat())
         self.assertEqual(params.get("startDate"),
                          (today - datetime.timedelta(days=30)).isoformat())

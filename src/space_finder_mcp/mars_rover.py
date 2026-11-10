@@ -51,7 +51,7 @@ def _get_mars_weather(rover: str) -> dict:
 def mars_rover_status(rover: str = "curiosity", show_photos: bool = True) -> CallToolResult:
     """NASA 火星探査ローバーの現在の状況・天気・最新写真を返す。
 
-    「キュリオシティの現在の状況」「火星探査ローバーの今」「パーサヴィアランスの天気」
+    例:「キュリオシティの現在の状況」「火星探査ローバーの今」「パーサヴィアランスの天気」
     など。火星の天気（気温・気圧・風速・ソル・地球日付・季節）を認証不要で取得。
 
     Args:

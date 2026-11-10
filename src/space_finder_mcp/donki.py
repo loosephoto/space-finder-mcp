@@ -133,9 +133,7 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
     天体観測や通信・衛星運用に影響する太陽活動を確認できる。
 
     **DONKI（ccmc.gsfc.nasa.gov/DONKI-API・認証不要・専用のレート枠）が障害のときは、認証不要の NOAA SWPC（Kp・NOAA スケール・
-
     GOES X線・フレアイベント（直近7日）・太陽風・陽子・警報・黒点相対数）に自動で切り替えて返す**（どちらの出典かを
-
     content と structuredContent.source に明記する）。API キーは不要（`NASA_API_KEY` は apod / neo_today のみで使用）。
 
     **予報（`kind="forecast"`）は DONKI に存在しない**（DONKI は観測・警報の記録）ので、

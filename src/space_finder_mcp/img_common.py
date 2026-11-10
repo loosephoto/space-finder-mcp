@@ -433,18 +433,24 @@ def load_font(sz: int, bold: bool = False):
 
 
 def encode_jpeg(img, max_bytes: int = 3_500_000) -> bytes:
-    """PIL 画像を JPEG バイト列にする。max_bytes 超過時は縮小して再エンコードする。"""
+    """PIL 画像を JPEG バイト列にする。max_bytes を超える場合は縮小を繰り返す。
+
+    1回の縮小（0.7x）では上限を守れないことがある（実測: 4000x3000 のノイズ画像が
+    3,688,544 bytes > 3,500,000）。縮小率を 0.7 → 0.56 → ... と下げてまで抑える。
+    """
     from PIL import Image
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="JPEG", quality=88)
     data = buf.getvalue()
-    if len(data) > max_bytes:
-        w, h = img.size
+    scale = 0.7
+    w, h = img.size
+    while len(data) > max_bytes and scale > 0.15:
         small = img.convert("RGB").resize(
-            (max(1, int(w * 0.7)), max(1, int(h * 0.7))), Image.LANCZOS)
+            (max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
         buf = io.BytesIO()
         small.save(buf, format="JPEG", quality=85)
         data = buf.getvalue()
+        scale *= 0.8
     return data
 
 
@@ -491,11 +497,21 @@ def _fmt_num(v: Optional[float], digits: int = 2) -> str:
     """注記用の数値表記（大きな値は3桁区切り、小さい値は有効数字を確保）。"""
     if v is None:
         return "-"
+    try:
+        if not math.isfinite(float(v)):
+            return "-"
+    except (TypeError, ValueError):
+        return "-"
     av = abs(v)
     if av >= 1000:
         return "{:,.0f}".format(v)
     if av >= 1:
         return "{:,.{}f}".format(v, digits)
+    if av == 0:
+        return "0"
+    if av < 1e-4:
+        # 0.0001 未満は固定小数だと '0'／'-0' になる（実測: 1e-5 → '0'）
+        return "{:.2e}".format(v)
     return "{:.4f}".format(v).rstrip("0").rstrip(".")
 
 

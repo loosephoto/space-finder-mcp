@@ -9,6 +9,7 @@ MCPクライアントの設定ファイルにAPIキーを書きたくない場�
 from __future__ import annotations
 
 import os
+import re
 
 _LOADED = False
 
@@ -34,8 +35,17 @@ def parse_dotenv(text: str) -> dict:
         key, value = line.split("=", 1)
         key = key.strip()
         value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
+        # インラインコメント（` #...`）は**引用符の外**にあるものだけ切る
+        # （python-dotenv と同じ。実測: 'NASA_API_KEY=*** # comment' が値にコメントを
+        # 含んでいた）。引用符で囲んだ値は囲みの外のコメントを落とす。
+        if value[:1] in ("\"", "'"):
+            q = value[0]
+            end = value.find(q, 1)
+            value = value[1:end] if end != -1 else value[1:]
+        else:
+            m = re.search(r"\s#", value)
+            if m:
+                value = value[:m.start()].rstrip()
         if key:
             out[key] = value
     return out

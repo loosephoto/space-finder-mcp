@@ -236,7 +236,10 @@ def _nasa_apod(date: Optional[str] = None) -> CallToolResult:
     return _nasa.apod(_nasa_budget.current_key(), date)
 
 def _nasa_neo_today() -> CallToolResult:
-    """今日地球に接近する小惑星(NEO)を返す。NASA_API_KEY が必要。"""
+    """今日地球に接近する小惑星(NEO)を返す。NASA_API_KEY が必要。
+
+    例:「今日地球に近づく小惑星は？」「NEOの接近情報」
+"""
     return _nasa.neo_today(_nasa_budget.current_key())
 
 _reg(_nasa_apod, name="apod")

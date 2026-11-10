@@ -327,7 +327,7 @@ def _ensure_coverage(year: int, month: int, off: float) -> list:
     else:
         store.upsert(pub, "public:{}".format(year), window=str(year), complete=True,
                      ttl=store.TTL_PUBLIC)
-    jaxa_err = _jaxa_public_events()
+    jaxa_err = _jaxa_public_events(off)
     if jaxa_err:
         warnings.append("JAXA 施設公開: {}".format(jaxa_err))
     _computed_month(year, month, off)
@@ -572,6 +572,8 @@ def space_calendar(year: Optional[int] = None, month: Optional[int] = None, plac
                    ) -> CallToolResult:
     """宇宙・天文イベントの月間カレンダー（打ち上げ・天文現象・公開イベント・自分の予定）を画像とJSONで返す。
 
+    例:「10月の宇宙イベントは？」「今月の打ち上げ予定」「流星群のタイミング」
+
     打ち上げは Launch Library 2 の API（月範囲）から、日付が確定した行だけを日付セルに置きます。
     天文現象は JPL DE421 + Skyfield のローカル計算（月相・二十四節気・惑星の衝/合/内合・最大離角・
     日食月食・流星群）、公開・イベントは国立天文台のイベント一覧と JAXA の施設公開（一般公開・特別公開）、
@@ -762,6 +764,8 @@ def calendar_event_remove(id: Optional[str] = None, title: Optional[str] = None,
                           date: Optional[str] = None) -> CallToolResult:
     """カレンダーの自分の予定を削除する（id か title[+date] で指定）。
 
+    例:「追加した予定を消して」「10/20のミーティングを削除」
+
     既に無い場合や既に削除済みの場合はエラーにせず「該当なし」を返します（冪等）。
     title だけで複数該当したときは**削除せず候補を提示**します（推測して消さない）。
 
@@ -804,7 +808,7 @@ def calendar_events(year: Optional[int] = None, month: Optional[int] = None, pla
 
     蓄積ストア（`space_calendar` が取得したものと `calendar_event_add` で入れた予定）だけを読みます。
     呼び出し時に保持期限（カレンダーと同じ日数＝過去データの自動削除）も適用します。
-    「今月の予定は？」「10月の公開イベントは？」のように、まず一覧だけ見たいときに使ってください。
+    例:「今月の予定は？」「10月の公開イベントは？」のように、まず一覧だけ見たいときに使ってください。
     打ち上げ・天文現象の鮮度は `structuredContent.sources` に取得時刻として入ります。
 
     Args:
@@ -1033,7 +1037,7 @@ def _jaxa_isas_events() -> list:
     return out
 
 
-def _jaxa_public_events() -> Optional[str]:
+def _jaxa_public_events(off: float = 0.0) -> Optional[str]:
     """JAXA の施設公開（fanfun の近日開催＋ISAS の過去分）を取り込む。戻り: 警告 or None。
 
     fanfun はアーカイブを持たないスナップショットなので、月キーの read-through（窓 [M-1, M+2]）には
@@ -1042,7 +1046,11 @@ def _jaxa_public_events() -> Optional[str]:
     片方の取得に失敗したら complete=False にして、当日中は再取得を許す。
     """
     src = "jaxa_public:v1"
-    window = dt.date.today().isoformat()
+    # 窓は「取得日」。レンダリング経路と同じく観測地の現地日を使う（host の UTC 日付だと
+    # 東京の未明9時間は前日扱いになり、新しい現地日に取り直さない）。
+    today = (dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+             + dt.timedelta(hours=off)).date()
+    window = today.isoformat()
     if store.source_is_fresh(src, store.TTL_PUBLIC, window=window):
         return None
     recs, errs = [], []

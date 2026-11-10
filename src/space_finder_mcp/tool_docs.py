@@ -71,8 +71,45 @@ def _unwrap(block: str) -> str:
 
 
 def _sentences(block: str) -> list:
-    """段落を文単位に分ける（`。` 区切り）。"""
-    return [p.strip() for p in re.split(r"(?<=。)", _unwrap(block)) if p.strip()]
+    """段落を文単位に分ける（`。` 区切り）。`**太字**` の内部で分割しない。
+
+    `_unwrap` は隣接する行を 1 行に戻すため、行ごとに太字が閉じる段落
+    （`**A。**` の次に `**B。**`）が `A。****B。` と結合される。ここで素朴に
+    `。` で分割すると閉じマーカが次文に孤立して `****` という不正なマークダウンに
+    なる（実測: space_calendar の description）。太字の開き・閉じを深度で追い、
+    - 太字の**外**で `。` → 文を切る
+    - 太字の**内**で `。` の直後に閉じ `**` → その閉じマーカの後で文を切る
+    ようにする（結果として `**A。**` と `**B。**` の 2 文になる）。
+    """
+    text = _unwrap(block)
+    out, cur = [], ""
+    depth = 0                       # 0: 太字の外 / 1: 太字の中
+    i = 0
+    while i < len(text):
+        if text.startswith("**", i):
+            if depth == 0:
+                if cur.endswith("。"):
+                    out.append(cur.strip())
+                    cur = ""
+                depth = 1
+                cur += "**"
+            else:
+                depth = 0
+                if cur.endswith("。"):            # 太字内の文末 → 閉じマーカの後で切る
+                    out.append((cur + "**").strip())
+                    cur = ""
+                else:
+                    cur += "**"
+            i += 2
+            continue
+        cur += text[i]
+        i += 1
+        if cur.endswith("。") and depth == 0:
+            out.append(cur.strip())
+            cur = ""
+    if cur.strip():
+        out.append(cur.strip())
+    return [s for s in out if s]
 
 
 def _contract_clause(sentence: str, limit: int = 160) -> str:
@@ -122,8 +159,18 @@ def compact_description(doc: str, cap: int = 300) -> str:
         return ""
     out = [_summary(blocks[0], cap)]
     # ツール選択の手がかりになる例（「例:」で始まる行）
-    examples = [ln.strip() for b in blocks for ln in b.split("\n")
-                if ln.strip().startswith("例")]
+    # 「例」は Args 見出し**より前**のものだけ拾う。Args の中の「例」は Args ごと
+    # そのまま出すので二重になる（実測: stac_search / planetary_rover_location_map /
+    # satellite_status で重複）。逆に、uk_stac_collections のように「例」と Args が
+    # 同じブロックで 例 が先に来るものは落としてはいけない。
+    examples = []
+    for b in blocks:
+        for ln in b.split("\n"):
+            s = ln.strip()
+            if s.startswith(_ARG_HEADS):
+                break
+            if s.startswith("例"):
+                examples.append(s)
     if examples:
         out.append("\n".join(examples))
     # 引数の説明は一次情報なので一字も変えずに残す。`Args:` が単独ブロックの先頭に

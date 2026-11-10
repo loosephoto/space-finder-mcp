@@ -86,6 +86,10 @@ def to_json(value: Any, *, _depth: int = 0) -> Any:
     if isinstance(value, (_dt.datetime, _dt.date, _dt.time)):
         return value.isoformat()
     if isinstance(value, decimal.Decimal):
+        # 非有限（NaN / Infinity）は float 分岐と同じく None に落とす
+        # （int(Infinity) は OverflowError、JSON の NaN は非準拠）
+        if not value.is_finite():
+            return None
         return int(value) if value == value.to_integral_value() else float(value)
     if isinstance(value, (bytes, bytearray)):
         return bytes(value).decode("utf-8", "replace")
