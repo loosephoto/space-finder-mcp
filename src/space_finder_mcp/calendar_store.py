@@ -22,7 +22,9 @@ import time
 import uuid
 from typing import Iterable, Optional
 
-STORE_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "space-finder-mcp")
+from .cache import local_appdata
+
+STORE_DIR = os.path.join(local_appdata(), "space-finder-mcp")
 STORE_PATH = os.path.join(STORE_DIR, "calendar_store.json")
 STORE_VERSION = 1
 

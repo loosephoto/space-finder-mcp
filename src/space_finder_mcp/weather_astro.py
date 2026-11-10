@@ -32,6 +32,7 @@ from .cache import TTL_DAILY, TTL_FORECAST, ttl_cache, is_error_result
 from .img_common import figure_text_block, media_link_line, save_output
 from .input_utils import as_float, as_int
 from .jma_rain import rain_images
+from .name_common import ResolverUnavailable
 
 # Nominatim の 1 req/s を守るための排他（スレッド間で共有）
 _NOMINATIM_LOCK = threading.Lock()
@@ -317,7 +318,15 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
                 content=[TextContent(type="text", text="緯度経度 または 地名(place) のいずれかを指定してください。例: place='東京' または latitude=35.68, longitude=139.69")],
                 structuredContent={"error": "location required"},
             )
-        g = _geocode(place)
+        try:
+            g = _geocode(place)
+        except ResolverUnavailable as ex:
+            return CallToolResult(
+                content=[TextContent(type="text",
+                                     text="地名 '{}' を解決できませんでした（地名解決サービスに接続できません: {}）"
+                                          "。時間をおくか、緯度経度を直接指定してください。".format(place, str(ex)[:120]))],
+                structuredContent={"error": "resolver_unavailable", "place": place},
+            )
         if not g:
             return CallToolResult(
                 content=[TextContent(type="text", text=f"地名 '{place}' を解決できませんでした。緯度経度を直接指定してください。")],
@@ -521,12 +530,14 @@ def _geocode(place: str) -> Optional[dict]:
     # 日本語→英語変換
     if q in _JA_PLACES:
         q = _JA_PLACES[q]
+    reachable = False
     for name in dict.fromkeys((q, place.strip())):   # 同一地名の二重リクエストを避ける
         try:
             r = requests.get("https://geocoding-api.open-meteo.com/v1/search",
                              params={"name": name, "count": 1, "format": "json"},
                              headers=UA, timeout=(20, 20))
             r.raise_for_status()
+            reachable = True                     # 応答は返った（＝地名が無い可能性）
             results = r.json().get("results") or []
             if results:
                 it = results[0]
@@ -535,7 +546,12 @@ def _geocode(place: str) -> Optional[dict]:
         except requests.RequestException:
             continue
     # Open-Meteo で解決できなかった地名（施設・複合地名・曖昧な都市）は Nominatim へ
-    return _geocode_nominatim(place)
+    try:
+        return _geocode_nominatim(place)
+    except ResolverUnavailable:
+        if reachable:
+            return None                          # Open-Meteo は答えた＝地名が無いだけ
+        raise                                    # 両方に繋がらない＝サービス障害
 
 
 def _geocode_nominatim(place: str) -> Optional[dict]:
@@ -571,6 +587,11 @@ def _geocode_nominatim(place: str) -> Optional[dict]:
             disp = it.get("display_name", it.get("name", q))
             return {"latitude": float(it["lat"]), "longitude": float(it["lon"]),
                     "name": disp}
-    except (requests.RequestException, KeyError, ValueError):
+    except requests.RequestException as ex:
+        # 「該当なし」と「サービスに繋がらない」を区別する（呼び出し側が東京へ
+        # 黙って落ちるのを防ぐ）。
+        raise ResolverUnavailable(
+            "Nominatim（地名解決）に接続できませんでした: {}".format(str(ex)[:120])) from ex
+    except (KeyError, ValueError):
         pass
     return None

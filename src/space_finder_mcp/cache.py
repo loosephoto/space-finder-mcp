@@ -19,14 +19,34 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 import threading
 import time
+import uuid
 from functools import wraps
 from typing import Callable, Optional
 
+
+def local_appdata() -> str:
+    """OS ごとのアプリデータ置き場（Windows は %LOCALAPPDATA%）。
+
+    LOCALAPPDATA が無い環境（macOS/Linux）で "." に落とすと、キャッシュとカレンダー
+    ストアが**カレントディレクトリ依存**になる（実測: 起動場所ごとに別ファイルを読み、
+    「蓄積済み」が消える）。プラットフォーム標準の場所へ退避する。
+    """
+    v = os.environ.get("LOCALAPPDATA")
+    if v:
+        return v
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~"), "Library", "Application Support")
+    xdg = os.environ.get("XDG_DATA_HOME")
+    if xdg:
+        return xdg
+    return os.path.join(os.path.expanduser("~"), ".local", "share")
+
+
 # ディスクキャッシュのルート（既存の Blue Marble キャッシュと同じ場所の流儀）
-CACHE_ROOT = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp",
-                          "space_finder_mcp", "cache")
+CACHE_ROOT = os.path.join(local_appdata(), "Temp", "space_finder_mcp", "cache")
 
 # 既定 TTL（秒）。データの性質に合わせて呼び出し側で上書きする。
 TTL_DAILY = 24 * 3600       # データセット一覧・ジオコーディングなど準静的なもの
@@ -226,8 +246,11 @@ def disk_get(url: str, *, subdir: str = "asset", ttl: float = TTL_ASSET,
     path = disk_cache_path(url, subdir)
     now = time.time()
     if os.path.exists(path) and (now - os.path.getmtime(path)) < ttl:
-        with open(path, "rb") as fh:
-            data = fh.read()
+        try:
+            with open(path, "rb") as fh:
+                data = fh.read()
+        except OSError:                   # 並行 replace 中に掴まれることがある
+            data = b""
         if not data:                      # 0 バイト = 「無し」のマーカー
             return None
         return None if (max_bytes and len(data) > max_bytes) else data
@@ -243,10 +266,19 @@ def disk_get(url: str, *, subdir: str = "asset", ttl: float = TTL_ASSET,
         got = None
     if got is not None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp = "{}.{}.tmp".format(path, os.getpid())
-        with open(tmp, "wb") as fh:       # 部分書き込みを見せないよう atomic replace
-            fh.write(got)
-        os.replace(tmp, path)
+        # tmp 名は**呼び出しごとに一意**にする。PID だけだと同一 URL の並行取得が同じ
+        # tmp を掴み、os.replace が PermissionError になる（実測: 6 スレッド×10 回で
+        # 8/60 が失敗）。キャッシュは best-effort なので、書けなくても取得値は返す。
+        tmp = "{}.{}.{}.tmp".format(path, os.getpid(), uuid.uuid4().hex[:8])
+        try:
+            with open(tmp, "wb") as fh:   # 部分書き込みを見せないよう atomic replace
+                fh.write(got)
+            os.replace(tmp, path)
+        except OSError:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
         return None if (max_bytes and len(got) > max_bytes) else got
     if missing:
         os.makedirs(os.path.dirname(path), exist_ok=True)

@@ -109,8 +109,17 @@ def stac_search(collection: str = "sentinel-2-l2a", bbox: Optional[str] = None,
 
     # 場所解決
     if place:
+        from .name_common import ResolverUnavailable
         from .weather_astro import _geocode
-        g = _geocode(place)
+        try:
+            g = _geocode(place)
+        except ResolverUnavailable as ex:
+            return CallToolResult(
+                content=[TextContent(type="text",
+                                     text="地名 '{}' を解決できませんでした（地名解決サービスに接続できません: {}）"
+                                          "。時間をおくか bbox を直接指定してください。".format(place, str(ex)[:120]))],
+                structuredContent={"error": "resolver_unavailable", "place": place},
+            )
         if not g:
             return CallToolResult(
                 content=[TextContent(type="text", text=f"地名 '{place}' を解決できませんでした。bbox を直接指定してください。")],

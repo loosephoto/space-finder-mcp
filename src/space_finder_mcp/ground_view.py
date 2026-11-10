@@ -32,13 +32,13 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 import base64
 
-from .cache import TTL_DAILY, disk_get, ttl_cache
+from .cache import TTL_DAILY, disk_get, local_appdata, ttl_cache
 from .img_common import (figure_notes, figure_payload, figure_text_block, load_font,
                          media_link_line, pixel_near, primary_spec, save_output,
                          scale_spec, symbol_rgb, view_spec)
 from .input_utils import as_float
 
-_LOCAL = os.environ.get("LOCALAPPDATA", ".")
+_LOCAL = local_appdata()
 CACHE_DIR = os.path.join(_LOCAL, "Temp", "space_finder_mcp")
 CATALOG_CSV = os.path.join(CACHE_DIR, "stars_hip85.csv")
 SKYFIELD_DIR = os.path.join(_LOCAL, "Temp", "skyfield_data")
@@ -525,14 +525,16 @@ def _fit_label(dr, text, x, y, W, dx, dy, size, bold, pad=LABEL_PAD,
 
 
 def _label_box(text, tx, ty, font, anchor, dr):
-    """描いた名札の占有範囲（画素検証・回帰テスト用）。"""
-    w = float(dr.textlength(text, font=font))
-    x0 = float(tx) if anchor == "la" else float(tx) - w
-    size_px = int(getattr(font, "size", 0))
-    return dict(text=text, x0=round(x0, 1), x1=round(x0 + w, 1),
-                y=round(float(ty), 1),
-                y0=round(float(ty) - size_px, 1), y1=round(float(ty), 1),
-                size=size_px, anchor=anchor)
+    """描いた名札の占有範囲（画素検証・回帰テスト用）。
+
+    以前は `y0 = ty - size` と近似していたが、実際の textbbox は `ty+6..ty+29`
+    （anchor="la"・size=26）で、箱が上へ 20px ほどズレていた。その箱で重なりを
+    避けても実際は重なる（実測: 金星×スピカ 1078px²）。textbbox で実寸を取る。
+    """
+    bb = dr.textbbox((tx, ty), text, font=font, anchor=anchor)
+    return dict(text=text, x0=round(float(bb[0]), 1), x1=round(float(bb[2]), 1),
+                y=round(float(ty), 1), y0=round(float(bb[1]), 1), y1=round(float(bb[3]), 1),
+                size=int(getattr(font, "size", 0)), anchor=anchor)
 
 
 def _wrap_to_width(dr, text, font, max_w):
@@ -1369,6 +1371,7 @@ def sky_ground(place=None, lat=None, lon=None, when=None, span=360.0, az0=0.0,
             本文に「この視野の外」として列挙する（図に無いものを「見えている」と
             書かないため）。
     """
+    from .name_common import ResolverUnavailable
     from .places import resolve_place as _resolve_place
     from .sky_overlay import _SAT_CATALOG as _sat_catalog
     span = as_float(span, 360.0, 30.0, 360.0) or 360.0
@@ -1377,14 +1380,28 @@ def sky_ground(place=None, lat=None, lon=None, when=None, span=360.0, az0=0.0,
     lpinfo = _set_lp(lp)
     lp_unknown = not _lp_is_known(lp)
 
-    ll = _resolve_place(place, lat, lon)
+    try:
+        ll = _resolve_place(place, lat, lon)
+    except ResolverUnavailable as ex:
+        return CallToolResult(
+            content=[TextContent(type="text",
+                                 text="観測地 '{}' を解決できませんでした（地名解決サービスに接続できません: {}）"
+                                      "。時間をおくか lat/lon を指定してください。".format(place, str(ex)[:120]))],
+            structuredContent={"error": "resolver_unavailable", "place": str(place)})
     if ll is None and (lat is not None or lon is not None):
         return CallToolResult(
             content=[TextContent(type="text",
                                  text="lat（-90〜90）と lon（-180〜180）は数値（度）で指定してください。")],
             structuredContent={"error": "invalid coordinates", "lat": str(lat), "lon": str(lon)})
     if ll is None:
-        ll = (35.68, 139.69)                                     # 東京
+        # 地名を指定されたのに解決できなかった → 東京で代用しない
+        if place:
+            return CallToolResult(
+                content=[TextContent(type="text",
+                                     text="観測地 '{}' を解決できませんでした。地名を変えるか lat/lon を数値で指定してください。"
+                                          .format(place))],
+                structuredContent={"error": "place not resolved", "place": str(place)})
+        ll = (35.68, 139.69)                                     # 東京（既定）
     when_utc = _parse_when(when)
     if when_utc == "bad":
         return CallToolResult(

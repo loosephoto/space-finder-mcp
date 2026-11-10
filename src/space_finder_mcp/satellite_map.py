@@ -20,8 +20,10 @@ import os
 from typing import Optional
 
 import requests
+
 from mcp.types import CallToolResult, ImageContent, TextContent
 
+from .cache import local_appdata
 from .celestrak import WELL_KNOWN, TLE_SOURCE_ORDER, fetch_tle_ex, source_label
 from .img_common import (encode_jpeg, figure_notes, figure_payload,
                          figure_text_block, load_font, media_link_line, pixel_near,
@@ -36,7 +38,7 @@ UA = {"User-Agent": "space-finder-mcp/0.23 (MCP; satellite ground track)"}
 # ---- NASA Blue Marble 等角図法 地球地図（キャッシュ）----
 _EARTH_URL = ("https://eoimages.gsfc.nasa.gov/images/imagerecords/"
               "57000/57752/land_shallow_topo_2048.jpg")
-_EARTH_CACHE = os.path.join(os.environ.get("LOCALAPPDATA", "."),
+_EARTH_CACHE = os.path.join(local_appdata(),
                             "Temp", "space_finder_mcp", "earth_2048.jpg")
 
 

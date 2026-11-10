@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Optional
 
 from .input_utils import as_float
+from .name_common import ResolverUnavailable
 
 #: 都市名 → (緯度, 経度)。キーは小文字（日本語はそのまま）。
 CITY_COORDS = {
@@ -56,6 +57,10 @@ def resolve_place(place, lat, lon) -> Optional[tuple]:
             g = _geocode(place)
             if g:
                 return float(g["latitude"]), float(g["longitude"])
+        except ResolverUnavailable:
+            # 「地名が見つからない（None）」と「地名解決サービスに繋がらない」を混ぜない
+            # （混ぜると呼び出し側が東京へ黙って落ちる）。
+            raise
         except Exception:
             pass
     return None

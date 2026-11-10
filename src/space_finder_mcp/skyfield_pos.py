@@ -9,10 +9,11 @@ from __future__ import annotations
 import os
 
 from mcp.types import CallToolResult, TextContent
+from .cache import local_appdata
 from .input_utils import as_float
 from .places import CITY_COORDS as _KNOWN_COORDS
 
-_DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
+_DATA_DIR = os.path.join(local_appdata(), "Temp", "skyfield_data")
 os.makedirs(_DATA_DIR, exist_ok=True)
 os.environ.setdefault("HOME", _DATA_DIR)
 

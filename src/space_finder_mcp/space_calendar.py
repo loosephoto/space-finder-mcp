@@ -606,7 +606,12 @@ def space_calendar(year: Optional[int] = None, month: Optional[int] = None, plac
     if month_i is not None and not (1 <= month_i <= 12):
         return _err("month は 1〜12 の範囲で指定してください（{}月は存在しません）"
                     .format(month_i))
-    res = _resolve_place(place, lat, lon)
+    from .name_common import ResolverUnavailable
+    try:
+        res = _resolve_place(place, lat, lon)
+    except ResolverUnavailable as ex:
+        return _err("地名解決サービスに接続できませんでした（観測地 {!r}）: {}。時間をおいて再試行するか "
+                    "lat/lon を指定してください".format(place, str(ex)[:120]))
     if res is None:
         return _err("観測地を解決できませんでした: {!r}。地名を変えるか lat/lon を数値で指定してください".format(place))
     la, lo = res
@@ -819,7 +824,12 @@ def calendar_events(year: Optional[int] = None, month: Optional[int] = None, pla
             all で全部。neo / fireball は `neo_close_approach` / `fireball_reports` の呼び出しで
             蓄積されたレコードだけが出ます。
     """
-    res = _resolve_place(place, None, None)
+    from .name_common import ResolverUnavailable
+    try:
+        res = _resolve_place(place, None, None)
+    except ResolverUnavailable as ex:
+        return _err("地名解決サービスに接続できませんでした（観測地 {!r}）: {}。時間をおいて再試行してください"
+                    .format(place, str(ex)[:120]))
     if res is None:
         return _err("観測地を解決できませんでした: {!r}".format(place))
     off = _local_tz(res[0], res[1])

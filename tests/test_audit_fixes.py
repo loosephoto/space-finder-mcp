@@ -5,7 +5,9 @@
 import io
 import json
 import os
+import shutil
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -1347,6 +1349,163 @@ class JmaRainLegendTests(unittest.TestCase):
         self.assertIn("降水強度", d)
         self.assertIn("mm/h", d)
         self.assertGreater(d["mm/h"][0], d["降水強度"][0])
+
+
+
+
+class LocalAppDataFallbackTests(unittest.TestCase):
+    """LOCALAPPDATA が無い環境で cwd 依存のパスにしない（v0.57.0）。"""
+
+    def test_falls_back_to_platform_dir_not_cwd(self):
+        from space_finder_mcp import cache
+        env = {k: v for k, v in os.environ.items() if k != "LOCALAPPDATA"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            p = cache.local_appdata()
+        self.assertTrue(os.path.isabs(p), p)
+        self.assertNotIn(p, ("", ".", os.getcwd()))
+        self.assertNotEqual(os.path.normpath(p), os.path.normpath("."))
+
+    def test_windows_value_is_used_as_is(self):
+        from space_finder_mcp import cache
+        with mock.patch.dict(os.environ, {"LOCALAPPDATA": r"C:\Users\x\AppData\Local"}):
+            self.assertEqual(cache.local_appdata(), r"C:\Users\x\AppData\Local")
+
+
+class DiskGetConcurrencyTests(unittest.TestCase):
+    """同一 URL の並行取得で os.replace の PermissionError を漏らさない（v0.57.0）。"""
+
+    def test_parallel_disk_get_does_not_raise(self):
+        from space_finder_mcp import cache
+        root = tempfile.mkdtemp(prefix="probe_cache_")
+        old_root = cache.CACHE_ROOT
+        cache.CACHE_ROOT = root
+        errs = []
+
+        class R:
+            status_code = 200
+            content = b"x" * (256 * 1024)
+
+        def fake_get(url, headers=None, timeout=None):
+            return R()
+
+        def worker():
+            for _ in range(8):
+                try:
+                    cache.disk_get("https://example.invalid/a.png", ttl=3600)
+                except Exception as e:      # noqa: BLE001 - 何でも漏れたら失敗
+                    errs.append(repr(e))
+
+        try:
+            with mock.patch.object(requests, "get", fake_get):
+                ts = [threading.Thread(target=worker) for _ in range(6)]
+                for t in ts:
+                    t.start()
+                for t in ts:
+                    t.join()
+        finally:
+            cache.CACHE_ROOT = old_root
+            shutil.rmtree(root, ignore_errors=True)
+        self.assertEqual(errs, [])
+
+
+class SolarEclipseDateTests(unittest.TestCase):
+    """存在しない暦日は例外ではなくエラー結果にする（v0.57.0）。"""
+
+    def test_nonexistent_date_returns_error_result(self):
+        from space_finder_mcp import solar_eclipse
+        for d in ("2026-02-30", "2026-07-43", "2026-13-01", "2026-04-31"):
+            r = solar_eclipse.solar_eclipse_series(date=d, place="東京", max_magnitude=True)
+            sc = getattr(r, "structuredContent", None) or {}
+            self.assertEqual(sc.get("error"), "bad date", d)
+
+    def test_valid_date_still_works(self):
+        from space_finder_mcp import solar_eclipse
+        r = solar_eclipse.solar_eclipse_series(date="2035-09-02", place="東京",
+                                               max_magnitude=True)
+        sc = getattr(r, "structuredContent", None) or {}
+        self.assertNotEqual(sc.get("error"), "bad date")
+
+
+class PlaceResolverFailureTests(unittest.TestCase):
+    """「地名が無い」と「サービスに繋がらない」を混ぜず、東京で代用しない（v0.57.0）。"""
+
+    def test_resolve_place_propagates_resolver_unavailable(self):
+        from space_finder_mcp import places
+        from space_finder_mcp.name_common import ResolverUnavailable
+        import space_finder_mcp.weather_astro as wa
+        with mock.patch.object(wa, "_geocode",
+                               lambda p: (_ for _ in ()).throw(ResolverUnavailable("down"))):
+            with self.assertRaises(ResolverUnavailable):
+                places.resolve_place("パリ", None, None)
+
+    def test_resolve_place_returns_none_when_not_found(self):
+        from space_finder_mcp import places
+        import space_finder_mcp.weather_astro as wa
+        with mock.patch.object(wa, "_geocode", lambda p: None):
+            self.assertIsNone(places.resolve_place("パリ", None, None))
+
+    def test_eclipse_does_not_substitute_tokyo(self):
+        from space_finder_mcp import solar_eclipse
+        import space_finder_mcp.weather_astro as wa
+        with mock.patch.object(wa, "_geocode", lambda p: None):
+            r = solar_eclipse.solar_eclipse_series(date="2035-09-02", place="パリ",
+                                                   max_magnitude=True)
+        sc = getattr(r, "structuredContent", None) or {}
+        self.assertEqual(sc.get("error"), "place not resolved")
+        self.assertEqual(sc.get("place"), "パリ")
+        self.assertNotIn("lat", sc)
+
+    def test_sky_ground_does_not_substitute_tokyo(self):
+        from space_finder_mcp import ground_view as gv
+        import space_finder_mcp.weather_astro as wa
+        with mock.patch.object(wa, "_geocode", lambda p: None):
+            r = gv.sky_ground(place="パリ")
+        sc = getattr(r, "structuredContent", None) or {}
+        self.assertEqual(sc.get("error"), "place not resolved")
+
+    def test_astronomy_weather_reports_resolver_unavailable(self):
+        from space_finder_mcp import weather_astro as wa
+        from space_finder_mcp.name_common import ResolverUnavailable
+        with mock.patch.object(wa, "_geocode",
+                               lambda p: (_ for _ in ()).throw(ResolverUnavailable("down"))):
+            r = wa.astronomy_weather(place="パリ")
+        sc = getattr(r, "structuredContent", None) or {}
+        self.assertEqual(sc.get("error"), "resolver_unavailable")
+
+    def test_no_place_still_defaults_to_tokyo(self):
+        from space_finder_mcp import ground_view as gv
+        r = gv.sky_ground()
+        sc = getattr(r, "structuredContent", None) or {}
+        self.assertNotIn(sc.get("error"), ("place not resolved", "resolver_unavailable"))
+
+
+class LabelBoxGeometryTests(unittest.TestCase):
+    """_label_box の矩形が実 textbbox と一致する（v0.57.0。旧実装は上へ 20px ズレていた）。"""
+
+    def test_matches_textbbox(self):
+        from space_finder_mcp import ground_view as gv
+        from PIL import Image, ImageDraw
+        im = Image.new("RGB", (400, 200), (0, 0, 0))
+        dr = ImageDraw.Draw(im)
+        font = gv.load_font(26, True)
+        for text, tx, ty, anchor in (("月", 100, 100, "la"), ("火星", 300, 120, "ra")):
+            bb = dr.textbbox((tx, ty), text, font=font, anchor=anchor)
+            box = gv._label_box(text, tx, ty, font, anchor, dr)
+            self.assertEqual((box["x0"], box["y0"], box["x1"], box["y1"]),
+                             (float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])))
+            self.assertEqual(box["anchor"], anchor)
+            self.assertEqual(box["size"], 26)
+
+    def test_box_is_below_the_anchor_point(self):
+        from space_finder_mcp import ground_view as gv
+        from PIL import Image, ImageDraw
+        im = Image.new("RGB", (400, 200), (0, 0, 0))
+        dr = ImageDraw.Draw(im)
+        font = gv.load_font(26, True)
+        box = gv._label_box("月", 100, 100, font, "la", dr)
+        # 旧実装は y0=74, y1=100（文字より上）。実際の文字は y=100 より下に出る
+        self.assertGreater(box["y0"], 100)
+        self.assertGreater(box["y1"], box["y0"])
 
 
 if __name__ == "__main__":

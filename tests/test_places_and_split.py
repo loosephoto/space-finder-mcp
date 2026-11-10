@@ -50,9 +50,15 @@ class ResolvePlaceTests(unittest.TestCase):
         self.assertEqual(places.resolve_place(None, 35.0, 200.0), (35.0, 180.0))
         self.assertIsNone(places.resolve_place(None, "abc", 139.0))
 
-    def test_unknown_place_offline_is_none(self):
-        """未知の地名は外へ例外を出さず None（ネットワーク断でも落ちない）。"""
+    def test_unknown_place_offline_raises_resolver_unavailable(self):
+        """ネットワーク断は「該当なし」と混同せず ResolverUnavailable で伝える（v0.57.0）。
+
+        旧実装は None を返していたため、呼び出し側が東京で代用していた
+        （solar_eclipse_series(place="パリ") が「パリ」と題した東京の図を返した）。
+        ツール側はこれを error="resolver_unavailable" に変換する。
+        """
         import requests
+        from space_finder_mcp.name_common import ResolverUnavailable
 
         orig = requests.get
 
@@ -61,9 +67,38 @@ class ResolvePlaceTests(unittest.TestCase):
 
         requests.get = _boom
         try:
+            with self.assertRaises(ResolverUnavailable):
+                places.resolve_place("どこでもない場所", None, None)
+        finally:
+            requests.get = orig
+
+    def test_unknown_place_when_resolver_answers_is_none(self):
+        """サービスは応答したが該当なし → None（例外にしない）。"""
+        import requests
+        import space_finder_mcp.weather_astro as weather_astro
+
+        class _Resp:
+            def __init__(self, payload):
+                self._p = payload
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return self._p
+
+        def _fake(url, *a, **k):
+            return _Resp([] if "nominatim" in url else {"results": []})
+
+        orig = requests.get
+        orig_last = getattr(weather_astro._geocode_nominatim, "_last_call", 0.0)
+        weather_astro._geocode_nominatim._last_call = 0.0
+        requests.get = _fake
+        try:
             self.assertIsNone(places.resolve_place("どこでもない場所", None, None))
         finally:
             requests.get = orig
+            weather_astro._geocode_nominatim._last_call = orig_last
 
     def test_city_table_is_shared_by_tools(self):
         """同じ入力を別ツールが別結果にしない（表の複製を禁止する）。"""

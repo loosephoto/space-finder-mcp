@@ -29,6 +29,7 @@ from .img_common import (as_image, figure_notes, figure_payload,
                          figure_text_block, load_font, media_link_line,
                          save_output, scale_spec, view_spec)
 from .input_utils import as_float
+from .name_common import ResolverUnavailable
 from .places import resolve_place as _resolve_place
 
 _DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
@@ -258,13 +259,30 @@ def solar_eclipse_series(date: Optional[str] = None, place: Optional[str] = None
     保存し、同じパスを structuredContent.image_path にも入れます）。
     回答時はこのリンクをそのまま提示してください（画像が描画されない環境では唯一の導線）。
     """
-    ll = _resolve_place(place, lat, lon)
+    try:
+        ll = _resolve_place(place, lat, lon)
+    except ResolverUnavailable as ex:
+        return CallToolResult(
+            content=[TextContent(type="text",
+                                 text="観測地 '{}' を解決できませんでした（地名解決サービスに接続できません: {}）"
+                                      "。時間をおくか lat/lon を指定してください。".format(place, str(ex)[:120]))],
+            structuredContent={"error": "resolver_unavailable", "place": str(place)},
+        )
     if ll is None and (lat is not None or lon is not None):
         return CallToolResult(
             content=[TextContent(type="text", text="lat（-90〜90）と lon（-180〜180）は数値（度）で指定してください。")],
             structuredContent={"error": "invalid coordinates", "lat": str(lat), "lon": str(lon)},
         )
     if ll is None:
+        # 地名を指定されたのに解決できなかった → 東京で代用しない（「パリ」と題した
+        # 東京の図を返していた。実測 2026-11-10）。
+        if place:
+            return CallToolResult(
+                content=[TextContent(type="text",
+                                     text="観測地 '{}' を解決できませんでした。地名を変えるか lat/lon を数値で指定してください。"
+                                          .format(place))],
+                structuredContent={"error": "place not resolved", "place": str(place)},
+            )
         ll = (35.68, 139.69)
     place_ja = place if place else "東京"
     # タイムゾーン: 緯度経度から現地の正確なオフセット(DST込み)を取得
@@ -286,6 +304,17 @@ def solar_eclipse_series(date: Optional[str] = None, place: Optional[str] = None
                 text="date の形式が不正です（例: 2035-09-02 または 2035年9月2日）")],
                 structuredContent={"error": "bad date"})
         dates = [(int(m.group(1)), int(m.group(2)), int(m.group(3)))]
+        try:
+            # 存在しない暦日（2026-02-30 等）はここで弾く。素通しすると下流の
+            # datetime.datetime() が ValueError を投げ、プロトコル経路では
+            # structuredContent も無い isError 応答になる（実測 2026-11-10）。
+            datetime.date(*dates[0])
+        except ValueError:
+            return CallToolResult(
+                content=[TextContent(type="text",
+                                     text="date の日付が存在しません（受け取った値: {}）。例: 2026-02-28".format(date))],
+                structuredContent={"error": "bad date", "date": str(date)},
+            )
         date_str = "{}年{}月{}日".format(*dates[0])
         date_disp = date_str
     else:

@@ -458,7 +458,16 @@ def moon_phase_map(date: Optional[str] = None, place: Optional[str] = None,
 
 
 def _moon_phase_map_impl(date, place, lat, lon, layout, days):
-    ll = _resolve_place(place, lat, lon)
+    from .name_common import ResolverUnavailable
+    try:
+        ll = _resolve_place(place, lat, lon)
+    except ResolverUnavailable as ex:
+        return CallToolResult(
+            content=[TextContent(type="text",
+                                 text="観測地 '{}' を解決できませんでした（地名解決サービスに接続できません: {}）"
+                                      "。時間をおくか lat/lon を指定してください。".format(place, str(ex)[:120]))],
+            structuredContent={"error": "resolver_unavailable", "place": str(place)},
+        )
     if ll is None and (lat is not None or lon is not None):
         return CallToolResult(
             content=[TextContent(type="text",
@@ -466,6 +475,14 @@ def _moon_phase_map_impl(date, place, lat, lon, layout, days):
             structuredContent={"error": "invalid coordinates", "lat": str(lat), "lon": str(lon)},
         )
     if ll is None:
+        if place:
+            # 地名を指定されたのに解決できなかった → 東京で代用しない
+            return CallToolResult(
+                content=[TextContent(type="text",
+                                     text="観測地 '{}' を解決できませんでした。地名を変えるか lat/lon を数値で指定してください。"
+                                          .format(place))],
+                structuredContent={"error": "place not resolved", "place": str(place)},
+            )
         ll = (35.68, 139.69)
     if place:
         place_ja = str(place)
