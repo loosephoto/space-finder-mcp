@@ -63,6 +63,9 @@ def expand_datetime(value) -> str:
     v = str(value or "").strip()
     if not v:
         return v
+    # 既に full timestamp（"T" を含む）は書き換えない（v0.50.0 の契約）
+    if "T" in v:
+        return v
     parts = [p.strip() for p in v.split("/")]
 
     def _bounds(part):
@@ -88,10 +91,17 @@ def expand_datetime(value) -> str:
 
     if len(parts) == 1:
         b = _bounds(parts[0])
-        if b:
-            return f"{b[0]}/{b[1]}"
-        return v
+        # 展開できない（存在しない暦日・形式外）ときは None。呼び出し側がエラー結果を返す
+        # （v0.50.0 で date-only を展開するようにしたものの、02-30 等はそのまま API へ
+        # 流れて CDSE / AWS が 400 を返していた。実測 2026-11-10）
+        return f"{b[0]}/{b[1]}" if b else None
     b1, b2 = _bounds(parts[0]), _bounds(parts[1])
+    # 片側が空（"2026-01-01/" のような開いた範囲）はそのまま残す。空でない側が
+    # 解析できないときだけ None（存在しない暦日を API へ流さない）
+    if parts[0] and not b1:
+        return None
+    if parts[1] and not b2:
+        return None
     a = b1[0] if b1 else parts[0]
     b = b2[1] if b2 else parts[1]
     return f"{a}/{b}"

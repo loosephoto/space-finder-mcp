@@ -67,7 +67,7 @@ def _classify(url: str, title: str) -> str:
     return "observing" if any(h in t for h in _OBSERVING_HINTS) else "news"
 
 
-@ttl_cache(TTL_SHORT, maxsize=16)
+@ttl_cache(TTL_SHORT, maxsize=16, skip_if=lambda v: not v)
 def _parse_feed(url: str) -> list[dict]:
     """RSS 2.0 / Atom フィードを取得して記事レコードを返す。失敗時は例外を送出する。"""
     r = requests.get(url, headers=UA, timeout=(25, 25))

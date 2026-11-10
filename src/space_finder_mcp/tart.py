@@ -85,7 +85,8 @@ def radio_sources_now(lat: Optional[float] = None,
             structuredContent={"count": 0, "source": "tart.elec.ac.nz/catalog"},
         )
     # 仰角の高い順に並べ替え
-    srcs = sorted(data, key=lambda s: float(s.get("el", 0)), reverse=True)[:limit]
+    srcs = sorted((s for s in data if isinstance(s, dict)),
+                  key=lambda s: as_float(s.get("el"), 0.0), reverse=True)[:limit]
     lines = [f"📡 **TART 電波望遠鏡 可視電波源**"
              f"（観測地 {lat:.2f}°, {lon:.2f}° ・仰角{elevation}°以上・{len(srcs)}件）:"]
     records = []

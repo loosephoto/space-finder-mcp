@@ -14,7 +14,7 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
-from .cache import TTL_FORECAST, ttl_cache, is_error_result
+from .cache import TTL_FORECAST, ttl_cache, is_empty_result, is_error_result
 from .input_utils import as_int
 from .name_common import ResolverUnavailable, resolve_object
 
@@ -50,7 +50,8 @@ def _do_query(query: str, limit: int = 10) -> tuple[Optional[list[list]], Option
     return rows[:limit], None
 
 
-@ttl_cache(TTL_FORECAST, maxsize=64, skip_if=is_error_result)
+@ttl_cache(TTL_FORECAST, maxsize=64,
+           skip_if=lambda r: is_error_result(r) or is_empty_result(r))
 def cadc_observations(object_name: Optional[str] = None,
                       ra: Optional[float] = None, dec: Optional[float] = None,
                       radius: float = 0.5, telescope: Optional[str] = None,

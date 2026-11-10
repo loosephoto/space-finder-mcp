@@ -11,7 +11,7 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
-from .cache import TTL_DAILY, ttl_cache, is_error_result
+from .cache import TTL_DAILY, ttl_cache, is_empty_result, is_error_result
 from .input_utils import as_int
 
 # Wikidata SPARQL エンドポイント
@@ -48,7 +48,8 @@ CATEGORY_ENTITIES: dict[str, tuple[str, str]] = {
 }
 
 
-@ttl_cache(TTL_DAILY, maxsize=64, skip_if=is_error_result)
+@ttl_cache(TTL_DAILY, maxsize=64,
+           skip_if=lambda r: is_error_result(r) or is_empty_result(r))
 def reverse_lookup(
     category: str,
     launch_date: bool = True,

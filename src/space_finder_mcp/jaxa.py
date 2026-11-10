@@ -9,7 +9,7 @@ from __future__ import annotations
 import requests
 from mcp.types import CallToolResult, TextContent
 
-from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_error_result
+from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_empty_result, is_error_result
 from .input_utils import as_int, as_list
 
 ROOT = "https://data.earth.jaxa.jp/stac/cog/v1/catalog.json"
@@ -86,7 +86,8 @@ def jaxa_datasets(limit: int = 30) -> CallToolResult:
     )
 
 
-@ttl_cache(TTL_SHORT, maxsize=64, skip_if=is_error_result)
+@ttl_cache(TTL_SHORT, maxsize=64,
+           skip_if=lambda r: is_error_result(r) or is_empty_result(r))
 def jaxa_dataset_search(query: str, limit: int = 10) -> CallToolResult:
     """JAXA Earth のデータセットをキーワード検索する（認証不要）。
 

@@ -21,7 +21,7 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
-from .cache import TTL_DAILY, TTL_HOURLY, ttl_cache, is_error_result
+from .cache import TTL_DAILY, TTL_HOURLY, ttl_cache, is_empty_result, is_error_result
 from .img_common import media_link_line
 from .input_utils import as_int
 
@@ -146,7 +146,8 @@ def _asset_pick(item: dict) -> tuple:
     return quick, data
 
 
-@ttl_cache(TTL_DAILY, maxsize=16, skip_if=is_error_result)
+@ttl_cache(TTL_DAILY, maxsize=16,
+           skip_if=lambda r: is_error_result(r) or is_empty_result(r))
 def roscosmos_collections(level: int = 2) -> CallToolResult:
     """Roscosmos オープンデータ STAC のコレクション一覧を返す（認証不要）。
 
@@ -233,7 +234,8 @@ def _parse_date(value) -> tuple:
                       "（例: 2026-10-11。指定された値: {}）。".format(text[:40]))
 
 
-@ttl_cache(TTL_HOURLY, maxsize=64, skip_if=is_error_result)
+@ttl_cache(TTL_HOURLY, maxsize=64,
+           skip_if=lambda r: is_error_result(r) or is_empty_result(r))
 def roscosmos_search(collection: str = "Electro-L/MSU-GS/L2_RGB_VIS_IR",
                      date: Optional[str] = None, limit: int = 3,
                      lookback: int = 7) -> CallToolResult:

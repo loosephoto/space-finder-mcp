@@ -16,7 +16,7 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
-from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_error_result
+from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_empty_result, is_error_result
 from .img_common import media_link_line
 from .input_utils import as_int
 from .stac_common import parse_bbox, parse_cloud_cover
@@ -58,7 +58,8 @@ def _pick_asset(item: dict, roles: tuple = ("thumbnail",), types: tuple = ("imag
     return None
 
 
-@ttl_cache(TTL_DAILY, maxsize=32, skip_if=is_error_result)
+@ttl_cache(TTL_DAILY, maxsize=32,
+           skip_if=lambda r: is_error_result(r) or is_empty_result(r))
 def dlr_collections(limit: int = 40) -> CallToolResult:
     """DLR（ドイツ航空宇宙センター）EOC の地球観測コレクション一覧を返す（認証不要）。
 
@@ -108,7 +109,8 @@ def dlr_collections(limit: int = 40) -> CallToolResult:
     )
 
 
-@ttl_cache(TTL_SHORT, maxsize=64, skip_if=is_error_result)
+@ttl_cache(TTL_SHORT, maxsize=64,
+           skip_if=lambda r: is_error_result(r) or is_empty_result(r))
 def dlr_search(collection: str = "S2_L2A_MAJA", bbox: Optional[str] = None,
                datetime: Optional[str] = None, max_cloud_cover: Optional[float] = None,
                limit: int = 5) -> CallToolResult:

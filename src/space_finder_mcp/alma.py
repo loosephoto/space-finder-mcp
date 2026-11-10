@@ -20,7 +20,7 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
-from .cache import TTL_DAILY, TTL_FORECAST, is_error_result, ttl_cache
+from .cache import TTL_DAILY, TTL_FORECAST, is_empty_result, is_error_result, ttl_cache
 from .img_common import media_link_line
 from .input_utils import as_float, as_int
 from .name_common import first_token, like_patterns, name_variants
@@ -148,7 +148,8 @@ def _candidate_names(first_token: str, limit: int = 8) -> list:
     return [r[0] for r in rows[1:] if r and r[0]]
 
 
-@ttl_cache(TTL_FORECAST, maxsize=64, skip_if=is_error_result)
+@ttl_cache(TTL_FORECAST, maxsize=64,
+           skip_if=lambda r: is_error_result(r) or is_empty_result(r))
 def alma_search(object_name: Optional[str] = None,
                 ra: Optional[float] = None, dec: Optional[float] = None,
                 radius: float = 0.3, band: Optional[int] = None,

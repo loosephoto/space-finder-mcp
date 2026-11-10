@@ -292,9 +292,13 @@ class ExpandDatetimeTests(unittest.TestCase):
         self.assertEqual(expand_datetime("2024"),
                          "2024-01-01T00:00:00Z/2024-12-31T23:59:59Z")
 
-    def test_nonexistent_calendar_date_passes_through_unchanged(self):
+    def test_nonexistent_calendar_date_returns_none(self):
+        """存在しない暦日は None（呼び出し側がエラー結果を返す。API へ流すと 400）。"""
         from space_finder_mcp.stac_common import expand_datetime
-        self.assertEqual(expand_datetime("2026-02-30"), "2026-02-30")
+        self.assertIsNone(expand_datetime("2026-02-30"))
+        self.assertIsNone(expand_datetime("2026-02-30/2026-03-31"))
+        # 開いた端は従来どおり通す
+        self.assertEqual(expand_datetime("2026-01-01/"), "2026-01-01T00:00:00Z/")
 
     def test_stac_bodies_carry_expanded_datetime_offline(self):
         """date-only を渡すとリクエスト body は RFC3339 になる（上流 400 の防止・オフライン）。"""
@@ -948,6 +952,242 @@ class GeocodeDedupeTests(unittest.TestCase):
         finally:
             wa._geocode.cache_clear()
         self.assertEqual(len(calls), 1)
+
+
+
+
+class EmptyResultNotCachedTests(unittest.TestCase):
+    """0 件（空応答）を TTL で固定しない（v0.46.0 の exoplanet/isro・v0.50.0 の csa と同じ）。"""
+
+    def test_is_empty_result(self):
+        from space_finder_mcp.cache import is_empty_result
+        self.assertTrue(is_empty_result({"results": []}))
+        self.assertTrue(is_empty_result({"records": []}))
+        self.assertTrue(is_empty_result({"features": []}))
+        self.assertFalse(is_empty_result({"results": [{"a": 1}]}))
+        self.assertFalse(is_empty_result({"error": "x"}))     # エラーは别経路
+        self.assertFalse(is_empty_result({"total": 0}))      # list 型のキーだけ見る
+
+    def test_literature_zero_result_not_cached(self):
+        from space_finder_mcp import literature
+        calls = []
+        orig_adapters = literature.ADAPTERS
+        literature.ADAPTERS = dict(orig_adapters)
+        literature.ADAPTERS["crossref"] = lambda *a, **k: (calls.append(1), [])[1]
+        literature._search_source.cache_clear()
+        try:
+            for _ in range(2):
+                literature._search_source("crossref", "zzzqqqxyz", 10, None, None,
+                                          "relevance", False)
+        finally:
+            literature._search_source.cache_clear()
+            literature.ADAPTERS = orig_adapters
+        self.assertEqual(len(calls), 2)
+
+    def test_oscar_zero_result_not_cached(self):
+        from space_finder_mcp import oscar
+        calls = {"n": 0}
+
+        def fake_cat():
+            calls["n"] += 1
+            return {"satellites": [], "total": 0, "pages": 1, "failed_pages": []}
+
+        oscar._catalogue.cache_clear()
+        oscar.satellite_status.cache_clear()
+        try:
+            with mock.patch.object(oscar, "_catalogue", fake_cat):
+                for _ in range(2):
+                    oscar.satellite_status(query="zzzz")
+        finally:
+            oscar._catalogue.cache_clear()
+            oscar.satellite_status.cache_clear()
+        self.assertEqual(calls["n"], 2)
+
+    def test_wikidata_zero_result_not_cached(self):
+        from space_finder_mcp import wikidata_lookup as wl
+        calls = []
+
+        class R:
+            status_code = 200
+            headers = {}
+            content = b'{"results":{"bindings":[]}}'
+            text = '{"results":{"bindings":[]}}'
+
+            def json(self):
+                return {"results": {"bindings": []}}
+
+            def raise_for_status(self):
+                pass
+
+        def fake_get(*a, **k):
+            calls.append(1)
+            return R()
+
+        wl.reverse_lookup.cache_clear()
+        try:
+            with mock.patch.object(wl.requests, "get", fake_get), \
+                    mock.patch.object(wl, "_resolve_country", lambda n: "Q17"):
+                for _ in range(2):
+                    wl.reverse_lookup(category="人工衛星", country="Japan")
+        finally:
+            wl.reverse_lookup.cache_clear()
+        self.assertEqual(len(calls), 2)
+
+    def test_stac_search_zero_result_not_cached(self):
+        from space_finder_mcp import stac_search as st
+        calls = []
+
+        class R:
+            status_code = 200
+            headers = {}
+            content = b'{"features":[],"context":{"matched":0}}'
+            text = '{"features":[],"context":{"matched":0}}'
+
+            def json(self):
+                return {"features": [], "context": {"matched": 0}}
+
+            def raise_for_status(self):
+                pass
+
+        def fake_post(*a, **k):
+            calls.append(1)
+            return R()
+
+        st.stac_search.cache_clear()
+        try:
+            with mock.patch.object(st.requests, "post", fake_post):
+                for _ in range(2):
+                    st.stac_search(collection="sentinel-2-l2a",
+                                   bbox="139.6,35.5,139.9,35.8")
+        finally:
+            st.stac_search.cache_clear()
+        self.assertEqual(len(calls), 2)
+
+
+class BadResponseNoLeakTests(unittest.TestCase):
+    """不正な 200 応答・欠測キーで例外をツール外へ漏らさない。"""
+
+    def test_swpc_non_numeric_kp(self):
+        from space_finder_mcp import swpc
+        txt = swpc._advice({"kp": {"current": "abc"},
+                            "scales": {"current": {"G": {"scale": "0"}}, "forecast": {}}})
+        self.assertIsInstance(txt, str)
+
+    def test_weather_astro_missing_hourly_keys(self):
+        from space_finder_mcp import weather_astro as wa
+        h = {"time": ["2026-11-10T00:00", "2026-11-10T01:00"], "is_day": [0, 0]}
+        wins = wa._night_obs_windows(h, {}, sun_alts=[-20.0, -25.0])
+        self.assertIsInstance(wins, list)
+
+    def test_tart_junk_catalog(self):
+        from space_finder_mcp import tart
+
+        class R:
+            status_code = 200
+            headers = {}
+            content = b'[{"name":"SAT1","el":"abc","az":10,"r":1000}]'
+            text = '[{"name":"SAT1","el":"abc","az":10,"r":1000}]'
+
+            def json(self):
+                import json as _j
+                return _j.loads(self.text)
+
+            def raise_for_status(self):
+                pass
+
+        with mock.patch.object(tart.requests, "get", lambda *a, **k: R()):
+            r = tart.radio_sources_now()      # 例外を漏らさなければよい
+        sc = getattr(r, "structuredContent", None) or {}
+        self.assertNotIn("error", sc)
+
+    def test_eodashboard_null_tree(self):
+        from space_finder_mcp import eodashboard
+
+        class R:
+            status_code = 200
+            headers = {}
+            content = b'{"tree": null}'
+            text = '{"tree": null}'
+
+            def json(self):
+                return {"tree": None}
+
+            def raise_for_status(self):
+                pass
+
+        orig_disk = eodashboard._disk_read
+        eodashboard._disk_read = lambda ttl: None
+        eodashboard._collections_cache = None
+        try:
+            with mock.patch.object(eodashboard.requests, "get", lambda *a, **k: R()):
+                eodashboard.eodashboard_collections()
+        finally:
+            eodashboard._disk_read = orig_disk
+            eodashboard._collections_cache = None
+        # 例外を漏らさず返ればよい（空リストの結果）
+
+    def test_gcn_array_json(self):
+        from space_finder_mcp import gcn
+
+        class R:
+            status_code = 200
+            headers = {}
+            content = b'[{"circularId":1}]'
+            text = '[{"circularId":1}]'
+
+            def json(self):
+                import json as _j
+                return _j.loads(self.text)
+
+            def raise_for_status(self):
+                pass
+
+        with mock.patch.object(gcn.requests, "get", lambda *a, **k: R()):
+            r = gcn.gcn_alerts(days=7)
+        self.assertIn("error", (getattr(r, "structuredContent", None) or {}))
+
+
+class ExpandDatetimeInvalidTests(unittest.TestCase):
+    def test_nonexistent_date_returns_none(self):
+        from space_finder_mcp.stac_common import expand_datetime
+        self.assertIsNone(expand_datetime("2026-02-30"))
+        self.assertIsNone(expand_datetime("2026-02-29"))
+        self.assertIsNone(expand_datetime("2026-04-31"))
+        self.assertEqual(expand_datetime("2026-01-01"),
+                         "2026-01-01T00:00:00Z/2026-01-01T23:59:59Z")
+
+    def test_stac_search_bad_date_returns_error(self):
+        from space_finder_mcp import stac_search as st
+        r = st.stac_search(collection="sentinel-2-l2a", datetime="2026-02-30")
+        sc = getattr(r, "structuredContent", None) or {}
+        self.assertEqual(sc.get("error"), "bad date")
+        self.assertEqual(len(getattr(r, "content", []) or []), 1)
+
+    def test_copernicus_bad_date_returns_error(self):
+        from space_finder_mcp import copernicus
+        r = copernicus.copernicus_search(collection="sentinel-2-l2a",
+                                         datetime="2026-02-30")
+        sc = getattr(r, "structuredContent", None) or {}
+        self.assertEqual(sc.get("error"), "bad date")
+
+
+class CelestrakTleFallbackTests(unittest.TestCase):
+    def test_empty_tle_lines_falls_back(self):
+        from space_finder_mcp import celestrak
+        row = {"OBJECT_NAME": "TESTSAT", "NORAD_CAT_ID": "12345",
+               "OBJECT_ID": "2026-001A", "EPOCH": "2026-11-09T00:00:00",
+               "INCLINATION": "51.6"}
+        fb_record = {"object_name": "TESTSAT", "norad_id": "12345",
+                     "line1": "1 12345U ...", "line2": "2 12345 ..."}
+        with mock.patch.object(celestrak, "_fetch_tle", lambda p: [row]), \
+                mock.patch.object(celestrak, "_fetch_tle_lines", lambda p: {}), \
+                mock.patch.object(celestrak, "_fallback_sat_tle",
+                                  lambda p, lim, reason="unavailable":
+                                  ([fb_record], "mirror", "fallback note")):
+            r = celestrak.sat_tle(name="TESTSAT")
+        sc = getattr(r, "structuredContent", None) or {}
+        self.assertEqual(sc.get("source"), "mirror")
+        self.assertEqual(sc.get("results"), [fb_record])
 
 
 if __name__ == "__main__":

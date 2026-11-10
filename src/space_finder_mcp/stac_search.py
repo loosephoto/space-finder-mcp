@@ -12,7 +12,7 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
-from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_error_result
+from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_empty_result, is_error_result
 from .stac_common import expand_datetime, parse_bbox, parse_cloud_cover
 from .input_utils import as_int
 
@@ -43,7 +43,8 @@ def _parse_assets(assets: dict) -> dict:
     return out
 
 
-@ttl_cache(TTL_DAILY, maxsize=32, skip_if=is_error_result)
+@ttl_cache(TTL_DAILY, maxsize=32,
+           skip_if=lambda r: is_error_result(r) or is_empty_result(r))
 def stac_collections() -> CallToolResult:
     """AWS Earth Search で利用可能な衛星データコレクション一覧を返す（認証不要）。
 
@@ -82,7 +83,8 @@ def stac_collections() -> CallToolResult:
     )
 
 
-@ttl_cache(TTL_SHORT, maxsize=64, skip_if=is_error_result)
+@ttl_cache(TTL_SHORT, maxsize=64,
+           skip_if=lambda r: is_error_result(r) or is_empty_result(r))
 def stac_search(collection: str = "sentinel-2-l2a", bbox: Optional[str] = None,
                 place: Optional[str] = None, datetime: Optional[str] = None,
                 max_cloud_cover: Optional[float] = None, limit: int = 5) -> CallToolResult:
@@ -131,7 +133,14 @@ def stac_search(collection: str = "sentinel-2-l2a", bbox: Optional[str] = None,
 
     if datetime:
         # AWS Earth Search は date-only を 400 で拒否する（"does not match RFC3339 format"）
-        body["datetime"] = expand_datetime(datetime)
+        dt_exp = expand_datetime(datetime)
+        if dt_exp is None:
+            return CallToolResult(
+                content=[TextContent(type="text",
+                                     text="datetime の日付が存在しません（受け取った値: {}）".format(datetime))],
+                structuredContent={"error": "bad date", "datetime": str(datetime)},
+            )
+        body["datetime"] = dt_exp
     cloud, cloud_err = parse_cloud_cover(max_cloud_cover)
     if cloud_err:
         return CallToolResult(

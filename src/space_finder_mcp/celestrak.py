@@ -733,6 +733,13 @@ def sat_tle(name: Optional[str] = None, norad_id: Optional[int] = None,
         )
     rows = rows[:limit]
     tle_lines = _fetch_tle_lines(params)
+    if not tle_lines:
+        # 生 TLE の取得だけ失敗した（JSON は取れた）。空の tle を返すより代替源を試す
+        # （_fetch_tle_lines は RequestException を握り潰して空 dict を返す）。
+        fb = _fallback_sat_tle(params, limit)
+        if fb is not None:
+            records, source, note = fb
+            return _sat_tle_result(records, query, source, note)
     records = []
     for r in rows:
         try:

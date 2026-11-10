@@ -714,7 +714,8 @@ def _resolve_sources(sources, ja: bool) -> tuple:
     return out, unknown
 
 
-@ttl_cache(TTL_DAILY, maxsize=128, skip_if=lambda r: bool((r[1] or {}).get("error")))
+@ttl_cache(TTL_DAILY, maxsize=128,
+           skip_if=lambda r: bool((r[1] or {}).get("error")) or not r[0])
 def _search_source(source: str, query: str, limit: int, year_from, year_to, sort: str,
                    open_access: bool, concept=None) -> tuple:
     """1ソースを検索する。戻り: (レコード, ソースレポート)。例外は外へ出さない。

@@ -23,6 +23,7 @@ from typing import Optional
 import base64
 import datetime
 import math
+import threading
 
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
@@ -31,6 +32,9 @@ from .cache import TTL_DAILY, TTL_FORECAST, ttl_cache, is_error_result
 from .img_common import figure_text_block, media_link_line, save_output
 from .input_utils import as_float, as_int
 from .jma_rain import rain_images
+
+# Nominatim の 1 req/s を守るための排他（スレッド間で共有）
+_NOMINATIM_LOCK = threading.Lock()
 
 API = "https://api.open-meteo.com/v1/forecast"
 UA = {"User-Agent": "space-finder-mcp/0.4 (MCP; Open-Meteo astronomy)"}
@@ -233,7 +237,11 @@ def _night_obs_windows(h: dict, daily: dict, max_cloud: float = 40.0,
       - 視程 >= min_vis (m)
       - 降水確率 <= 30 (%)
     """
-    t = h["time"]; cloud = h["cloud_cover"]; vis = h["visibility"]
+    t = h.get("time") or []
+    # 予報 API が cloud_cover / visibility を返さないことがある（実測: 2026-11-10）。
+    # 直接添字すると KeyError がツールへ漏れるので欠測は None として扱う。
+    cloud = h.get("cloud_cover") or [None] * len(t)
+    vis = h.get("visibility") or [None] * len(t)
     wind = h.get("wind_speed_10m"); pop = h.get("precipitation_probability")
 
     windows = []
@@ -243,9 +251,10 @@ def _night_obs_windows(h: dict, daily: dict, max_cloud: float = 40.0,
         dark = _is_dark(i, sun_alts, h, sun_alt_max)
         c = cloud[i]
         w = wind[i] if wind is not None else 0.0
-        v = vis[i] if vis is not None else min_vis
+        v = vis[i] if vis is not None else None
         popv = pop[i] if pop is not None else 0.0
-        good = dark and c <= max_cloud and w <= max_wind and v >= min_vis and popv <= 30
+        good = (dark and c is not None and v is not None
+                and c <= max_cloud and w <= max_wind and v >= min_vis and popv <= 30)
         if good and cur is None:
             cur = {"start": t[i], "hours": [], "min_cloud": c, "max_cloud": c,
                    "min_sun_alt": sa, "max_sun_alt": sa}
@@ -538,11 +547,14 @@ def _geocode_nominatim(place: str) -> Optional[dict]:
     利用条件 (1 req/s) を守るため、前回呼び出しから 1.1s 以上あけて実行する。
     """
     import time as _time
-    _last = getattr(_geocode_nominatim, "_last_call", 0.0)
-    wait = _last + 1.1 - _time.time()
-    if wait > 0:
-        _time.sleep(wait)
-    _geocode_nominatim._last_call = _time.time()
+    # 1 req/s の節度はスレッド間で共有する（reading と writing を分けると
+    # 同時呼び出しで 0.001 秒の間隔しか空かない。実測: 4 スレッドで 3 件が並行）
+    with _NOMINATIM_LOCK:
+        _last = getattr(_geocode_nominatim, "_last_call", 0.0)
+        wait = _last + 1.1 - _time.time()
+        if wait > 0:
+            _time.sleep(wait)
+        _geocode_nominatim._last_call = _time.time()
     q = place.strip()
     # Nominatim は日本語/英語どちらも処理できるが、Open-Meteo と同じ英語変換を先に試す
     query = _JA_PLACES.get(q, q)

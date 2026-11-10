@@ -99,7 +99,7 @@ def _fetch_collection_list(force: bool = False) -> list[dict]:
     try:
         r = requests.get(TREE_API, headers=UA, timeout=(30, 30))
         r.raise_for_status()
-        tree = r.json().get("tree", [])
+        tree = r.json().get("tree") or []      # 200 で {"tree": null} が来ることがある
         ids = [t["path"].split("/")[-1][:-5] for t in tree
                if t["path"].startswith("collections/") and t["path"].endswith(".json")
                and "/" not in t["path"].split("collections/")[1][:-5]]

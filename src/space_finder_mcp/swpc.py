@@ -23,6 +23,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_FORECAST, TTL_SHORT, ttl_cache
+from .input_utils import as_float
 
 SWPC = "https://services.swpc.noaa.gov"
 UA = {"User-Agent": "space-finder-mcp/0.30 (MCP; NOAA SWPC space weather)"}
@@ -329,13 +330,14 @@ def _sec_lines(key: str, sec: dict) -> list:
 
 def _advice(sections: dict) -> str:
     """現在値・予測値から助言文を組み立てる（手書きの固定文にしない）。"""
-    kp = (sections.get("kp") or {}).get("current") or 0
+    kp_raw = (sections.get("kp") or {}).get("current") or 0
+    kp = as_float(kp_raw, 0.0)        # 非数値（"abc" 等）でも例外を漏らさない
     cur_g = str((((sections.get("scales") or {}).get("current") or {}).get("G") or {}).get("scale") or "0")
     fc = ((sections.get("scales") or {}).get("forecast") or {})
     g_max = max([int(str(((b.get("G") or {}).get("scale") or 0))) for b in fc.values()] or [0])
-    if cur_g not in ("0", "None", "") or float(kp) >= 5:
+    if cur_g not in ("0", "None", "") or kp >= 5:
         return ("地磁気嵐が進行中です（Kp {}）。高緯度ではオーロラ、衛星運用・GNSS 測位・"
-                "短波通信に軽微な影響が出ることがあります。".format(kp))
+                "短波通信に軽微な影響が出ることがあります。".format(kp_raw))
     if g_max >= 1:
         return ("現在は静穏ですが、今後1〜3日に G{}（{}）の地磁気嵐が予測されています。"
                 "高緯度域の観測・衛星運用は該当時間帯の変動に注意してください。".format(

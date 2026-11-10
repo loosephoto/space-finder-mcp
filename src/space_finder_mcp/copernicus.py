@@ -12,7 +12,7 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
-from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_error_result
+from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_empty_result, is_error_result
 from .stac_common import expand_datetime, parse_bbox, parse_cloud_cover
 from .input_utils import as_int
 
@@ -36,7 +36,8 @@ def _fetch_collections() -> list[dict]:
     return r.json().get("collections", [])
 
 
-@ttl_cache(TTL_DAILY, maxsize=32, skip_if=is_error_result)
+@ttl_cache(TTL_DAILY, maxsize=32,
+           skip_if=lambda r: is_error_result(r) or is_empty_result(r))
 def copernicus_collections(limit: int = 20) -> CallToolResult:
     """ESA Copernicus の利用可能な衛星データコレクション一覧を返す（認証不要）。
 
@@ -76,7 +77,8 @@ def copernicus_collections(limit: int = 20) -> CallToolResult:
     )
 
 
-@ttl_cache(TTL_SHORT, maxsize=64, skip_if=is_error_result)
+@ttl_cache(TTL_SHORT, maxsize=64,
+           skip_if=lambda r: is_error_result(r) or is_empty_result(r))
 def copernicus_search(collection: str = "sentinel-2-l2a", bbox: Optional[str] = None,
                       datetime: Optional[str] = None, max_cloud_cover: Optional[float] = None,
                       limit: int = 5) -> CallToolResult:
@@ -106,7 +108,14 @@ def copernicus_search(collection: str = "sentinel-2-l2a", bbox: Optional[str] = 
         body["bbox"] = bbox_vals
     if datetime:
         # CDSE は date-only を 400 で拒否する（"invalid datetime separator, expected `T`"）
-        body["datetime"] = expand_datetime(datetime)
+        dt_exp = expand_datetime(datetime)
+        if dt_exp is None:
+            return CallToolResult(
+                content=[TextContent(type="text",
+                                     text="datetime の日付が存在しません（受け取った値: {}）".format(datetime))],
+                structuredContent={"error": "bad date", "datetime": str(datetime)},
+            )
+        body["datetime"] = dt_exp
     cloud, cloud_err = parse_cloud_cover(max_cloud_cover)
     if cloud_err:
         return CallToolResult(

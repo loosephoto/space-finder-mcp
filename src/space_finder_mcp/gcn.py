@@ -27,7 +27,7 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
-from .cache import TTL_FORECAST, ttl_cache, is_error_result
+from .cache import TTL_FORECAST, ttl_cache, is_empty_result, is_error_result
 from .input_utils import as_int
 
 ARCHIVE = "https://gcn.nasa.gov/circulars"
@@ -87,6 +87,8 @@ def _list_json(days: int, query: Optional[str], today=None) -> tuple:
         data = json.loads(text)
     except ValueError:
         return None, 0, "json parse failed"
+    if not isinstance(data, dict):       # 200 で配列が返ることがある
+        return None, 0, "unexpected json shape"
     items = data.get("items")
     if not isinstance(items, list):
         return None, 0, "unexpected json shape"
@@ -144,7 +146,8 @@ def _detail(circular_id: str) -> tuple:
     return rec, None
 
 
-@ttl_cache(TTL_FORECAST, maxsize=32, skip_if=is_error_result)
+@ttl_cache(TTL_FORECAST, maxsize=32,
+           skip_if=lambda r: is_error_result(r) or is_empty_result(r))
 def gcn_alerts(days: int = 7, query: Optional[str] = None, circular_id: Optional[str] = None,
                limit: int = 25) -> CallToolResult:
     """NASA GCN（General Coordinates Network）の過渡天体速報（GCN Circulars）を返す（認証不要）。
