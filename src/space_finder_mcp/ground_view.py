@@ -481,7 +481,8 @@ LABEL_PAD = 6          # 名札と図の端に残す余白（px）
 LABEL_MIN_SIZE = 13    # 名札を縮めるときの下限サイズ
 
 
-def _fit_label(dr, text, x, y, W, dx, dy, size, bold, pad=LABEL_PAD, min_size=LABEL_MIN_SIZE):
+def _fit_label(dr, text, x, y, W, dx, dy, size, bold, pad=LABEL_PAD,
+               min_size=LABEL_MIN_SIZE, avoid=()):
     """名札（惑星・恒星・銀河）をキャンバス内に収める描画位置・フォント・アンカーを返す。
 
     マーカーの右に置けないときは左へ回して右揃えにし、どちらも狭ければ余裕のある側で
@@ -489,24 +490,38 @@ def _fit_label(dr, text, x, y, W, dx, dy, size, bold, pad=LABEL_PAD, min_size=LA
     旧実装は x+12 に置くだけで右端のクランプが無く、狭い視野で名札が切れていた
     （実測: W=444・span=40 で「フォーマルハウト」が 122px、W=333・span=30 で
     「月（照度 96%）」が 52px はみ出し）。
+
+    `avoid` は既に置いた名札の矩形 (x0, y0, x1, y1) のリスト。重ならない候補を選ぶ
+    （実測: 従来は「火星」×「木星」が 363px² 重なっていた）。どの候補も重なるときは
+    先頭の候補を返す（名札を丸ごと落とすと情報が消える）。
     """
     font = load_font(int(size), bold)
     tw = dr.textlength(text, font=font)
-    if x + dx + tw <= W - pad:                    # 既定: マーカーの右に左揃え
-        return (x + dx, y + dy, font, "la")
-    if x - dx - tw >= pad:                        # 右が狭い → 左へ回して右揃え
-        return (x - dx, y + dy, font, "ra")
+    cands = []
+    # dy をずらした候補も用意する（近接する天体の名札が重なるのを避ける。実測:
+    # 「木星」×「レグルス」624px²・「金星」×「スピカ」294px²）
+    for ddy in (0, -16, 16, -32, 32, -48, 48, -64):
+        if x + dx + tw <= W - pad:                # 既定: マーカーの右に左揃え
+            cands.append((x + dx, y + dy + ddy, font, "la"))
+        if x - dx - tw >= pad:                    # 右が狭い → 左へ回して右揃え
+            cands.append((x - dx, y + dy + ddy, font, "ra"))
     room_r = W - pad - (x + dx)                   # どちらも狭い → 余裕のある側で縮小
     room_l = x - dx - pad
     room = max(room_r, room_l)
-    if room < 24:                                 # 縮めても読めない幅しかない
+    if room >= 24:
+        small = _fit_font(dr, text, size, bold, room, min_size=min_size)
+        if dr.textlength(text, font=small) <= room:
+            cands.append((x + dx, y + dy, small, "la") if room_r >= room_l
+                         else (x - dx, y + dy, small, "ra"))
+    if not cands:                                 # 縮めても読めない幅しかない
         return None
-    small = _fit_font(dr, text, size, bold, room, min_size=min_size)
-    if dr.textlength(text, font=small) > room:    # 下限サイズでも入らない
-        return None
-    if room_r >= room_l:
-        return (x + dx, y + dy, small, "la")
-    return (x - dx, y + dy, small, "ra")
+    for (qx, qy, qf, qa) in cands:
+        bb = dr.textbbox((qx, qy), text, font=qf, anchor=qa)
+        if any(not (bb[2] < q[0] - 2 or bb[0] > q[2] + 2
+                    or bb[3] < q[1] - 2 or bb[1] > q[3] + 2) for q in avoid):
+            continue
+        return (qx, qy, qf, qa)
+    return cands[0]
 
 
 def _label_box(text, tx, ty, font, anchor, dr):
@@ -995,7 +1010,7 @@ def _tle_source_summary(sources):
     return "CelesTrak TLE" if hosts == [CELESTRAK_SOURCE] else "TLE出典: {}".format("、".join(hosts))
 
 
-def draw_satellites(img, sats, span, az0, sky_h, header, font):
+def draw_satellites(img, sats, span, az0, sky_h, header, font, avoid=()):
     """人工衛星を赤いマーカー＋名札＋軌道予測の破線で描く（色は検証で探すので固定）。
 
     視野の方位外（`_in_frame` が偽）の衛星は描かない。本文も同じ判定で「視野外」と書くので、
@@ -1028,16 +1043,39 @@ def draw_satellites(img, sats, span, az0, sky_h, header, font):
     for nm, (x, y) in pts.items():
         dr.ellipse([x - 14, y - 14, x + 14, y + 14], fill=(120, 20, 18))
         dr.ellipse([x - 9, y - 9, x + 9, y + 9], fill=SAT_RGB, outline=(255, 255, 255), width=3)
+    placed = []
     for nm, (x, y) in pts.items():
         # 名札はキャンバス右端で切れないようにクランプする（月・惑星の _fit_label と同じ
-        # 規約。実測: span=90 で「ひまわり9号」の名札 339px 中 334px が画面外だった）
+        # 規約。実測: span=90 で「ひまわり9号」の名札 339px 中 334px が画面外だった）。
+        # ただし固定オフセットだと近接する衛星同士で重なる（実測: 「ひまわり9号」×
+        # 「みちびき4号」が 1693px²）ので、既に置いた名札と重ならない位置を探す。
         tw = dr.textlength(nm, font=font)
+        cands = []
         lx = x + 14
         if lx + tw > W - 6:
             lx = max(6.0, x - 14 - tw)
-        dr.text((lx, y - 30), nm, font=font, fill=SAT_LABEL,
+        cands.append((lx, y - 30))
+        cands.append((max(6.0, min(x - 14 - tw, W - tw - 6)), y - 30))
+        cands.append((max(6.0, min(x + 14, W - tw - 6)), y + 18))
+        cands.append((max(6.0, min(x - 14 - tw, W - tw - 6)), y + 18))
+        chosen = None
+        for (cx_, cy_) in cands:
+            bb = dr.textbbox((cx_, cy_), nm, font=font)
+            bb = (bb[0] - 4, bb[1] - 4, bb[2] + 4, bb[3] + 4)   # 白フチ分
+            if any(not (bb[2] < q[0] or bb[0] > q[2]
+                        or bb[3] < q[1] or bb[1] > q[3])
+                   for q in list(placed) + list(avoid)):
+                continue
+            chosen = (cx_, cy_, bb)
+            break
+        if chosen is None:
+            cx_, cy_ = cands[0]
+            bb = dr.textbbox((cx_, cy_), nm, font=font)
+            chosen = (cx_, cy_, (bb[0] - 4, bb[1] - 4, bb[2] + 4, bb[3] + 4))
+        dr.text((chosen[0], chosen[1]), nm, font=font, fill=SAT_LABEL,
                 stroke_width=3, stroke_fill=(0, 0, 0))
-    return pts
+        placed.append(chosen[2])
+    return pts, placed
 
 
 def _frame_x(az, span, az0, W):
@@ -1194,9 +1232,10 @@ def render(scene, *, span, az0, sky_h, seed=20261010, label="", focus=None, lp=N
     img = Image.fromarray((np.clip(1.0 - (1.0 - bg) * (1.0 - disp), 0.0, 1.0) * 255.0
                            + 0.5).astype(np.uint8), "RGB")
     f_s, f_m, f_b = load_font(19), load_font(26, True), load_font(24, True)
-    sat_pts = {}
+    sat_pts, sat_boxes = {}, []
     if scene["satellites"]:                                      # 街並みの下に描く（建物が隠す）
-        sat_pts = draw_satellites(img, scene["satellites"], span, az0, sky_h, header, f_m)
+        sat_pts, sat_boxes = draw_satellites(img, scene["satellites"], span, az0,
+                                             sky_h, header, f_m)
 
     day_mix = float(np.clip((sun["alt"] + 4.0) / 10.0, 0.0, 1.0))
     ground, skyline, occl = draw_ground(img, y_horizon, ground_h, W, seed, day_mix)
@@ -1233,10 +1272,14 @@ def render(scene, *, span, az0, sky_h, seed=20261010, label="", focus=None, lp=N
                     stroke_fill=(255, 255, 255) if mixv < 0.5 else (0, 0, 0))
             label_boxes.append(_label_box("天の川（銀河面）", tx, ty, fnt, anc, dr))
             break
+    placed_boxes = []            # 実描画した名札の矩形（名札同士の回避用）
     for nm, x, y, vis in labels:                                 # 月・惑星の名札
         if x < 10 or x > W - 10 or _hidden(x, y):
             continue
-        box = _fit_label(dr, nm, x, y, W, 12, -22, 26, True)
+        # 回避には「実描画した textbbox」を使う（_label_box は y が実テキストより
+        # 上にズレているため、その箱で避けても実際は重なる。実測: 金星×スピカ 1078px²）
+        box = _fit_label(dr, nm, x, y, W, 12, -22, 26, True,
+                         avoid=placed_boxes + list(sat_boxes))
         if box is None:
             continue
         tx, ty, fnt, anc = box
@@ -1244,19 +1287,23 @@ def render(scene, *, span, az0, sky_h, seed=20261010, label="", focus=None, lp=N
                 fill=(255, 250, 214) if vis else (198, 210, 234),
                 stroke_width=3, stroke_fill=(0, 0, 0))
         label_boxes.append(_label_box(nm, tx, ty, fnt, anc, dr))
+        _bb = dr.textbbox((tx, ty), nm, font=fnt, anchor=anc)
+        placed_boxes.append((_bb[0] - 2, _bb[1] - 2, _bb[2] + 2, _bb[3] + 2))
     for nm, x, y, vis, kind in focus_labels:                     # 主要恒星・銀河の名札
         if x < 10 or x > W - 10 or _hidden(x, y):
             continue
         col = (216, 226, 252) if kind == "star" else _DSO_COLOR[kind]
         if not vis:
             col = tuple(int(v * 0.78) for v in col)
-        box = _fit_label(dr, nm, x, y, W, 11, 8, 19, False)
+        box = _fit_label(dr, nm, x, y, W, 11, 8, 19, False, avoid=placed_boxes)
         if box is None:
             continue
         tx, ty, fnt, anc = box
         dr.text((tx, ty), nm, font=fnt, fill=col, anchor=anc,
                 stroke_width=3, stroke_fill=(0, 0, 0))
         label_boxes.append(_label_box(nm, tx, ty, fnt, anc, dr))
+        _bb = dr.textbbox((tx, ty), nm, font=fnt, anchor=anc)
+        placed_boxes.append((_bb[0] - 2, _bb[1] - 2, _bb[2] + 2, _bb[3] + 2))
 
     dr.rectangle([0, 0, W, header], fill=HDR_BG)
     for hx, hy, htext, hfont, hcol, hanchor in hdr_items:

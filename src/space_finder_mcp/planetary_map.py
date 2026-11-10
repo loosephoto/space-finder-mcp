@@ -1678,10 +1678,12 @@ def _orbit3d_result(body_cfg, trail3d, cur, *, ja, en="", when_str="", cam=None,
         "🛤 トレイル: 前後 {:g} 分（{} 刻み）".format(float(minutes), step_disp),
     ]
     fig_text = figure_text_block(fig)
+    # 契約: content は「メディアのリンク行 → … → 画像ブロックが最後」。
+    # 旧実装は画像を先頭に置いていた（他の描画ツールと逆）。
     return CallToolResult(
-        content=[imgc] + [TextContent(type="text", text="\n".join(
+        content=[TextContent(type="text", text="\n".join(
             x for x in lines if x.strip()))] + ([TextContent(type="text", text=fig_text)]
-                                                if fig_text else []),
+                                                if fig_text else []) + [imgc],
         structuredContent={
             "body": body_cfg["ja"], "orbiter": ja, "when": when_str,
             "view": "orbit3d", "camera": r["camera"],

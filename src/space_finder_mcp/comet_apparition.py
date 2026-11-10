@@ -397,6 +397,7 @@ def _draw_chart(series: Sequence[dict], info: dict) -> dict:
                 dd.line(pts, fill=c["color"], width=2, joint="curve")
 
     mark_x = {}
+    mark_boxes = []            # マーカー名の占有矩形（同じ日付の名札の段積み用）
     for m in info["marks"]:                     # 縦マーカー（今日／近日点／地球最接近）
         xr = px(m["jd"])
         if xr < x0 - 1.0 or xr > x1 + 1.0:
@@ -413,9 +414,20 @@ def _draw_chart(series: Sequence[dict], info: dict) -> dict:
             for yy in range(y_top, int(py0 + _PH - 16), 6):
                 dd.line([(x, yy), (x, yy + 3)], fill=m["color"])
         # マーカー名は凡例（panel 先頭行 y=_HDR+6）と同一段に置くと重なる（実測 419px²）
-        # ので凡例の下段へずらす
-        dd.text((min(max(x - 20, 4), _W - 96), _HDR + 22), m["label"], font=f_m,
-                fill=m["color"])
+        # ので凡例の下段へずらす。同じ日付のマーカーは同じ x に来る（実測: 「r 最小」
+        # 「Δ 最小」が 1246px² 重なる）ため、既に置いた名札と重ならない段を探す。
+        base_x = min(max(x - 20, 4), _W - 96)
+        bb = None
+        for attempt in range(4):
+            # _HDR+22 だと panel0 の題名（y=_HDR+7・高さ 17px）の下端 120 と 2px 重なる
+            # （実測: 「距離」×「r 最小」34px²）。題名の下から始める。
+            ty = _HDR + 26 + attempt * 16
+            bb = dd.textbbox((base_x, ty), m["label"], font=f_m)
+            if all(bb[2] < q[0] or bb[0] > q[2] or bb[3] < q[1] or bb[1] > q[3]
+                   for q in mark_boxes):
+                break
+        dd.text((base_x, ty), m["label"], font=f_m, fill=m["color"])
+        mark_boxes.append(bb)
 
     # 極値は「点を全部打ってからラベルを置く」の2段階にする。先に点を打たないと、
     # 後から別系列の点が既存ラベルの矩形に入り、画素検査（ラベル重なり）が偽になる。

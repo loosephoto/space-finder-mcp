@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import datetime as dt
 import io
 
 from mcp.types import CallToolResult, ImageContent, TextContent
@@ -58,25 +59,47 @@ def _card(d, box, title, tag=None):
         d.text((box[2] - 18 - tw - 8, box[1] + 16), tag, font=load_font(15, True), fill=ACC)
 
 
-def _night_row(d, box, hours, label, moon, start, end, day_shift=0):
-    """1夜ぶん（18:00→翌06:00）の雲量バー。start/end は 18 時起点の通し時。"""
+def _same_night(h, night_date):
+    """h が night_date の夜（18:00→翌06:00）に属するか。
+
+    時刻だけで選ぶと 3 夜ぶんが同じ行に重なる（実測: 今夜 9 時間なのに 27 本描かれて
+    いた）。night_date の 18:00〜23:59 と、翌朝 00:00〜05:59 だけをその夜とする。
+    """
+    if night_date is None:
+        return True
+    hh = int(h["time"][11:13])
+    if 6 <= hh < 18:                     # 昼間はその夜に属さない
+        return False
+    want = night_date if hh >= 18 else night_date + dt.timedelta(days=1)
+    return h["time"][:10] == want.isoformat()
+
+
+def _night_row(d, box, hours, label, moon, start, end, night_date=None, k_offset=0):
+    """1夜ぶん（18:00→翌06:00）の雲量バー。start/end は 18 時起点の通し時。
+
+    night_date を渡すと「その日付の夜」の時間だけを選ぶ。k_offset は 2 段目
+    （明日の夜）で 24 を足すために使う。戻り値は描いた棒の本数。
+    """
     x0, y0, x1, y1 = box
     px0, py0, px1, py1 = x0 + 78, y0 + 10, x1 - 16, y1 - 26
     d.text((x0, y0), label, font=load_font(17, True), fill=FG)
     sel = []
     for h in hours:
         hh = int(h["time"][11:13])
-        k = hh if hh >= 18 else hh + 24
-        if start <= k <= end:
+        k = (hh if hh >= 18 else hh + 24) + k_offset
+        if start <= k <= end and _same_night(h, night_date):
             sel.append((k, h))
     if not sel:
         d.text((px0, py0 + 20), "この夜の予報データがありません", font=load_font(15), fill=DIM)
-        return
+        return 0
     for v in (0, 50, 100):
         yy = py1 - (py1 - py0) * v / 100.0
         d.line([px0, yy, px1, yy], fill=(44, 50, 66), width=1)
-        d.text((x0 + 12, yy - 8), "{}%".format(v), font=load_font(13), fill=DIM)
-    span = max(1, end - start)
+        # 左マージン（x0+12）に置くと夜行のラベルと重なる（実測 333px²）。右マージンへ。
+        d.text((px1 + 4, yy - 8), "{}%".format(v), font=load_font(12), fill=DIM)
+    # k は start〜end の両端を含む（13 個）ので span は +1 が正しい。+1 なしだと
+    # 最後の棒がプロット右端をはみ出し、値ラベルが % 目盛と重なる（実測 78px²）。
+    span = max(1, end - start + 1)
     step = (px1 - px0) / span
     for k, h in sel:
         c = h["cloud_cover"]
@@ -89,11 +112,12 @@ def _night_row(d, box, hours, label, moon, start, end, day_shift=0):
         d.text((bx + 1, py1 - bh - 18), str(c), font=load_font(12, True), fill=col)
     mr = moon.get("moonrise") or ""
     if mr:
-        mk = int(mr[11:13]) + (24 if int(mr[11:13]) < 18 else 0)
+        mk = int(mr[11:13]) + (24 if int(mr[11:13]) < 18 else 0) + k_offset
         if start <= mk <= end:
             mx = px0 + step * (mk - start) + step * int(mr[14:16]) / 60.0
             d.line([mx, py0 - 4, mx, py1], fill=BLUE, width=2)
             d.text((mx + 4, py0 - 22), "月の出 {}".format(mr[11:16]), font=load_font(13), fill=BLUE)
+    return len(sel)
 
 
 def build_sheet(*, place, lat, lon, hours, windows, moon, sat=None, rain_panels=None,
@@ -142,24 +166,37 @@ def build_sheet(*, place, lat, lon, hours, windows, moon, sat=None, rain_panels=
         lx += 26 + d.textlength(lab, font=load_font(14))
     d.line([lx + 8, 198, lx + 8, 214], fill=BLUE, width=2)
     d.text((lx + 16, 197), "月の出", font=load_font(14), fill=DIM)
-    _night_row(d, [46, 226, W - 46, 330], hours, "今夜 18:00 → 翌 06:00", moon, 18, 30)
-    has_second = any((int(h["time"][11:13]) if int(h["time"][11:13]) >= 18
-                      else int(h["time"][11:13]) + 24) >= 42 for h in (hours or []))
+    night_date = None
+    if win.get("start"):
+        try:
+            night_date = dt.date.fromisoformat(str(win["start"])[:10])
+        except ValueError:
+            night_date = None
+    bars = _night_row(d, [46, 226, W - 46, 330], hours, "今夜 18:00 → 翌 06:00",
+                      moon, 18, 30, night_date)
+    # 2 段目は「明日の夜」= night_date の翌日を 18:00 とする。k は 1 段目より 24 進める。
+    second_date = night_date + dt.timedelta(days=1) if night_date else None
+    has_second = bool(second_date) and any(_same_night(h, second_date)
+                                           for h in (hours or []))
     if has_second:
-        _night_row(d, [46, 356, W - 46, 458], hours, "明日の夜 18:00 → 翌 06:00", moon, 42, 54)
+        bars += _night_row(d, [46, 356, W - 46, 458], hours, "明日の夜 18:00 → 翌 06:00",
+                           moon, 42, 54, second_date, k_offset=24)
     else:
         d.text((46, 366), "明日の夜", font=load_font(17, True), fill=FG)
         d.text((150, 368), "予報の取得範囲外（`days` を増やすと出ます）", font=load_font(15), fill=DIM)
         d.text((46, 398), "※ 今夜の判断には影響しません", font=load_font(14), fill=(120, 128, 146))
 
-    verify = {"verdict": v[0], "panels": [], "site_marker_px": None, "cloud_bars": 0}
-    verify["cloud_bars"] = len(hours or [])
+    # 雲量タイムラインは「その夜の時間」だけを描くので、描いた棒の本数を数える
+    # （旧実装は hourly の全件数＝3 夜ぶんの 27 を数えていた）
+    verify = {"verdict": v[0], "panels": [], "site_marker_px": None,
+              "cloud_bars": bars}
 
     y = 484
     half = (W - 28 - 28 - 28) // 2
     if sat is not None:
         _card(d, [28, y, 28 + half, y + 516], "🛰 ひまわり9号 赤外（B13）", tag="実況")
-        d.text((46, y + 32), "観測 {} UTC ／ 明るい=雲頂が高い".format(
+        # カード標題（y+12・21px 太字）の下に置く（y+32 だと 281px² 重なっていた）
+        d.text((46, y + 46), "観測 {} UTC ／ 明るい=雲頂が高い".format(
             (sat_obs or "").replace("T", " ").replace("Z", "")), font=load_font(14), fill=DIM)
         jb = _japan_box(sat.width)
         cw, ch = jb[2] - jb[0], jb[3] - jb[1]

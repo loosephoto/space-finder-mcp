@@ -273,7 +273,10 @@ def _draw_marker(d, x: float, y: float, *, label: str = "", font=None) -> None:
 def _draw_legend(d, x: int, y: int, font, font_sm) -> None:
     """降水強度の凡例（気象庁公式の色と値）を描く。"""
     d.text((x, y - 26), "降水強度", font=font_sm, fill=(205, 210, 220))
-    d.text((x + 56, y - 26), "mm/h", font=font_sm, fill=(150, 155, 168))
+    # 固定オフセット（x+56）だと「降水強度」の文字幅を突き抜けて 120px² 重なっていた。
+    # 実測した文字幅の後ろに置く。
+    d.text((x + d.textlength("降水強度", font=font_sm) + 8, y - 26), "mm/h",
+           font=font_sm, fill=(150, 155, 168))
     for i, (lab, col) in enumerate(reversed(LEGEND)):
         yy = y + i * 30
         d.rectangle([x, yy, x + 44, yy + 27], fill=col, outline=(70, 70, 80))

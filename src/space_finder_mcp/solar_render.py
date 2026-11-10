@@ -908,6 +908,10 @@ def _oblique_body(body):
             if any(bb[0] - 8 <= qx <= bb[2] + 8 and bb[1] - 8 <= qy <= bb[3] + 8
                    for (qx, qy) in pts_px):
                 continue
+            # 既に置いたラベル同士も避ける（実測: 高離心率で '0.2'/'0.5' が 231px² 重なる）
+            if any(not (bb[2] < q[0] - 2 or bb[0] > q[2] + 2
+                        or bb[3] < q[1] - 2 or bb[1] > q[3] + 2) for q in boxes):
+                continue
             boxes.append(bb)
             dr.text((x, y), text, font=font, fill=fill, anchor=anc)
             return True

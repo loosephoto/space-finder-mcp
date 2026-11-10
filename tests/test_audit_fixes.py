@@ -1190,5 +1190,164 @@ class CelestrakTleFallbackTests(unittest.TestCase):
         self.assertEqual(sc.get("results"), [fb_record])
 
 
+
+
+class ObsSheetNightTests(unittest.TestCase):
+    """「今夜」の行にはその夜の時間だけを描く（v0.56.0）。"""
+
+    def _hours(self):
+        out = []
+        for d in (10, 11, 12):
+            for hh in range(0, 24, 2):
+                out.append({"time": "2026-11-%02dT%02d:00" % (d, hh),
+                            "cloud_cover": 30})
+        return out
+
+    def _build(self):
+        from space_finder_mcp import obs_sheet as o
+        windows = [{"start": "2026-11-10T21:00", "end": "2026-11-11T05:00",
+                    "hours": 9, "max_cloud": 30, "min_cloud": 10}]
+        moon = {"moonrise": "2026-11-10T16:00", "illumination_pct": 40}
+        return o.build_sheet(place="東京", lat=35.68, lon=139.69,
+                             hours=self._hours(), windows=windows, moon=moon,
+                             sat=None, rain_panels=None)
+
+    def test_same_night(self):
+        import datetime as dt
+        from space_finder_mcp.obs_sheet import _same_night
+        d = dt.date(2026, 11, 10)
+        self.assertTrue(_same_night({"time": "2026-11-10T21:00"}, d))
+        self.assertTrue(_same_night({"time": "2026-11-11T02:00"}, d))
+        self.assertFalse(_same_night({"time": "2026-11-11T21:00"}, d))
+        self.assertFalse(_same_night({"time": "2026-11-10T10:00"}, d))
+        self.assertTrue(_same_night({"time": "2026-11-10T10:00"}, None))
+
+    def test_cloud_bars_counts_only_drawn_bars(self):
+        _img, verify = self._build()
+        # 3 夜ぶん（36 件）あっても「今夜」は 21/23/1/3/5 の 5 本だけ
+        self.assertLess(verify["cloud_bars"], len(self._hours()))
+        self.assertGreater(verify["cloud_bars"], 0)
+
+    def test_percent_labels_do_not_overlap_night_label(self):
+        from PIL import ImageDraw
+        from space_finder_mcp import obs_sheet as o
+        rec = []
+        orig = ImageDraw.ImageDraw.text
+
+        def hook(self, xy, text, *a, **kw):
+            kw2 = {k: v for k, v in kw.items()
+                   if k in {"anchor", "spacing", "align", "direction", "features",
+                            "language", "stroke_width", "embedded_color",
+                            "font_size"}}
+            font = kw.get("font", a[1] if len(a) > 1 else None)
+            try:
+                bb = self.textbbox(xy, text, font=font, **kw2)
+            except Exception:
+                bb = None
+            if bb:
+                rec.append((str(text), tuple(int(v) for v in bb)))
+            return orig(self, xy, text, *a, **kw)
+
+        ImageDraw.ImageDraw.text = hook
+        try:
+            o.build_sheet(place="東京", lat=35.68, lon=139.69,
+                          hours=self._hours(),
+                          windows=[{"start": "2026-11-10T21:00",
+                                    "end": "2026-11-11T05:00",
+                                    "hours": 9, "max_cloud": 30,
+                                    "min_cloud": 10}],
+                          moon={"moonrise": "2026-11-10T16:00",
+                                "illumination_pct": 40},
+                          sat=None, rain_panels=None)
+        finally:
+            ImageDraw.ImageDraw.text = orig
+
+        def box_of(prefix):
+            return [b for t, b in rec if t.startswith(prefix)]
+
+        night = box_of("今夜") + box_of("明日の夜")
+        pct = box_of("0%") + box_of("50%") + box_of("100%")
+        self.assertTrue(night and pct)
+        for a in night:
+            for b in pct:
+                x0, y0 = max(a[0], b[0]), max(a[1], b[1])
+                x1, y1 = min(a[2], b[2]), min(a[3], b[3])
+                self.assertFalse(x1 > x0 and y1 > y0,
+                                 "夜行ラベルとパーセント目盛が重なる: {} {}".format(a, b))
+
+    def test_bars_stay_inside_the_plot(self):
+        """最後の棒がプロット右端をはみ出さない（span は end-start+1）。"""
+        from PIL import ImageDraw
+        from space_finder_mcp import obs_sheet as o
+        rects = []
+        orig = ImageDraw.ImageDraw.rectangle
+
+        def hook(self, box, *a, **kw):
+            rects.append(tuple(float(v) for v in box))
+            return orig(self, box, *a, **kw)
+
+        ImageDraw.ImageDraw.rectangle = hook
+        try:
+            o.build_sheet(place="東京", lat=35.68, lon=139.69,
+                          hours=self._hours(),
+                          windows=[{"start": "2026-11-10T21:00",
+                                    "end": "2026-11-11T05:00",
+                                    "hours": 9, "max_cloud": 30,
+                                    "min_cloud": 10}],
+                          moon={"moonrise": "2026-11-10T16:00",
+                                "illumination_pct": 40},
+                          sat=None, rain_panels=None)
+        finally:
+            ImageDraw.ImageDraw.rectangle = orig
+        # 棒の矩形は雲量カード（x 28..1532）の内側に収まる
+        bars = [r for r in rects if r[2] - r[0] > 20 and r[3] - r[1] > 5]
+        self.assertTrue(bars)
+        self.assertLessEqual(max(r[2] for r in bars), 1532)
+
+
+class FitLabelAvoidTests(unittest.TestCase):
+    def test_fit_label_avoids_existing_box(self):
+        from PIL import Image, ImageDraw
+        from space_finder_mcp.ground_view import _fit_label, load_font
+        im = Image.new("RGB", (400, 200))
+        dr = ImageDraw.Draw(im)
+        b1 = _fit_label(dr, "金星", 100, 100, 400, 12, -22, 26, True)
+        self.assertIsNotNone(b1)
+        bb1 = dr.textbbox((b1[0], b1[1]), "金星", font=b1[2], anchor=b1[3])
+        b2 = _fit_label(dr, "金星", 100, 100, 400, 12, -22, 26, True,
+                        avoid=[(bb1[0] - 2, bb1[1] - 2, bb1[2] + 2, bb1[3] + 2)])
+        self.assertIsNotNone(b2)
+        bb2 = dr.textbbox((b2[0], b2[1]), "金星", font=b2[2], anchor=b2[3])
+        separated = (bb2[2] < bb1[0] or bb2[0] > bb1[2]
+                     or bb2[3] < bb1[1] or bb2[1] > bb1[3])
+        self.assertTrue(separated, "avoid を渡しても同じ位置に置かれる: %r %r"
+                        % (bb1, bb2))
+
+
+class JmaRainLegendTests(unittest.TestCase):
+    def test_unit_is_placed_after_label_text(self):
+        from PIL import Image, ImageDraw
+        from space_finder_mcp import jma_rain
+        im = Image.new("RGB", (600, 400))
+        dr = ImageDraw.Draw(im)
+        rec = []
+        orig = ImageDraw.ImageDraw.text
+
+        def hook(self, xy, text, *a, **kw):
+            rec.append((str(text), (xy, kw.get("font"))))
+            return orig(self, xy, text, *a, **kw)
+
+        ImageDraw.ImageDraw.text = hook
+        try:
+            jma_rain._draw_legend(dr, 100, 300, jma_rain.load_font(17),
+                                  jma_rain.load_font(14))
+        finally:
+            ImageDraw.ImageDraw.text = orig
+        d = {t: xy for t, (xy, _f) in rec}
+        self.assertIn("降水強度", d)
+        self.assertIn("mm/h", d)
+        self.assertGreater(d["mm/h"][0], d["降水強度"][0])
+
+
 if __name__ == "__main__":
     unittest.main()
