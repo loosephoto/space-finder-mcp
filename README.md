@@ -102,7 +102,7 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 
 ## 📝 更新履歴
 
-各バージョンの変更内容は **[GitHub Releases](https://github.com/loosephoto/space-finder-mcp/releases)** に記載しています（最新: [v0.57.0](https://github.com/loosephoto/space-finder-mcp/releases/tag/v0.57.0)）。
+各バージョンの変更内容は **[GitHub Releases](https://github.com/loosephoto/space-finder-mcp/releases)** に記載しています（最新: [v0.58.0](https://github.com/loosephoto/space-finder-mcp/releases/tag/v0.58.0)）。
 
 **README では履歴を二重管理しません** — 同じ内容を2か所に書くと必ず片方が古くなるため、変更点はリリース時に GitHub Releases の本文へ書きます（手順は [`CLAUDE.md`](CLAUDE.md) の「リリース手順」）。
 
@@ -1093,9 +1093,11 @@ src/space_finder_mcp/
 ├── input_utils.py       # 引数の防御的数値変換 as_int/as_float（不正値でも例外を漏らさない）
 ├── img_common.py        # 画像合成の共通ヘルパー（フォント探索/JPEG化/アンチメリジアン分割。ツール定義なし）
 ├── name_common.py       # 天体名・衛星名の解決（表記ゆれ/和名→英語/Sesame で名前→座標。ツール定義なし）
+├── places.py            # 地名→緯度経度の解決（既知テーブル＋Open-Meteo/Nominatim。ツール定義なし）
 ├── nasa_budget.py       # api.nasa.gov のレート枠管理（投げる前の check/429 の記録/キーの伏せ字化）
 ├── satellite_map.py     # sat_ground_track（衛星の地上軌道マップ, CelesTrak+SGP4+Blue Marble）
 ├── cache.py             # キャッシュ基盤（TTLメモリ/ディスク資産キャッシュ。ツール定義なし）
+├── jsonio.py            # structuredContent の JSON 正規化（numpy 型/NaN → JSON 七型。唯一の境界）
 ├── env_config.py        # リポジトリ直下 .env の読み込み（標準ライブラリのみ。ツール定義なし）
 ├── wikidata_lookup.py   # reverse_lookup（逆引き歴史Q&A）
 ├── launch.py            # upcoming_launches / china_launches / russia_launches（ロケット打ち上げ・中国・ロシア）
@@ -1139,10 +1141,13 @@ src/space_finder_mcp/
 ├── news.py               # astronomy_news（Sky & Telescope 天文ニュース）
 ├── sky_overlay.py        # sky_map_with_satellites（星図+人工衛星。描画は ground_view に一本化）
 ├── ground_view.py        # sky_map_with_satellites(engine="ground") 地上視点パノラマ（実星表・天の川・街並み・方位目盛り）
+├── solar_model.py        # 太陽系のデータモデル（惑星表・SBDB 要素・ケプラー伝播・円錐曲線）
+├── solar_render.py       # 太陽系の斜め俯瞰レンダラと画素検証（Pillow・通信しない）
 ├── solar_system.py        # solar_system_now（太陽系俯瞰図, JPL DE421+SBDB。描画は _render_oblique の1本）
 ├── comet_apparition.py   # 彗星の見え方チャート（solar_system_now view="apparition"）
 ├── swingby.py            # スイングバイ航路の実測（Horizons 状態ベクトル＋最接近探索）
 ├── orbit_view.py          # 斜め俯瞰の投影部品（正射影/弱い透視・対数/線形動径・円錐曲線サンプリング・深度）
+├── orbit3d.py             # 天体中心 3D の斜め俯瞰（周回機の軌道面の傾斜・高度・進行方向）
 ├── solar_eclipse.py       # solar_eclipse_series（日食の時系列パネル, JPL DE421+Skyfield）
 ├── moon_phase.py          # moon_phase_map（月齢マップ: 月齢カレンダー/朔望月パネル, JPL DE421+Skyfield）
 ├── mars_rover.py         # mars_rover_status（火星ローバー状況・天気）

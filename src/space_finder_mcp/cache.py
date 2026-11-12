@@ -99,25 +99,6 @@ def is_empty_result(result) -> bool:
     return False
 
 
-#: 「0件」を数えるキー。空の list/tuple/dict をキャッシュすると一時的な空応答が
-#: 「該当なし」として TTL の間ずっと返る（v0.46.0 の exoplanet/isro・v0.50.0 の csa）。
-_EMPTY_KEYS = ("results", "records", "features", "items", "satellites",
-               "bindings", "collections", "entries", "candidates")
-
-
-def is_empty_result(result) -> bool:
-    """0 件（空応答）かどうか。
-
-    ``skip_if`` から使う。``is_error_result`` は ``error`` キーしか見ないため、
-    HTTP 200 で空の results を返す一時的な障害は通ってしまう（STAC 系で実測）。
-    """
-    sc = result if isinstance(result, dict) else (getattr(result, "structuredContent", None) or {})
-    for key in _EMPTY_KEYS:
-        v = sc.get(key)
-        if isinstance(v, (list, tuple, dict)) and not v:
-            return True
-    return False
-
 
 def ttl_cache(seconds: float, maxsize: int = 128,
               skip_if: Optional[Callable] = None):

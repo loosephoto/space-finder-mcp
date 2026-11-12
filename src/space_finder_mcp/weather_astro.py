@@ -505,15 +505,15 @@ _JA_PLACES: dict[str, str] = {
     "カイロ": "Cairo", "ナイロビ": "Nairobi", "ヨハネスブルグ": "Johannesburg",
     "デリー": "New Delhi", "ムンバイ": "Mumbai", "ジャカルタ": "Jakarta",
     "マニラ": "Manila", "クアラルンプール": "Kuala Lumpur", "台北": "Taipei",
-    "香港": "Hong Kong", "ソウル": "Seoul", "平壌": "Pyongyang", "ウラジオストク": "Vladivostok",
+    "香港": "Hong Kong", "平壌": "Pyongyang", "ウラジオストク": "Vladivostok",
     "ストックホルム": "Stockholm", "オスロ": "Oslo", "ヘルシンキ": "Helsinki",
     "コペンハーゲン": "Copenhagen", "ベルリン": "Berlin", "ウィーン": "Vienna",
     "チューリッヒ": "Zurich", "ジュネーブ": "Geneva", "アムステルダム": "Amsterdam",
     "ブリュッセル": "Brussels", "マドリード": "Madrid", "バルセロナ": "Barcelona",
-    "リスボン": "Lisbon", "アテネ": "Athens", "イスタンブール": "Istanbul",
-    "モスクワ": "Moscow", "サンクトペテルブルク": "Saint Petersburg",
+    "リスボン": "Lisbon", "イスタンブール": "Istanbul",
+    "サンクトペテルブルク": "Saint Petersburg",
     "オークランド": "Auckland", "ウェリントン": "Wellington",
-    "ホノルル": "Honolulu", "アンカレッジ": "Anchorage",
+    "アンカレッジ": "Anchorage",
 }
 
 

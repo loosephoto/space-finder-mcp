@@ -38,7 +38,6 @@ WELL_KNOWN: dict[str, int] = {
     "kepu": 44414, "hinode": 29479, "aqua": 27424, "terra": 25994, "suomi-npp": 37849,
     # 以下は CelesTrak GROUP=active（16,563 機）の OBJECT_NAME と突合して確認した現役機
     # （name_common.JA_ALIASES の英語名と同じ綴りで引けるようにしてある）
-    "himawari-8": 40267, "himawari-9": 41836,
     "alos-2": 39766, "alos-4": 60182, "gosat": 33492, "gosat-2": 43672,
     "gcom-w1": 38337, "gcom-c1": 43065, "ajisai": 16908,
     "arase": 41896, "reimei": 28810, "hisaki": 39253,

@@ -26,7 +26,7 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
-from .cache import TTL_DAILY, ttl_cache
+from .cache import TTL_DAILY, local_appdata, ttl_cache
 from .input_utils import as_float
 from .name_common import split_names as _split_object_names
 from .img_common import (figure_notes, figure_payload, figure_text_block, media_link_line,
@@ -41,7 +41,7 @@ from .solar_render import (_au_fmt, _render_oblique, _split_camera_arg,
                            _verify_light_day_draw, _verify_oblique, _verify_range_draw,
                            _verify_route_draw, oblique_camera)
 
-_DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
+_DATA_DIR = os.path.join(local_appdata(), "Temp", "skyfield_data")
 os.makedirs(_DATA_DIR, exist_ok=True)
 UA = {"User-Agent": "space-finder-mcp/0.21 (MCP; solar system)"}
 

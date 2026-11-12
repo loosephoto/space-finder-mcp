@@ -98,7 +98,7 @@ def _sat_subpoint(sat, t) -> tuple[float, float, float]:
 
 def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
                      when: Optional[str] = None,
-                     minutes: int = 45, step: int = 1,
+                     minutes: int = 45, step: float = 1.0,
                      out_px: int = 1200) -> CallToolResult:
     """任意の人工衛星の現在位置と地上軌道を地球地図にプロットした画像を返す。
 

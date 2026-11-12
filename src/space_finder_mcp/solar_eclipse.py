@@ -24,7 +24,7 @@ from typing import Optional
 
 from mcp.types import CallToolResult, ImageContent, TextContent
 
-from .cache import TTL_DAILY, ttl_cache
+from .cache import TTL_DAILY, local_appdata, ttl_cache
 from .img_common import (as_image, figure_notes, figure_payload,
                          figure_text_block, load_font, media_link_line,
                          save_output, scale_spec, view_spec)
@@ -32,7 +32,7 @@ from .input_utils import as_float
 from .name_common import ResolverUnavailable
 from .places import resolve_place as _resolve_place
 
-_DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
+_DATA_DIR = os.path.join(local_appdata(), "Temp", "skyfield_data")
 os.makedirs(_DATA_DIR, exist_ok=True)
 
 # 太陽・月の実半径 (km)

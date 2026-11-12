@@ -21,9 +21,11 @@ import os
 
 import requests
 
+from .cache import local_appdata
+from .cache import local_appdata
 from .celestrak import CELESTRAK_SOURCE, fetch_tle_ex
 
-_DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Temp", "skyfield_data")
+_DATA_DIR = os.path.join(local_appdata(), "Temp", "skyfield_data")
 os.makedirs(_DATA_DIR, exist_ok=True)
 
 # 注目衛星 (LEOは動き・軌道線を見せる、静止は定点表示)
