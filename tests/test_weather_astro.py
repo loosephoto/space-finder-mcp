@@ -338,6 +338,41 @@ class AstronomyWeatherToolTests(unittest.TestCase):
         self.assertEqual(res.structuredContent.get("error"), "simulated blackhole")
         self.assertIn("接続に失敗", res.content[0].text)
 
+    def test_missing_cloud_cover_does_not_raise(self):
+        """cloud_cover を返さない予報でも例外を漏らさない（回帰）。
+
+        実測: 観測好機なしの分岐が `h["cloud_cover"][i]` を直接添字していたため、
+        全時間曇天（=好機なし）の応答で KeyError がツール外へ漏れていた。
+        """
+        payload = self._payload()
+        payload["hourly"].pop("cloud_cover")
+        requests.get = _stub_forecast(payload)
+        res = wa.astronomy_weather(latitude=35.6855, longitude=139.6955, include_rain=False)
+        sc = res.structuredContent
+        self.assertNotIn("error", {k: v for k, v in sc.items() if k == "error"})
+        self.assertEqual(sc["windows"], [])
+        self.assertEqual(sc["hourly"], [])          # 好機なし → 空でもキーは必ず在る
+        # 暗い時間は返るが、雲量は欠測（None）として扱われる（判定は「判定不能」）
+        self.assertTrue(all(h["cloud_cover"] is None for h in sc["night_hours"]))
+
+    def test_night_hours_lists_every_dark_hour_even_when_cloudy(self):
+        """判定シートのタイムライン用に、曇っていても暗い時間を全部返す（回帰）。
+
+        実測: `hourly` は観測好機（雲量≤max_cloud）の時間しか入らないため、
+        シート側に「曇り（>50%）」の棒を作るデータが構造上存在しなかった。
+        """
+        payload = self._payload()
+        payload["hourly"]["cloud_cover"] = [90] * len(payload["hourly"]["time"])
+        requests.get = _stub_forecast(payload)
+        res = wa.astronomy_weather(latitude=35.6866, longitude=139.6966, include_rain=False)
+        sc = res.structuredContent
+        self.assertEqual(sc["windows"], [])         # 雲量 90% では好機ゼロ
+        self.assertEqual(sc["hourly"], [])
+        self.assertGreater(len(sc["night_hours"]), 10)
+        self.assertTrue(all(h["cloud_cover"] == 90 for h in sc["night_hours"]))
+        self.assertTrue(all(h["sun_alt_deg"] is None or h["sun_alt_deg"] <= -15.0
+                            for h in sc["night_hours"]))
+
 
 if __name__ == "__main__":
     unittest.main()

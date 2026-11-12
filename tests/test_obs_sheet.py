@@ -67,9 +67,12 @@ class VerdictTests(unittest.TestCase):
 
 
 class SheetTests(unittest.TestCase):
-    def _build(self, cloud_max=23, with_rain=True, with_sat=True):
-        hrs = hours({"18": 23, "19": 15, "20": 23, "21": 29, "22": 32, "23": 40,
-                     "0": 38, "1": 38, "2": 5, "3": 0, "4": 2, "5": 3})
+    def _build(self, cloud_max=23, with_rain=True, with_sat=True, cloud=None):
+        base = {"18": 23, "19": 15, "20": 23, "21": 29, "22": 32, "23": 40,
+                "0": 38, "1": 38, "2": 5, "3": 0, "4": 2, "5": 3}
+        if cloud is not None:
+            base = {k: cloud for k in base}
+        hrs = hours(base)
         win = [dict(WIN[0], max_cloud=cloud_max)]
         return osheet.build_sheet(
             place="東京", lat=35.68, lon=139.69, hours=hrs, windows=win, moon=MOON,
@@ -105,10 +108,34 @@ class SheetTests(unittest.TestCase):
         self.assertGreaterEqual(hit, 8, "地点マーカーが画素で見つからない")
 
     def test_verdict_follows_cloud_threshold(self):
-        _, v_clear = self._build(cloud_max=12)
-        _, v_cloudy = self._build(cloud_max=85)
+        """判定は**今夜の雲量**（タイムラインの最大値）で決まる。
+
+        v0.60.0: 旧実装は `windows[0]`（3日間で最初に見つかった観測好機）の
+        max_cloud を根拠にしていたため、今夜が曇天で明晩が晴天だと「明晩の窓」の
+        値を今夜として表示していた（実測）。時間軸と判定の根拠を一致させるため、
+        hours と windows を同じ雲量で作って検証する。
+        """
+        _, v_clear = self._build(cloud_max=12, cloud=12)
+        _, v_cloudy = self._build(cloud_max=85, cloud=85)
         self.assertEqual(v_clear["verdict"], "○")
         self.assertEqual(v_cloudy["verdict"], "×")
+
+    def test_tonight_cloudy_with_tomorrow_clear_is_not_ok(self):
+        """今夜が曇天・明晩が晴天のとき、判定を明晩の窓で○にしない（回帰）。
+
+        実測: `windows[0]` は 3 日間で最初の好機なので、今夜が曇っていれば
+        翌晩の窓が返り、シートは「今夜」の行に翌日の日付と ○ を描いていた。
+        """
+        hrs = hours({"18": 95, "19": 98, "20": 92, "21": 88, "22": 96, "23": 99,
+                     "0": 90, "1": 85, "2": 80, "3": 78, "4": 82, "5": 88})
+        # 明晩の好機（翌日 18:00 開始）だけが windows に入っている状況
+        win = [{"start": "2026-11-01T18:00", "end": "2026-11-02T05:00", "hours": 11,
+                "min_cloud": 3, "max_cloud": 8, "min_sun_alt": -60.0, "max_sun_alt": -16.0}]
+        im, v = osheet.build_sheet(place="東京", lat=35.68, lon=139.69, hours=hrs,
+                                   windows=win, moon=MOON)
+        self.assertEqual(v["verdict"], "×")
+        # 今夜の棒は 12 本（18..23 と翌 0..5）。曇りの色で描かれている本数も数える。
+        self.assertEqual(v["cloud_bars"], 12)
 
 
 if __name__ == "__main__":

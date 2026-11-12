@@ -74,6 +74,23 @@ def _same_night(h, night_date):
     return h["time"][:10] == want.isoformat()
 
 
+def _first_night_date(hours):
+    """タイムラインの起点（= 予報初日 = 現地の今日）の日付を返す。
+
+    「今夜」は窓の開始日ではなく**現地の今日** 18:00 起点で決める。旧実装は
+    `windows[0]["start"]`（3日間で最初の観測好機）の発想で、今夜が曇天・明晩が
+    晴天だと「明晩の窓」を今夜として描画していた（実測）。
+    """
+    for h in hours or []:
+        t = str(h.get("time") or "")
+        if len(t) >= 10:
+            try:
+                return dt.date.fromisoformat(t[:10])
+            except ValueError:
+                continue
+    return None
+
+
 def _night_row(d, box, hours, label, moon, start, end, night_date=None, k_offset=0):
     """1夜ぶん（18:00→翌06:00）の雲量バー。start/end は 18 時起点の通し時。
 
@@ -102,7 +119,9 @@ def _night_row(d, box, hours, label, moon, start, end, night_date=None, k_offset
     span = max(1, end - start + 1)
     step = (px1 - px0) / span
     for k, h in sel:
-        c = h["cloud_cover"]
+        c = h.get("cloud_cover")
+        if c is None:                       # 欠測の時間は棒を作らない（None で TypeError にしない）
+            continue
         bx = px0 + step * (k - start)
         bh = (py1 - py0) * c / 100.0
         col = OKC if c <= 20 else (ACC if c <= 50 else NGC)
@@ -131,11 +150,16 @@ def build_sheet(*, place, lat, lon, hours, windows, moon, sat=None, rain_panels=
 
     from .weather_sat import _geo_px, _japan_box
 
-    win = (windows or [{}])[0]
-    mc = win.get("max_cloud")
-    # 判定は**雲量（予報）**だけで決める。雨雲の有無は「実況」なので判定に混ぜない
-    # （混ぜると「雨雲データが取れただけで×」になり、図と理由が食い違う）。
-    v = _verdict(mc, win.get("min_cloud"))
+    # 判定は**今夜**の予報雲量で決める（雨雲＝実況は判定に混ぜない）。
+    # 旧実装は `windows[0]`（3日間で最初の観測好機）を根拠にしていたため、今夜が
+    # 曇天で明晩が晴天だと「明晩の窓」を今夜として描画し、○ を出していた（実測）。
+    night_date = _first_night_date(hours)
+    tonight = [h for h in (hours or []) if _same_night(h, night_date)]
+    tonight_max = max([h["cloud_cover"] for h in tonight
+                       if h.get("cloud_cover") is not None], default=None)
+    v = _verdict(tonight_max)
+    win = next((w for w in (windows or [])
+                if _same_night({"time": str(w.get("start") or "")}, night_date)), {})
     has_rain = bool(rain_panels)
     H = 1010 if not (sat or has_rain) else (1180 if (sat and has_rain) else 1010)
     if sat and has_rain:
@@ -151,11 +175,17 @@ def build_sheet(*, place, lat, lon, hours, windows, moon, sat=None, rain_panels=
     d.rounded_rectangle([28, 64, W - 28, 170], radius=16, fill=PANEL, outline=LINE)
     d.text((46, 74), v[0], font=load_font(56, True), fill=v[2])
     d.text((116, 74), v[1], font=load_font(30, True), fill=FG)
-    d.text((116, 116), "{} 〜 {}・雲量 {}〜{}%・月照度 {}・月の出 {}".format(
-        (win.get("start") or "")[5:].replace("T", " "),
-        (win.get("end") or "")[5:].replace("T", " "),
-        win.get("min_cloud"), win.get("max_cloud"), moon.get("illumination_pct"),
-        _hm(moon.get("moonrise"))), font=load_font(18), fill=DIM)
+    if win.get("start"):
+        _span = "{} 〜 {}・雲量 {}〜{}%".format(
+            str(win["start"])[5:].replace("T", " "),
+            str(win.get("end") or "")[5:].replace("T", " "),
+            win.get("min_cloud"), win.get("max_cloud"))
+    else:
+        _span = "今夜の観測好機なし・雲量の最大 {}".format(
+            "-" if tonight_max is None else "{}%".format(tonight_max))
+    d.text((116, 116), "{}・月照度 {}・月の出 {}".format(
+        _span, moon.get("illumination_pct"), _hm(moon.get("moonrise"))),
+        font=load_font(18), fill=DIM)
 
     # --- 雲量タイムライン
     _card(d, [28, 184, W - 28, 470], "☁ 雲量の推移（予報・1時間ごと）")
@@ -166,12 +196,6 @@ def build_sheet(*, place, lat, lon, hours, windows, moon, sat=None, rain_panels=
         lx += 26 + d.textlength(lab, font=load_font(14))
     d.line([lx + 8, 198, lx + 8, 214], fill=BLUE, width=2)
     d.text((lx + 16, 197), "月の出", font=load_font(14), fill=DIM)
-    night_date = None
-    if win.get("start"):
-        try:
-            night_date = dt.date.fromisoformat(str(win["start"])[:10])
-        except ValueError:
-            night_date = None
     bars = _night_row(d, [46, 226, W - 46, 330], hours, "今夜 18:00 → 翌 06:00",
                       moon, 18, 30, night_date)
     # 2 段目は「明日の夜」= night_date の翌日を 18:00 とする。k は 1 段目より 24 進める。
@@ -260,7 +284,9 @@ def observing_sheet(place=None, lat=None, lon=None, band="infrared"):
 
     la = as_float(lat, None, -90.0, 90.0)
     lo = as_float(lon, None, -180.0, 180.0)
-    aw = wa.astronomy_weather(place=place, latitude=la, longitude=lo)
+    # include_rain=False: 雨雲はこの関数の下で自分で取る（旧実装は
+    # astronomy_weather に作らせた雨雲を捨てて rain_images をもう一度呼んでいた＝二重取得）。
+    aw = wa.astronomy_weather(place=place, latitude=la, longitude=lo, include_rain=False)
     sc = aw.structuredContent or {}
     if sc.get("error"):
         return CallToolResult(content=[TextContent(type="text", text=str(sc["error"]))],
@@ -288,8 +314,11 @@ def observing_sheet(place=None, lat=None, lon=None, band="infrared"):
     except Exception as e:
         rain_note = "雨雲: 取得できませんでした（{}）".format(str(e)[:80])
 
-    img, verify = build_sheet(place=site, lat=la, lon=lo, hours=sc["hourly"],
-                              windows=sc["windows"], moon=sc["moon"],
+    # hours は「暗い時間帯の全時刻」（night_hours）。`hourly` は観測好機の時間だけなので、
+    # それを渡すと曇りの棒が描けない（旧実装）。古いサーバとの互換で hourly に落とす。
+    img, verify = build_sheet(place=site, lat=la, lon=lo,
+                              hours=sc.get("night_hours") or sc.get("hourly") or [],
+                              windows=sc.get("windows") or [], moon=sc.get("moon") or {},
                               sat=sat_img, rain_panels=panels, sat_obs=sat_obs,
                               source_note="気象庁 ひまわり9号（MSC）" if sat_img else "")
     jpeg = encode_jpeg(img)

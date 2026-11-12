@@ -311,7 +311,11 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
     days = as_int(days, 3, 1, 7)
     max_cloud = as_float(max_cloud, 40.0, 0.0, 100.0)
     sun_alt_max = as_float(sun_alt_max, -15.0, -30.0, -1.0)
-    lat, lon = latitude, longitude
+    # 数値でない緯度経度は API へ投げる前に弾く。旧実装は `lat, lon = latitude, longitude`
+    # の素通しで、"abc" がそのままパラメータになり、`latitude=999` も素通りして
+    # structuredContent の lat が str になっていた（実測）。
+    lat = as_float(latitude, None, -90.0, 90.0)
+    lon = as_float(longitude, None, -180.0, 180.0)
     if lat is None or lon is None:
         if not place:
             return CallToolResult(
@@ -367,6 +371,19 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
                                  sun_alts=sun_alts, sun_alt_max=sun_alt_max)
     name = place or f"({lat},{lon})"
 
+    # 判断シートのタイムライン用に「暗い時間帯の**全**時刻」を渡す。
+    # `hourly` は観測好機（雲量≤max_cloud）の時間しか入らないため、シート側では
+    # 雲量が上限を超える時間が構造上存在せず、「曇り（>50%）」の赤い棒と
+    # 「× 不向き（>60%）」の判定が永久に到達不能だった（実測）。
+    _cloud_all = h.get("cloud_cover") or []
+    _vis_all = h.get("visibility") or []
+    night_hours = [{"time": times[i],
+                    "cloud_cover": _cloud_all[i] if i < len(_cloud_all) else None,
+                    "visibility_m": _vis_all[i] if i < len(_vis_all) else None,
+                    "sun_alt_deg": sun_alts[i] if i < len(sun_alts) else None}
+                   for i in range(len(times))
+                   if _is_dark(i, sun_alts, h, sun_alt_max)]
+
     # 気象庁の雨雲・降水画像（日本国内のみ・取得失敗時は省略）
     image_blocks = []
     image_sc = {"source": "open-meteo.com (CC BY 4.0)"}
@@ -405,8 +422,11 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
     if not windows:
         lines = [f"🔭 **{name}** 今後{days}日間: 条件を満たす観測時間帯は見つかりませんでした（太陽高度≤{sun_alt_max:g}°・雲量≤{max_cloud:g}%・風速≤15km/h）。"]
         # 最も雲が少ない「暗い」時間帯を1つ提示
-        night_clouds = [(times[i], h["cloud_cover"][i]) for i in range(len(times))
-                        if _is_dark(i, sun_alts, h, sun_alt_max)]
+        # cloud_cover / visibility は API が返さないことがある（欠測）。直接添字すると
+        # KeyError が漏れ、None が混じると min() が TypeError になる（実測）。
+        _cloud = h.get("cloud_cover") or []
+        night_clouds = [(times[i], _cloud[i]) for i in range(min(len(times), len(_cloud)))
+                        if _cloud[i] is not None and _is_dark(i, sun_alts, h, sun_alt_max)]
         if night_clouds:
             best = min(night_clouds, key=lambda x: x[1])
             lines.append(f"最もマシな時間帯: {_fmt_day_hm(best[0])} 頃 雲量 {best[1]}%")
@@ -418,7 +438,9 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
             structuredContent={"place": name, "lat": lat, "lon": lon, "days": days,
                                "max_cloud": max_cloud, "sun_alt_max": sun_alt_max,
                                "sun_alt_source": sun_alt_source,
-                               "moon": moon, "windows": [], "note": "no suitable window", **image_sc},
+                               "moon": moon, "windows": [], "hourly": [],
+                               "night_hours": night_hours,
+                               "note": "no suitable window", **image_sc},
         )
 
     lines = [f"🔭 **{name}** 今後{days}日間の天体観測チャンス（太陽高度 ≤ {sun_alt_max:g}° の暗い時間帯のみ）:"]
@@ -456,7 +478,7 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
                                         "min_cloud": w["min_cloud"], "max_cloud": w["max_cloud"],
                                         "min_sun_alt": w["min_sun_alt"], "max_sun_alt": w["max_sun_alt"]}
                                        for w in windows[:10]],
-                           "hourly": details, **image_sc},
+                           "hourly": details, "night_hours": night_hours, **image_sc},
     )
 
 
