@@ -99,7 +99,7 @@ def jaxa_dataset_search(query: str, limit: int = 10) -> CallToolResult:
         limit: 返す件数（既定 10、最大 100）。
     """
     limit = as_int(limit, 10, 1, 100)
-    q = (query or "").strip().lower()
+    q = str(query or "").strip().lower()
     if not q:
         return CallToolResult(
             content=[TextContent(type="text", text="検索語を指定してください（例: GSMaP, ALOS, GCOM, precip）。")],

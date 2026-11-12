@@ -59,7 +59,7 @@ def mars_rover_status(rover: str = "curiosity", show_photos: bool = True) -> Cal
             天気フィードが稼働しているのは現状 MSL(キュリオシティ) のみ。
         show_photos: 保持（互換用。Mars Rover Photos API は廃止済みのため取得しない）。
     """
-    rover = (rover or "curiosity").strip().lower()
+    rover = str(rover or "curiosity").strip().lower()
     rover_ja = ROVER_JA.get(rover, rover)
     try:
         weather = _get_mars_weather(rover)

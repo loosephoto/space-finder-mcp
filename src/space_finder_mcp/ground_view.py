@@ -41,7 +41,7 @@ from .input_utils import as_float
 _LOCAL = local_appdata()
 CACHE_DIR = os.path.join(_LOCAL, "Temp", "space_finder_mcp")
 CATALOG_CSV = os.path.join(CACHE_DIR, "stars_hip85.csv")
-SKYFIELD_DIR = os.path.join(_LOCAL, "Temp", "skyfield_data")
+# 天体暦の置き場は `ephemeris.DATA_DIR`（複数モジュールで共有）が持つ。
 CATALOG_URL = ("https://vizier.cds.unistra.fr/viz-bin/asu-tsv?-source=I/239/hip_main"
                "&-out=HIP,_RA,_DE,Vmag,B-V&-out.max=unlimited&Vmag=%3C8.5")
 CATALOG_LABEL = "Hipparcos 実星表（Vmag<8.5）"
@@ -133,9 +133,9 @@ _CARD = {0: "北", 45: "北東", 90: "東", 135: "南東", 180: "南", 225: "南
 
 # ---------- データ（星表・暦） ----------
 def _load_ephemeris():
-    from skyfield.api import Loader
-    load = Loader(SKYFIELD_DIR, verbose=False)
-    return load.timescale(), load("de421.bsp")
+    """(timescale, ephemeris) を返す（`ephemeris` の共有ローダ。1 度だけ開く）。"""
+    from .ephemeris import load as _load_shared
+    return _load_shared()
 
 
 def _read_catalog_csv(path):

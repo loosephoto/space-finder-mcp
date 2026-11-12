@@ -157,7 +157,7 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
         limit: 各カテゴリの返す件数（既定 10、最大 20）。forecast では活動領域の表示数。
     """
     limit = as_int(limit, 10, 1, 20)
-    kind = (kind or "all").strip().lower()
+    kind = str(kind or "all").strip().lower()
     if kind == "forecast":
         # 予報は DONKI に存在しない（DONKI は観測・警報の記録で、フレア発生確率・
         # 3日予報・活動領域別確率は NOAA SWPC のプロダクト）。よって障害時の

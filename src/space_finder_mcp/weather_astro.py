@@ -523,7 +523,7 @@ def _geocode(place: str) -> Optional[dict]:
 
     日本語地名は英語名へマッピングして解決を試みる（Open-Meteo は英語に強い）。
     """
-    q = place.strip()
+    q = str(place or "").strip()
     # 既知の観測地は正確な緯度経度を優先（ジオコーディングの誤りを回避）
     if q in _KNOWN_COORDS:
         return dict(_KNOWN_COORDS[q])
@@ -531,7 +531,8 @@ def _geocode(place: str) -> Optional[dict]:
     if q in _JA_PLACES:
         q = _JA_PLACES[q]
     reachable = False
-    for name in dict.fromkeys((q, place.strip())):   # 同一地名の二重リクエストを避ける
+    # 入力そのものと前後空白を除いた版で引く（str 以外が来ても例外にしない）
+    for name in dict.fromkeys((q, str(place).strip())):   # 同一地名の二重リクエストを避ける
         try:
             r = requests.get("https://geocoding-api.open-meteo.com/v1/search",
                              params={"name": name, "count": 1, "format": "json"},
@@ -571,7 +572,7 @@ def _geocode_nominatim(place: str) -> Optional[dict]:
         if wait > 0:
             _time.sleep(wait)
         _geocode_nominatim._last_call = _time.time()
-    q = place.strip()
+    q = str(place or "").strip()
     # Nominatim は日本語/英語どちらも処理できるが、Open-Meteo と同じ英語変換を先に試す
     query = _JA_PLACES.get(q, q)
     ua = {"User-Agent": "space-finder-mcp/0.22 (MCP; Open-Meteo/Nominatim geocode)"}

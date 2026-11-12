@@ -102,7 +102,7 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 
 ## 📝 更新履歴
 
-各バージョンの変更内容は **[GitHub Releases](https://github.com/loosephoto/space-finder-mcp/releases)** に記載しています（最新: [v0.58.0](https://github.com/loosephoto/space-finder-mcp/releases/tag/v0.58.0)）。
+各バージョンの変更内容は **[GitHub Releases](https://github.com/loosephoto/space-finder-mcp/releases)** に記載しています（最新: [v0.59.0](https://github.com/loosephoto/space-finder-mcp/releases/tag/v0.59.0)）。
 
 **README では履歴を二重管理しません** — 同じ内容を2か所に書くと必ず片方が古くなるため、変更点はリリース時に GitHub Releases の本文へ書きます（手順は [`CLAUDE.md`](CLAUDE.md) の「リリース手順」）。
 
@@ -1097,6 +1097,7 @@ src/space_finder_mcp/
 ├── nasa_budget.py       # api.nasa.gov のレート枠管理（投げる前の check/429 の記録/キーの伏せ字化）
 ├── satellite_map.py     # sat_ground_track（衛星の地上軌道マップ, CelesTrak+SGP4+Blue Marble）
 ├── cache.py             # キャッシュ基盤（TTLメモリ/ディスク資産キャッシュ。ツール定義なし）
+├── ephemeris.py         # 天体暦(JPL DE421)と星座境界の共有ローダ（1度だけ開く。ツール定義なし）
 ├── jsonio.py            # structuredContent の JSON 正規化（numpy 型/NaN → JSON 七型。唯一の境界）
 ├── env_config.py        # リポジトリ直下 .env の読み込み（標準ライブラリのみ。ツール定義なし）
 ├── wikidata_lookup.py   # reverse_lookup（逆引き歴史Q&A）

@@ -866,10 +866,20 @@ def concurrency_report(timeout: float = 120.0) -> list:
 
 
 def fuzz_args(only=None, timeout=60, live=False) -> list:
-    """数値引数へ不正値（"abc" / None / []）を入れて例外が漏れないか検査する。
+    """全引数へ不正値を入れて例外が漏れないか検査する。
 
     MCPクライアントは型を保証しないため、int()/float() を引数へ直に適用すると
-    ValueError がツール外へ漏れる。全ツール入口で input_utils を通していることを機械的に確認する。
+    ValueError が、str 引数へ `.strip()` を直に適用すると AttributeError が
+    ツール外へ漏れる。全ツール入口で input_utils / str() 正規化を通していることを
+    機械的に確認する。
+
+    v0.59.0 の強化点:
+      - 数値注釈の引数には**範囲外の整数**（-999 / 99999 / 0）も入れる。
+        旧実装は "abc" などの文字列だけを入れており、`calendar_events(year=-999)` が
+        ValueError（year is out of range）を漏らすのを見逃していた（実測）。
+      - 数値注釈でない引数にも不正値を入れる（旧実装は数値引数だけを対象にしていたため、
+        `sat_tle(name=True)` の AttributeError を検出できなかった）。
+      - 1 呼び出しが重いツールは文字列引数の総当たりから外す（実行時間の抑制）。
     """
     import inspect as _inspect
     import requests
@@ -886,6 +896,12 @@ def fuzz_args(only=None, timeout=60, live=False) -> list:
     names = sorted(mcp._tool_manager._tools)
     if only:
         names = [n for n in names if n in only]
+    # 数値引数は範囲外の整数まで、文字列引数は型違いまで試す
+    NUM_BAD = ("abc", "5件", [], {}, -999, 99999, 0)
+    TEXT_BAD = ("abc", 99999, True)
+    # 実測が重いツール（1 呼び出し 5 秒以上）は文字列引数の総当たりから外す
+    SLOW_TOOLS = {"space_calendar", "sky_map_with_satellites", "solar_eclipse_series",
+                  "moon_phase_map", "observing_sheet", "astronomy_weather"}
     rows = []
     try:
         for name in names:
@@ -894,9 +910,13 @@ def fuzz_args(only=None, timeout=60, live=False) -> list:
             base = _fill_kwargs(fn)
             for p in _inspect.signature(fn).parameters.values():
                 ann = str(p.annotation)
-                if not any(k in ann for k in ("int", "float")):
+                if any(k in ann for k in ("int", "float")):
+                    bads = NUM_BAD
+                elif name in SLOW_TOOLS:
                     continue
-                for bad in ("abc", "5件", [], {}):
+                else:
+                    bads = TEXT_BAD
+                for bad in bads:
                     kw = dict(base)
                     kw[p.name] = bad
                     out = {}
@@ -1040,7 +1060,7 @@ def main() -> int:
         if args.json:
             print(json.dumps({"mode": "fuzz", "rows": rows, "problems": bad}, ensure_ascii=False, indent=2))
         else:
-            print("=== 不正引数の注入テスト（数値引数 × 4種）===")
+            print("=== 不正引数の注入テスト（数値引数 × 7種 / 文字列引数 × 3種）===")
             for r in bad:
                 # 行によっては detail が無い（TIMEOUT など）ので .get で埋める
                 print("  EXC {tool} {arg}={value}  {detail}".format(
@@ -1111,8 +1131,12 @@ def main() -> int:
         rows = run_all(only=only, timeout=args.timeout, offline=False)
         out = [r for r in rows if r["tool"] in DRAWN_FIGURE_TOOLS]
         extra_rows = figure_extra_rows(timeout=args.timeout) if not only else []
+        # 図を返すはずのツールが error 結果（= 画像未生成）を返した場合も失敗として数える。
+        # 旧実装は ERROR_RESULT を素通りさせていたため、主 10 ツールが全部画像を返さなくても
+        # exit 0 になっていた（実測）。外部 API 障害でも落ちるが、黙って通すより再実行で
+        # 気付けるほうが良い（ゲートは緩めない方針）。
         bad = [r for r in out + extra_rows
-               if r["status"] in ("FIGURE_INVALID", "TIMEOUT", "LEAKED_EXCEPTION")
+               if r["status"] in ("FIGURE_INVALID", "TIMEOUT", "LEAKED_EXCEPTION", "ERROR_RESULT")
                or r.get("figure_issues")]
         if args.json:
             print(json.dumps({"mode": "figures", "rows": out, "problems": bad},
@@ -1135,8 +1159,13 @@ def main() -> int:
                     c=(r.get("conic") or {}).get("kind")))
                 for i in r.get("figure_issues", []):
                     print("      ! " + i)
+            missing = [r for r in out if r["status"] == "ERROR_RESULT"]
+            for r in missing:
+                print("  NG  {t:30s} 図が未生成（error={e}）".format(
+                    t=r["tool"], e=str((r.get("detail") or "")[:60])))
             print("  描画系:", len(out), "／ figure 未対応:",
                   sum(1 for r in out if not r.get("figure")),
+                  "／ error 結果:", len(missing),
                   "／ 追加経路:", len(extra_rows))
         return 1 if bad else 0
 

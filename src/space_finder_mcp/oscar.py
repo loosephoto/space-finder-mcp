@@ -209,10 +209,10 @@ def satellite_status(query: Optional[str] = None, agency: Optional[str] = None,
         limit: 返す件数（既定 10、最大 20）。
     """
     limit = as_int(limit, 10, 1, 20)
-    query_l = (query or "").strip().lower()
+    query_l = str(query or "").strip().lower()
     # 和名（ひまわり / だいち 等）は英語名へ展開してから照合する（OSCAR は英語のみ）
     q_terms = [t.lower() for t in expand_terms(query)] if query else []
-    agency_l = (agency or "").strip().lower()
+    agency_l = str(agency or "").strip().lower()
 
     try:
         cat = _catalogue()

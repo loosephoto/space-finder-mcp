@@ -839,8 +839,10 @@ def calendar_events(year: Optional[int] = None, month: Optional[int] = None, pla
     if month is not None and (month_i is None or not (1 <= month_i <= 12)):
         return _err("month は 1〜12 の範囲で指定してください。受け取った値: {!r}"
                     .format(str(month)[:40]))
-    if year is not None and year_i is None:
-        return _err("year は西暦の4桁の整数で指定してください。受け取った値: {!r}"
+    # dt.date() は年 0〜9999 の外で ValueError を投げる（実測: year=-999 / 99999 / False）。
+    # 一覧とカレンダーで扱える範囲を明示し、例外をツール外へ漏らさない。
+    if year is not None and (year_i is None or not (1900 <= year_i <= 2100)):
+        return _err("year は西暦の4桁（1900〜2100）で指定してください。受け取った値: {!r}"
                     .format(str(year)[:40]))
     kinds_set, kerr = _parse_kinds(kinds)
     if kerr:

@@ -57,7 +57,7 @@ def eso_seeing(hours: int = 12, fields: str = _DEFAULT_FIELDS) -> CallToolResult
     to = now.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
     _fr_ms = (now - timedelta(hours=hours)).timestamp() * 1000
     _to_ms = now.timestamp() * 1000
-    field_list = [f.strip() for f in fields.split(",") if f.strip()]
+    field_list = [f.strip() for f in str(fields or "").split(",") if f.strip()]
     # 全フィールド取得してフィルタ（APIは複数fieldを,区切りで受けるが、1つずつの方が安定）
     results = {}
     errs = []

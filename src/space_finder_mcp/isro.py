@@ -59,7 +59,7 @@ def isro_data(kind: str = "spacecrafts", query: Optional[str] = None,
         query: 部分一致検索語（例: "cartosat", "chandrayaan"）。省略で全件。
         limit: 返す件数（既定 20、最大 100）。
     """
-    kind = (kind or "spacecrafts").strip().lower()
+    kind = str(kind or "spacecrafts").strip().lower()
     if kind not in _ENDPOINTS:
         return CallToolResult(
             content=[TextContent(type="text", text=f"kind は {', '.join(_ENDPOINTS)} のいずれかを指定してください。")],
@@ -75,7 +75,7 @@ def isro_data(kind: str = "spacecrafts", query: Optional[str] = None,
         )
 
     if query:
-        q = query.strip().lower()
+        q = str(query).strip().lower()
         def _match(r):
             hay = " ".join([
                 str(r.get("name", "")).lower(),

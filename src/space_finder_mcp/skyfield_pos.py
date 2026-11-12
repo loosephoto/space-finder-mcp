@@ -6,16 +6,15 @@ Web API（Astronomy API / API Ninjas）はキー登録が必要なため不使�
 """
 from __future__ import annotations
 
-import os
-
 from mcp.types import CallToolResult, TextContent
-from .cache import local_appdata
-from .input_utils import as_float
-from .places import CITY_COORDS as _KNOWN_COORDS
 
-_DATA_DIR = os.path.join(local_appdata(), "Temp", "skyfield_data")
-os.makedirs(_DATA_DIR, exist_ok=True)
-os.environ.setdefault("HOME", _DATA_DIR)
+from .name_common import ResolverUnavailable
+from .input_utils import as_float
+from .places import resolve_place
+
+# 天体暦・星座データの置き場は `ephemeris` が持つ（cwd 非依存）。
+# 以前は import 時に `os.environ.setdefault("HOME", ...)` でプロセス環境変数を
+# 書き換えていたが、星座境界は Skyfield 同梱データなので HOME は不要（実測）。
 
 BODY_JA = {
     "sun": "太陽", "moon": "月", "mercury": "水星", "venus": "金星",
@@ -57,86 +56,111 @@ def _constellation_ja(abbr: str) -> str:
 
 
 def _load_skyfield():
-    from skyfield.api import Loader, position_of_radec, load_constellation_map, wgs84
-    # データをキャッシュディレクトリから読み込む（なければDL）
-    loader = Loader(_DATA_DIR, verbose=False)
-    ts = loader.timescale()
-    eph = loader("de421.bsp")
-    constellation_at = load_constellation_map()
-    return ts, eph, constellation_at, wgs84
+    """(timescale, ephemeris, 星座判定, wgs84) を返す（暦は共有ローダ）。"""
+    from skyfield.api import wgs84
+    from . import ephemeris
+    ts, eph = ephemeris.load()
+    return ts, eph, ephemeris.constellation_map(), wgs84
 
 
 def constellation_now(latitude=None, longitude=None, place=None, time_utc=None):
     """指定した観測地・日時で太陽・月・惑星の位置（高度・方位角・星座）を返す。
 
     「今夜東京で見える惑星は?」など。NASA JPL 天体暦 + Skyfield でローカル計算（認証不要）。
+    地名の解決は `places.resolve_place`（他ツールと同じ唯一の実装）を通すので、
+    地名解決サービスに繋がらないときは `error="resolver_unavailable"`、
+    地名が無いときは `error="place not resolved"` を返します（東京で代用しない）。
 
     Args:
         latitude: 観測地の緯度（例 東京 35.68）。place 指定時は省略可。
         longitude: 観測地の経度（例 東京 139.69）。
         place: 観測地名（既知テーブル）。緯度経度より優先。
-        time_utc: 観測時刻 "YYYY-MM-DD HH:MM"（UTC）。省略で現在。
+        time_utc: 観測時刻。ISO8601（"2026-10-31T12:00:00Z" / "2026-10-31 12:00"、
+            ±hh:mm のオフセットも可）。省略で現在。天体暦（DE421）の収録期間
+            1899-07-29〜2053-10-09 の外はエラー結果を返します。
     """
-    if place:
-        key = place.strip().lower()
-        match = None
-        for k, v in _KNOWN_COORDS.items():
-            if key == k.lower():
-                match = v
-                break
-        if match:
-            latitude, longitude = match
-        else:
-            # 既知テーブルにない任意の地名・施設 → Open-Meteo/Nominatim でジオコーディング
-            try:
-                from .weather_astro import _geocode
-                g = _geocode(place)
-            except Exception:
-                g = None
-            if g:
-                latitude, longitude = g["latitude"], g["longitude"]
-            else:
-                return CallToolResult(
-                    content=[TextContent(type="text", text="地名 " + place + " を解決できませんでした。緯度経度を直接指定してください。")],
-                    structuredContent={"error": "unknown place", "place": place,
-                                       "known": sorted(set(k for k in _KNOWN_COORDS))},
-                )
-    if latitude is None or longitude is None:
+    from .ground_view import EPH_MAX_UTC, EPH_MIN_UTC, _parse_when, ephemeris_range_error
+
+    # 範囲外の緯度経度は `places.resolve_place`（= as_float）が**クランプ**する契約なので
+    # （tests/test_places_and_split.py が既存挙動として固定）、ツール入口で明示的に弾く。
+    # 実測: latitude=999 が北極 90.0 に化けて「その座標で計算した」と誤認させていた。
+    if not place and (latitude is not None or longitude is not None):
+        _la = as_float(latitude, None)
+        _lo = as_float(longitude, None)
+        if (_la is None or _lo is None
+                or not (-90.0 <= _la <= 90.0) or not (-180.0 <= _lo <= 180.0)):
+            return CallToolResult(
+                content=[TextContent(type="text",
+                                     text="latitude（-90〜90）と longitude（-180〜180）は数値（度）で"
+                                          "指定してください。受け取った値: latitude={!r} / longitude={!r}"
+                                          .format(latitude, longitude))],
+                structuredContent={"error": "invalid coordinates", "latitude": str(latitude),
+                                   "longitude": str(longitude)},
+            )
+
+    try:
+        ll = resolve_place(place, latitude, longitude)
+    except ResolverUnavailable as ex:
         return CallToolResult(
-            content=[TextContent(type="text", text="観測地を指定してください。place（例 東京/Tokyo）または latitude/longitude。")],
-            structuredContent={"error": "location required"},
+            content=[TextContent(type="text",
+                                 text="観測地 '{}' を解決できませんでした（地名解決サービスに接続できません: {}）"
+                                      "。時間をおくか latitude/longitude を指定してください。".format(
+                                          place, str(ex)[:120]))],
+            structuredContent={"error": "resolver_unavailable", "place": str(place)},
         )
-    lat = as_float(latitude, None, -90.0, 90.0)
-    lon = as_float(longitude, None, -180.0, 180.0)
-    if lat is None or lon is None:
+    if ll is None and (latitude is not None or longitude is not None):
         return CallToolResult(
-            content=[TextContent(type="text", text="latitude（-90〜90）と longitude（-180〜180）は数値（度）で指定してください。")],
+            content=[TextContent(type="text",
+                                 text="latitude（-90〜90）と longitude（-180〜180）は数値（度）で指定してください。")],
             structuredContent={"error": "invalid coordinates", "latitude": str(latitude),
                                "longitude": str(longitude)},
         )
+    if ll is None:
+        if place:
+            return CallToolResult(
+                content=[TextContent(type="text",
+                                     text="観測地 '{}' を解決できませんでした。地名を変えるか "
+                                          "lat/lon を数値で指定してください。".format(place))],
+                structuredContent={"error": "place not resolved", "place": str(place)},
+            )
+        return CallToolResult(
+            content=[TextContent(type="text",
+                                 text="観測地を指定してください。place（例 東京/Tokyo）または latitude/longitude。")],
+            structuredContent={"error": "location required"},
+        )
+    lat, lon = ll
 
-    from skyfield.api import position_of_radec
+    parsed = _parse_when(time_utc)
+    if parsed == "bad":
+        return CallToolResult(
+            content=[TextContent(type="text",
+                                 text="time_utc は ISO8601（例 \"2026-10-31T12:00:00Z\" / "
+                                      "\"2026-10-31 12:00\"）で指定してください。")],
+            structuredContent={"error": "bad time", "time_utc": str(time_utc)},
+        )
+    _range = ephemeris_range_error(parsed)
+    if _range:
+        return CallToolResult(
+            content=[TextContent(type="text", text=_range)],
+            structuredContent={"error": "ephemeris_range", "time_utc": str(time_utc),
+                               "supported": "{} 〜 {}".format(
+                                   EPH_MIN_UTC.strftime("%Y-%m-%d"), EPH_MAX_UTC.strftime("%Y-%m-%d"))},
+        )
     try:
         ts, eph, constellation_at, wgs84 = _load_skyfield()
-    except Exception as e:
+    except Exception as e:                     # 天体暦の読み込み失敗を外へ漏らさない
         return CallToolResult(
             content=[TextContent(type="text", text="Skyfield 天体暦の読み込みに失敗しました: " + str(e))],
             structuredContent={"error": str(e)},
         )
 
-    import datetime as dt
-    if time_utc:
-        try:
-            t0 = dt.datetime.strptime(time_utc, "%Y-%m-%d %H:%M").replace(tzinfo=dt.timezone.utc)
-        except ValueError:
-            return CallToolResult(content=[TextContent(type="text", text="time_utc は YYYY-MM-DD HH:MM（UTC）形式で指定してください。")], structuredContent={"error": "bad time"})
-    else:
-        t0 = dt.datetime.now(dt.timezone.utc)
-    t = ts.from_datetime(t0)
+    from skyfield.api import position_of_radec
+    t = ts.utc(*parsed)
+    tstr = t.utc_strftime("%Y-%m-%d %H:%M")
     observer = wgs84.latlon(lat, lon)
     where = eph["earth"] + observer
 
-    lines = ["🌌 **天体の現在位置**（" + (place or f"{lat},{lon}") + "・" + t0.strftime("%Y-%m-%d %H:%M") + " UTC）:"]
+    lines = ["🌌 **天体の現在位置**（" + (place or f"{lat},{lon}") + "・" + tstr + " UTC）:"]
     results = []
     visible_any = False
     for name in BODIES:
@@ -158,15 +182,18 @@ def constellation_now(latitude=None, longitude=None, place=None, time_utc=None):
                "ra_hours": round(ra.hours, 3), "dec_deg": round(dec.degrees, 2)}
         results.append(rec)
         vis = "見えています▲" if visible else "地平線下"
-        lines.append("- **" + rec["body"] + "**: 高度 " + str(rec["altitude_deg"]) + "° / 方位 " + str(rec["azimuth_deg"]) + "° ／ " + rec["constellation_ja"] + "（" + c_abbr + "）" + vis)
+        lines.append("- **" + rec["body"] + "**: 高度 " + str(rec["altitude_deg"]) + "° / 方位 "
+                     + str(rec["azimuth_deg"]) + "° ／ " + rec["constellation_ja"] + "（" + c_abbr + "）" + vis)
 
     if not visible_any:
-        lines.append("🤖 【AIからのインテリジェントアドバイス】現在この観測地からは主要な天体がすべて地平線下です。日の入り後や日の出前に再確認するか、観測地を変更してください。")
+        lines.append("🤖 【AIからのインテリジェントアドバイス】現在この観測地からは主要な天体がすべて"
+                     "地平線下です。日の入り後や日の出前に再確認するか、観測地を変更してください。")
     else:
-        lines.append("🤖 【AIからのインテリジェントアドバイス】高度30°以上の天体は観測に適しています。空が暗く雲が少ないほど、惑星・月の観察がしやすいです。")
+        lines.append("🤖 【AIからのインテリジェントアドバイス】高度30°以上の天体は観測に適しています。"
+                     "空が暗く雲が少ないほど、惑星・月の観察がしやすいです。")
     lines.append("出典: NASA JPL 天体暦 (de421.bsp) + Skyfield ／ 星座判定は IAU 星座境界。")
     return CallToolResult(
         content=[TextContent(type="text", text=chr(10).join(lines))],
-        structuredContent={"place": place, "lat": lat, "lon": lon, "time_utc": t0.strftime("%Y-%m-%d %H:%M"),
+        structuredContent={"place": place, "lat": lat, "lon": lon, "time_utc": tstr,
                            "bodies": results, "source": "Skyfield + JPL de421"},
     )

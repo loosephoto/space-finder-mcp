@@ -662,7 +662,7 @@ def sat_tle(name: Optional[str] = None, norad_id: Optional[int] = None,
     if norad_id:
         params["CATNR"] = norad_id
     elif name:
-        nm = name.strip().lower()
+        nm = str(name).strip().lower()
         # 和名（ひので / ひまわり9号 等）は英語名へ展開してから照合する
         terms = [t.lower() for t in expand_terms(name)]
         # 既知の衛星名をNORAD IDに解決（完全一致を最優先）
@@ -687,7 +687,7 @@ def sat_tle(name: Optional[str] = None, norad_id: Optional[int] = None,
                 )
             else:
                 # 解決できない名前は、和名の英語名があればそれで CelesTrak の名前検索へ
-                params["NAME"] = terms[1] if len(terms) > 1 else name.strip()
+                params["NAME"] = terms[1] if len(terms) > 1 else str(name).strip()
     elif group:
         params["GROUP"] = group
     else:

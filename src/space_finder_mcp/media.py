@@ -314,8 +314,8 @@ def search_space_audio(query: str, limit: int = 3, kind: str = "auto") -> CallTo
     回答時はこのリンクをそのまま提示してください。
     """
     limit = as_int(limit, 3, 1, 10)
-    q = (query or "").strip()
-    kind = (kind or "auto").lower()
+    q = str(query or "").strip()
+    kind = str(kind or "auto").lower()
 
     want_podcast = kind in ("auto", "podcast")
     want_fx = kind in ("auto", "sound_effect")

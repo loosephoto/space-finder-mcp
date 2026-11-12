@@ -18,13 +18,12 @@ import copy
 import datetime
 import io
 import math
-import os
 import re
 from typing import Optional
 
 from mcp.types import CallToolResult, ImageContent, TextContent
 
-from .cache import TTL_DAILY, local_appdata, ttl_cache
+from .cache import TTL_DAILY, ttl_cache
 from .img_common import (as_image, figure_notes, figure_payload,
                          figure_text_block, load_font, media_link_line,
                          save_output, scale_spec, view_spec)
@@ -32,8 +31,6 @@ from .input_utils import as_float
 from .name_common import ResolverUnavailable
 from .places import resolve_place as _resolve_place
 
-_DATA_DIR = os.path.join(local_appdata(), "Temp", "skyfield_data")
-os.makedirs(_DATA_DIR, exist_ok=True)
 
 # 太陽・月の実半径 (km)
 _R_SUN = 696000.0
@@ -46,6 +43,40 @@ _SEARCH_DAYS = 1400
 # 新月の粗い走査（15分刻み）で取りこぼさないための余裕（度）。
 # 15分刻みのサンプリング誤差 ~0.07° を吸収し、縁の食も候補に残す。
 _SCREEN_MARGIN_DEG = 0.1
+
+def _eph_range_error_result(ex):
+    """Skyfield の EphemerisRangeError をエラー結果にする（例外を外へ漏らさない）。"""
+    from .ground_view import EPH_MAX_UTC, EPH_MIN_UTC
+    supported = "{} 〜 {}".format(EPH_MIN_UTC.strftime("%Y-%m-%d"),
+                                 EPH_MAX_UTC.strftime("%Y-%m-%d"))
+    return CallToolResult(
+        content=[TextContent(type="text",
+                             text="天体暦（JPL DE421）は {} の期間だけを収録しています。"
+                                  "date をこの範囲内で指定してください（{}）".format(
+                                      supported, str(ex)[:120]))],
+        structuredContent={"error": "ephemeris_range", "supported": supported})
+
+
+def _ephemeris_range_guard(parts):
+    """UTC の (y, mo, d, ...) が暦の収録期間外ならエラー結果を返す（範囲内は None）。"""
+    from .ground_view import EPH_MAX_UTC, EPH_MIN_UTC, ephemeris_range_error
+    msg = ephemeris_range_error(parts)
+    if not msg:
+        return None
+    supported = "{} 〜 {}".format(EPH_MIN_UTC.strftime("%Y-%m-%d"),
+                                 EPH_MAX_UTC.strftime("%Y-%m-%d"))
+    return CallToolResult(
+        content=[TextContent(type="text", text=msg)],
+        structuredContent={"error": "ephemeris_range", "supported": supported})
+
+
+def _search_days_clamped(days):
+    """検索窓を天体暦の収録末までに収める（超えると EphemerisRangeError で落ちる）。"""
+    from .ground_view import EPH_MAX_UTC
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    left = (EPH_MAX_UTC.date() - today).days - 1
+    return max(30, min(int(days), left))
+
 
 def _local_tz(lat, lon):
     """緯度経度から現地タイムゾーンの UTC オフセット(時間, DST込み)を Open-Meteo で取得。
@@ -78,10 +109,13 @@ def _tz_label(off):
 
 
 def _load():
-    from skyfield.api import Loader
-    loader = Loader(_DATA_DIR, verbose=False)
-    eph = loader("de421.bsp")
-    return loader, eph
+    """(loader シム, ephemeris) を返す（`ephemeris` の共有ローダ。1 度だけ開く）。
+
+    呼び出し側は `loader.timescale()` だけを使うので、互換シムを返して共有の timescale を
+    渡す（毎回 SPK を開き直すとファイル記述子が解放されない。実測で ResourceWarning）。
+    """
+    from .ephemeris import timescale_shim
+    return timescale_shim()
 
 
 def _geom_many(site, times, sun, moon):
@@ -315,15 +349,23 @@ def solar_eclipse_series(date: Optional[str] = None, place: Optional[str] = None
                                      text="date の日付が存在しません（受け取った値: {}）。例: 2026-02-28".format(date))],
                 structuredContent={"error": "bad date", "date": str(date)},
             )
+        _r = _ephemeris_range_guard(dates[0])
+        if _r is not None:
+            return _r
         date_str = "{}年{}月{}日".format(*dates[0])
         date_disp = date_str
     else:
         # 次の日食を自動検索（新月近傍のみ調べて高速化。約23秒かかるため
         # 緯度経度を丸めたキーで1日キャッシュし、戻り値は後段で書き換えるので deepcopy）
-        days_win = _SEARCH_DAYS
-        res = copy.deepcopy(_next_eclipse_search(
-            round(ll[0], 2), round(ll[1], 2),
-            datetime.datetime.now(datetime.timezone.utc).date().isoformat(), days_win, round(float(tz), 2)))
+        days_win = _search_days_clamped(_SEARCH_DAYS)
+        try:
+            res = copy.deepcopy(_next_eclipse_search(
+                round(ll[0], 2), round(ll[1], 2),
+                datetime.datetime.now(datetime.timezone.utc).date().isoformat(), days_win, round(float(tz), 2)))
+        except Exception as _ex:               # 暦の端に触れたときだけエラー結果へ
+            if type(_ex).__name__ != "EphemerisRangeError":
+                raise
+            return _eph_range_error_result(_ex)
         day_found, found = res if res else (None, None)
         dy, dmo, dd = day_found if day_found else (None, None, None)
         if not found:
@@ -343,8 +385,13 @@ def solar_eclipse_series(date: Optional[str] = None, place: Optional[str] = None
     ev = None
     for (y, mo, d) in dates:
         # 指定日の判定も約7秒かかるため、丸めた緯度経度＋日付のキーで再利用
-        ev = copy.deepcopy(_scan_day_cached(
-            round(ll[0], 2), round(ll[1], 2), y, mo, d, round(float(tz), 2)))
+        try:
+            ev = copy.deepcopy(_scan_day_cached(
+                round(ll[0], 2), round(ll[1], 2), y, mo, d, round(float(tz), 2)))
+        except Exception as _ex:               # 暦の端に触れたときだけエラー結果へ
+            if type(_ex).__name__ != "EphemerisRangeError":
+                raise
+            return _eph_range_error_result(_ex)
         if ev:
             break
     if ev is not None and not ev.get("visible", True):

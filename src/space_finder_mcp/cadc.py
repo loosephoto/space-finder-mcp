@@ -87,10 +87,10 @@ def cadc_observations(object_name: Optional[str] = None,
     }
     resolved = None
     if object_name:
-        key = object_name.strip().lower()
+        object_name = str(object_name).strip()
+        key = object_name.lower()
         if key in _KNOWN:
             ra, dec = _KNOWN[key]
-            object_name = object_name.strip()
             resolved = {"input": object_name, "matched": object_name, "via": "内蔵テーブル"}
         else:
             # 内蔵テーブルに無い名前は Sesame/CDS（SIMBAD・NED 横断）で座標解決する。
@@ -133,7 +133,7 @@ def cadc_observations(object_name: Optional[str] = None,
     # ADQL クエリ構築（位置列は caom2.Plane にあるため JOIN が必要）
     tel_cond = ""
     if telescope:
-        tel_cond = f" AND UPPER(o.telescope_name) LIKE '%{telescope.upper()}%'"
+        tel_cond = f" AND UPPER(o.telescope_name) LIKE '%{str(telescope).upper()}%'"
 
     query = (
         f"SELECT TOP {limit} o.obsID, o.observationID, o.telescope_name, "

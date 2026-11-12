@@ -177,13 +177,13 @@ def eodashboard_collections(themes: Optional[str] = None, agency: Optional[str] 
     # 絞り込み
     results = cols
     if themes:
-        want = {t.strip().lower() for t in themes.split(",")}
+        want = {t.strip().lower() for t in str(themes).split(",")}
         results = [c for c in results if any(t.lower() in want for t in c["themes"])]
     if agency:
-        ag = agency.strip().lower()
+        ag = str(agency or "").strip().lower()
         results = [c for c in results if any(ag in a.lower() for a in c["agency"])]
     if keyword:
-        kw = keyword.strip().lower()
+        kw = str(keyword).strip().lower()
         results = [c for c in results
                    if kw in (c["title"] + " " + c["subtitle"] + " " + c["name"] + " "
                              + " ".join(c["tags"]) + " " + " ".join(c["satellites"])).lower()]
@@ -231,7 +231,7 @@ def eodashboard_detail(identifier: str, show_image: bool = True) -> CallToolResu
                     大まかな名前でも探す。
         show_image: サムネイルをチャットにインライン表示するか（既定 True）。
     """
-    ident = (identifier or "").strip()
+    ident = str(identifier or "").strip()
     if not ident:
         return CallToolResult(
             content=[TextContent(type="text", text="identifier を指定してください（例: N1_NO2, sea_surface_temperature）。")],

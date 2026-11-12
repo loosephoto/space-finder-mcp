@@ -86,6 +86,7 @@ uv run python scripts/check-tools.py                  # 全67ツール実呼び�
 src/space_finder_mcp/
 ├── server.py        # FastMCP サーバー定義・67ツール登録
 ├── cache.py         # キャッシュ基盤（TTLメモリ / ディスク資産）
+├── ephemeris.py     # 天体暦(JPL DE421)・星座境界の共有ローダ（1度だけ開く）
 ├── img_common.py    # 画像共通（フォント探索 / JPEG化 / アンチメリジアン分割）
 ├── jsonio.py        # structuredContent の JSON 正規化（唯一の境界。numpy型/NaN を JSON 七型へ）
 ├── places.py        # 地名→緯度経度の共有テーブルと解決（skyfield_pos / solar_eclipse が使う）

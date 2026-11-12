@@ -92,14 +92,14 @@ def power_climate(latitude: float, longitude: float,
     today = dt.datetime.now(dt.timezone.utc).date()
     if end:
         try:
-            end_d = dt.date.fromisoformat(end)
+            end_d = dt.date.fromisoformat(str(end))
         except ValueError:
             return CallToolResult(content=[TextContent(type="text", text="end は 'YYYY-MM-DD' 形式で指定してください。")], structuredContent={"error": "bad end"})
     else:
         end_d = today
     if start:
         try:
-            start_d = dt.date.fromisoformat(start)
+            start_d = dt.date.fromisoformat(str(start))
         except ValueError:
             return CallToolResult(content=[TextContent(type="text", text="start は 'YYYY-MM-DD' 形式で指定してください。")], structuredContent={"error": "bad start"})
     else:
