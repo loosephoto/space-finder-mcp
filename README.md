@@ -102,7 +102,7 @@ Hermes Agent のようなリッチなクライアントは `ImageContent` をそ
 
 ## 📝 更新履歴
 
-各バージョンの変更内容は **[GitHub Releases](https://github.com/loosephoto/space-finder-mcp/releases)** に記載しています（最新: [v0.60.0](https://github.com/loosephoto/space-finder-mcp/releases/tag/v0.60.0)）。
+各バージョンの変更内容は **[GitHub Releases](https://github.com/loosephoto/space-finder-mcp/releases)** に記載しています（最新: [v0.61.0](https://github.com/loosephoto/space-finder-mcp/releases/tag/v0.61.0)）。
 
 **README では履歴を二重管理しません** — 同じ内容を2か所に書くと必ず片方が古くなるため、変更点はリリース時に GitHub Releases の本文へ書きます（手順は [`CLAUDE.md`](CLAUDE.md) の「リリース手順」）。
 
@@ -158,6 +158,61 @@ export SPACE_FINDER_FONT_BOLD="/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.t
 
 ```bash
 uv run python scripts/check-tools.py --fonts
+```
+
+### 初回起動時の天体暦（de421.bsp・約 16MB）
+
+天体暦を使うツール（`space_calendar` / `solar_system_now` / `moon_phase_map` /
+`solar_eclipse_series` / `sky_map_with_satellites` / `constellation_now` /
+`observing_sheet` など）は、**初回だけ** JPL の `de421.bsp`（約 16MB）を取得して
+ディスクへ保存します（2 回目以降は通信しません）。保存先は OS 標準のアプリデータ置き場です。
+
+| OS | 保存先（`de421.bsp`） |
+|---|---|
+| Linux | `~/.local/share/Temp/skyfield_data/`（`XDG_DATA_HOME` があればその下） |
+| macOS | `~/Library/Application Support/Temp/skyfield_data/` |
+| Windows | `%LOCALAPPDATA%\Temp\skyfield_data\` |
+
+取得元は JPL（`ssd.jpl.nasa.gov`）で、失敗したら NAIF の旧版アーカイブ
+（`naif.jpl.nasa.gov`）へ切り替えます。**TLS 証明書の検証は無効化しません**。
+プロキシが独自の証明書チェーンを提示する環境では、次のどれかで CA を渡してください。
+
+```bash
+# (a) CA 証明書ファイルを指定（この 4 つの変数は同じ意味で、設定されているものは順に試します）
+export SPACE_FINDER_CA_BUNDLE=/path/to/proxy-root-ca.pem
+# SSL_CERT_FILE / REQUESTS_CA_BUNDLE / CURL_CA_BUNDLE でも可
+
+# (b) OS の証明書ストアに CA を入れる（update-ca-certificates 等）。こちらは既定で試します
+```
+
+それでも取得できないときは、**手動で置く**のが最も確実です（エラー文面にも同じコマンドと
+実パスが出ます）。
+
+```bash
+mkdir -p ~/.local/share/Temp/skyfield_data     # Windows は %LOCALAPPDATA%\Temp\skyfield_data
+curl -L -o ~/.local/share/Temp/skyfield_data/de421.bsp \
+  https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/de421.bsp
+```
+
+置き場・実体を変えたいときは次の環境変数を使います。
+
+| 環境変数 | 意味 |
+|---|---|
+| `SPACE_FINDER_DATA_DIR` | `de421.bsp` を置くディレクトリごと差し替える |
+| `SPACE_FINDER_DE421` | 取得済みの `de421.bsp` のパスを直接指定する |
+
+取得できないとき、ツールは例外ではなく**対処手順つきのエラー結果**を返します
+（`structuredContent.error = "ephemeris_unavailable"`、`de421_path` / `data_dir` /
+`detail` つき）。
+
+```text
+天体暦 de421.bsp を用意できませんでした（初回のみダウンロードが必要です）。
+配置先: /home/user/.local/share/Temp/skyfield_data/de421.bsp
+対処1（最も確実）: 次のコマンドで手動取得し、上のパスに置いてください
+  curl -L -o "/home/user/.local/share/Temp/skyfield_data/de421.bsp" https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/de421.bsp
+対処2: プロキシ等の CA 証明書を環境変数で指定してください（SPACE_FINDER_CA_BUNDLE=/path/to/ca.pem。SSL_CERT_FILE / REQUESTS_CA_BUNDLE も可）
+対処3: 取得済みのファイルがあるなら SPACE_FINDER_DE421=/path/to/de421.bsp で指定できます
+原因: <取得元> [<試した CA>] <例外の要約>
 ```
 
 ### （任意）NASA APIキー

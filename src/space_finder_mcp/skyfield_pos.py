@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from mcp.types import CallToolResult, TextContent
 
+from .ephemeris import EphemerisUnavailable, error_result
 from .name_common import ResolverUnavailable
 from .input_utils import as_float
 from .places import resolve_place
@@ -148,6 +149,8 @@ def constellation_now(latitude=None, longitude=None, place=None, time_utc=None):
         )
     try:
         ts, eph, constellation_at, wgs84 = _load_skyfield()
+    except EphemerisUnavailable as e:          # 取得手順つきの文面をそのまま返す
+        return error_result(e)
     except Exception as e:                     # 天体暦の読み込み失敗を外へ漏らさない
         return CallToolResult(
             content=[TextContent(type="text", text="Skyfield 天体暦の読み込みに失敗しました: " + str(e))],

@@ -39,6 +39,7 @@ from PIL import Image, ImageDraw
 
 from . import calendar_store as store
 from . import http_retry
+from .ephemeris import EphemerisUnavailable, error_result
 from .img_common import (figure_notes, figure_payload, figure_text_block, load_font,
                          media_link_line, save_output)
 from .input_utils import as_int
@@ -639,6 +640,8 @@ def space_calendar(year: Optional[int] = None, month: Optional[int] = None, plac
     tz_label = _tz_label(off)
     try:
         img, verify = _render(year_i, month_i, place, tz_label, off, drawn, tray, warnings)
+    except EphemerisUnavailable as ex:          # 取得手順つきの文面をそのまま返す
+        return error_result(ex)
     except Exception as ex:                     # 描画そのものの失敗はエラー結果にする
         return _err("カレンダーの描画に失敗しました: {}".format(ex))
     png = _png_bytes(img)

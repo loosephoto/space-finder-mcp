@@ -27,6 +27,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 from .img_common import (conic_from_elements, figure_notes, figure_payload,
                          figure_text_block, load_font, media_link_line, save_output,
                          scale_spec, view_spec)
+from .ephemeris import EphemerisUnavailable
 from .input_utils import as_int
 from .solar_system import (_comet_elements, _comet_unknown_hint, _horizons_cmd_for,
                            _horizons_vectors_range, _load, _resolve_when, _sbdb_elements,
@@ -620,6 +621,10 @@ def _apparition_data(name: str, when_iso, days, before, samples) -> dict:
         loader, eph = _load()
         ts = loader.timescale()
         t = _resolve_when(when_iso, ts)
+    except EphemerisUnavailable as e:
+        # 配置先・手動取得のコマンド・CA の指定方法まで文面に含まれている
+        return {"error": str(e), "error_kind": "ephemeris_unavailable",
+                "detail": e.reason}
     except Exception as e:
         return {"error": "天体暦(JPL DE421)の読み込みに失敗しました（{}）。"
                          "初回はダウンロードが必要です".format(str(e)[:120])}

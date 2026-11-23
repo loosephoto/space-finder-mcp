@@ -26,6 +26,8 @@ import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import TTL_DAILY, ttl_cache
+from .ephemeris import (EphemerisUnavailable as _EphemerisUnavailable,
+                        error_result as _ephemeris_error_result)
 from .input_utils import as_float
 from .name_common import split_names as _split_object_names
 from .img_common import (figure_notes, figure_payload, figure_text_block, media_link_line,
@@ -1273,6 +1275,9 @@ def solar_system_now(when=None, asteroid: Optional[str] = None,
     coms = _split_object_names(comet) + _split_object_names(comet2)
     try:
         scene = _compute(when, asts, prbs, coms, route=bool(route))
+    except _EphemerisUnavailable as e:
+        # 取得手順（配置先・CA・curl）を含む文面をそのまま返す
+        return _ephemeris_error_result(e)
     except (OSError, KeyError, ValueError) as e:
         # de421.bsp の初回ダウンロード失敗・暦の読み込み失敗は例外が外へ漏れていた
         return CallToolResult(

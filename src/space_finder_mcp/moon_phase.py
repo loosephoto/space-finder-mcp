@@ -32,6 +32,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 from .img_common import (as_image, body_rgb, figure_notes, figure_payload,
                          figure_text_block, load_font, media_link_line,
                          save_output, scale_spec, view_spec)
+from .ephemeris import EphemerisUnavailable, error_result
 from .input_utils import as_int
 # 観測地の解決とタイムゾーン・暦のロードは日食ツールと同じ実装を共有する
 # （同じ処理を書き写すと、片方だけ直して食い違う）。
@@ -449,6 +450,8 @@ def moon_phase_map(date: Optional[str] = None, place: Optional[str] = None,
     """
     try:
         return _moon_phase_map_impl(date, place, lat, lon, layout, days)
+    except EphemerisUnavailable as e:          # 取得手順つきの文面をそのまま返す
+        return error_result(e)
     except Exception as e:                     # 例外をツール外へ漏らさない
         return CallToolResult(
             content=[TextContent(type="text",

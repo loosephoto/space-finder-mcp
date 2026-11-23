@@ -63,6 +63,7 @@ from . import literature as _lit
 from . import cds as _cds
 from . import exoplanet as _exo
 from . import qzss as _qzss
+from . import ephemeris as _ephemeris
 
 # ---- ネイティブ拡張は「起動前に」import しておく（重要） ----
 # numpy / skyfield を**ツール実行時**（イベントループが動き出した後）に import
@@ -94,10 +95,25 @@ def _threaded(fn):
     """
     @functools.wraps(fn)
     async def wrapper(*args, **kwargs):
-        return await anyio.to_thread.run_sync(lambda: _delivered(fn(*args, **kwargs)))
+        return await anyio.to_thread.run_sync(
+            lambda: _delivered(_guarded(fn, args, kwargs)))
 
     wrapper.sync_fn = fn
     return wrapper
+
+
+def _guarded(fn, args, kwargs):
+    """ツール本体を呼ぶ（天体暦が用意できない場合だけ、例外ではなく結果にする）。
+
+    de421.bsp の初回取得は環境依存（プロキシの TLS 検証など）で失敗しうる。そのまま
+    例外を投げると MCP クライアントには isError の本文だけが届き、対処手順（配置先・
+    CA の指定方法）が読めない。手順は `EphemerisUnavailable` の文面に入っているので、
+    それを content と structuredContent の両方に載せた結果として返す。
+    """
+    try:
+        return fn(*args, **kwargs)
+    except _ephemeris.EphemerisUnavailable as e:
+        return _ephemeris.error_result(e)
 
 
 def _delivered(result):

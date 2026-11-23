@@ -1338,7 +1338,7 @@ class NewCraterSiteTests(unittest.TestCase):
         old_get = requests.get
 
         def boom(*args, **kwargs):
-            raise OSError("network disabled for test")
+            raise requests.ConnectionError("network disabled for test")
 
         requests.get = boom
         try:
@@ -1353,7 +1353,7 @@ class NewCraterSiteTests(unittest.TestCase):
     def test_all_keeps_landing_provenance_and_labels_each_site_by_kind(self):
         from space_finder_mcp import planetary_map
         old_get = requests.get
-        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(OSError("offline"))
+        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(requests.ConnectionError("offline"))
         try:
             r = planetary_map._sites_result("moon", "all")
         finally:
@@ -1374,7 +1374,7 @@ class NewCraterSiteTests(unittest.TestCase):
     def test_newcrater_event_text_and_figure_kind_are_consistent(self):
         from space_finder_mcp import planetary_map
         old_get = requests.get
-        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(OSError("offline"))
+        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(requests.ConnectionError("offline"))
         try:
             r = planetary_map._sites_result("moon", "newcrater")
         finally:
@@ -1388,7 +1388,7 @@ class NewCraterSiteTests(unittest.TestCase):
     def test_single_site_label_is_inside_canvas_and_validated(self):
         from space_finder_mcp import planetary_map
         old_get = requests.get
-        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(OSError("offline"))
+        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(requests.ConnectionError("offline"))
         try:
             r = planetary_map._sites_result("moon", "falcon9", out_px=1000)
         finally:
@@ -1407,7 +1407,7 @@ class NewCraterSiteTests(unittest.TestCase):
     def test_map_only_has_no_empty_mixed_kind_label(self):
         from space_finder_mcp import planetary_map
         old_get = requests.get
-        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(OSError("offline"))
+        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(requests.ConnectionError("offline"))
         try:
             r = planetary_map._sites_result("moon", "map")
         finally:
@@ -1417,7 +1417,7 @@ class NewCraterSiteTests(unittest.TestCase):
     def test_jupiter_sl9_sites_remain_impact_site_map(self):
         from space_finder_mcp import planetary_map
         old_get = requests.get
-        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(OSError("offline"))
+        requests.get = lambda *args, **kwargs: (_ for _ in ()).throw(requests.ConnectionError("offline"))
         try:
             r = planetary_map._sites_result("jupiter", "all")
         finally:
