@@ -30,7 +30,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import TTL_FORECAST, ttl_cache, is_error_result
 from .img_common import media_link_line, save_output
-from .input_utils import as_float, as_int
+from .input_utils import as_float, as_int, json_object
 from .name_common import ResolverUnavailable, resolve_object
 
 INVOKE = "https://mast.stsci.edu/api/v0/invoke"
@@ -109,7 +109,7 @@ def _invoke(service: str, params: dict, pagesize: int = 10,
     except requests.RequestException as ex:
         return None, "MAST へのリクエストに失敗しました: {}".format(str(ex)[:120])
     try:
-        data = r.json()
+        data = json_object(r)
     except ValueError:
         return None, "MAST の応答を解析できませんでした（JSON 以外）"
     if str(data.get("status") or "").upper() == "ERROR":

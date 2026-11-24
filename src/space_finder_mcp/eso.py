@@ -14,7 +14,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_SHORT, ttl_cache, is_error_result
-from .input_utils import as_float, as_int
+from .input_utils import as_float, as_int, json_object, error_brief
 
 API = "https://www.eso.org/asm/api/"
 UA = {"User-Agent": "space-finder-mcp/0.13 (MCP; ESO Paranal ASM)"}
@@ -65,11 +65,11 @@ def eso_seeing(hours: int = 12, fields: str = _DEFAULT_FIELDS) -> CallToolResult
         try:
             r = requests.get(API, params={"from": fr, "to": to, "fields": f}, headers=UA, timeout=(30, 30))
             r.raise_for_status()
-            d = r.json()
+            d = json_object(r)
             if f in d:
                 results[f] = d[f]
         except requests.RequestException as e:
-            errs.append(f"{f}: {str(e)[:60]}")
+            errs.append(f"{f}: {error_brief(e)}")
     if not results:
         return CallToolResult(
             content=[TextContent(type="text", text=f"ESO ASM データ取得に失敗しました。{' '.join(errs)}")],

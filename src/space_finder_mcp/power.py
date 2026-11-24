@@ -20,6 +20,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, ttl_cache, is_error_result
+from .input_utils import json_object, error_brief
 
 API = "https://power.larc.nasa.gov/api/temporal/daily/point"
 UA = {"User-Agent": "space-finder-mcp/0.12 (MCP; NASA POWER climate)"}
@@ -113,10 +114,10 @@ def power_climate(latitude: float, longitude: float,
     try:
         r = requests.get(API, params=params, headers=UA, timeout=(40, 40))
         r.raise_for_status()
-        d = r.json()
+        d = json_object(r)
     except requests.RequestException as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"NASA POWER API への接続に失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"NASA POWER API への接続に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": "power.larc.nasa.gov"},
         )
     props = d.get("properties", {})

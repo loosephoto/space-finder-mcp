@@ -12,7 +12,7 @@ from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_empty_result, is_error_result
 from .stac_common import parse_bbox
-from .input_utils import as_int
+from .input_utils import as_int, json_object, error_brief
 
 STAC = "https://eodatahub.org.uk/api/catalogue/stac"
 UA = {"User-Agent": "space-finder-mcp/0.3 (MCP; UK EO DataHub STAC)"}
@@ -55,10 +55,10 @@ def uk_stac_search(collection: Optional[str] = None, query: Optional[str] = None
     try:
         r = requests.post(f"{STAC}/search", headers=UA, json=body, timeout=(35, 35))
         r.raise_for_status()
-        d = r.json()
+        d = json_object(r)
     except requests.RequestException as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"UK EO DataHub STAC 検索に失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"UK EO DataHub STAC 検索に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": "eodatahub.org.uk/api/catalogue/stac"},
         )
     feats = d.get("features", [])
@@ -109,7 +109,7 @@ def uk_stac_collections(limit: int = 20) -> CallToolResult:
         cols = r.json().get("collections", [])
     except requests.RequestException as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"UK EO DataHub への接続に失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"UK EO DataHub への接続に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": "eodatahub.org.uk"},
         )
     total = len(cols)

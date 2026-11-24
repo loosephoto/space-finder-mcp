@@ -22,7 +22,7 @@ from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, TTL_FORECAST, is_empty_result, is_error_result, ttl_cache
 from .img_common import media_link_line
-from .input_utils import as_float, as_int
+from .input_utils import as_float, as_int, error_brief
 from .name_common import first_token, like_patterns, name_variants
 
 TAP = "https://almascience.nao.ac.jp/tap/sync"
@@ -45,7 +45,7 @@ def _do_query(query: str, limit: int) -> tuple[Optional[list], Optional[str]]:
             "REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "csv", "QUERY": query,
         }, headers=UA, timeout=(40, 40), allow_redirects=False)
     except requests.RequestException as e:
-        return None, f"ALMA TAP 接続失敗: {str(e)[:120]}"
+        return None, f"ALMA TAP 接続失敗: {error_brief(e)}"
     loc = r.headers.get("Location") if r.status_code in (200, 303) else None
     if not loc:
         return None, f"ALMA TAP 応答異常（status={r.status_code}）。クエリの列・書式を確認してください。"
@@ -54,7 +54,7 @@ def _do_query(query: str, limit: int) -> tuple[Optional[list], Optional[str]]:
         g = requests.get(loc, headers=UA, timeout=(60, 60))
         g.raise_for_status()
     except requests.RequestException as e:
-        return None, f"ALMA TAP 結果取得失敗: {str(e)[:120]}"
+        return None, f"ALMA TAP 結果取得失敗: {error_brief(e)}"
     text = g.text
     if text.strip().upper().startswith("<?XML") or "<votable" in text[:200].lower():
         return None, "ALMA TAP が VOTable（エラー）を返しました。クエリを確認してください。"
@@ -239,7 +239,7 @@ def alma_search(object_name: Optional[str] = None,
     rows, err = _run(where)
     if err:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"ALMA 観測データ検索に失敗しました。{err}")],
+            content=[TextContent(type="text", text=f"ALMA 観測データ検索に失敗しました。{error_brief(err)}")],
             structuredContent={"error": err, "source": "almascience.nao.ac.jp/tap"},
         )
     # 完全一致で 0 件 → 表記ゆれをワイルドカードで拾い直す（大小・区切り・部分名）

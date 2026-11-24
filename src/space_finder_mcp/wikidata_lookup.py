@@ -12,7 +12,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, ttl_cache, is_empty_result, is_error_result
-from .input_utils import as_int
+from .input_utils import as_int, error_brief
 
 # Wikidata SPARQL エンドポイント
 SPARQL_ENDPOINT = "https://query.wikidata.org/sparql"
@@ -132,7 +132,7 @@ LIMIT {as_int(limit, 5, 1, 100)}
         rows = resp.json().get("results", {}).get("bindings", [])
     except requests.RequestException as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"Wikidata 問い合わせに失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"Wikidata 問い合わせに失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": "query.wikidata.org"},
         )
 

@@ -30,7 +30,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import TTL_DAILY, TTL_FORECAST, ttl_cache, is_error_result
 from .img_common import figure_text_block, media_link_line, save_output
-from .input_utils import as_float, as_int
+from .input_utils import as_float, as_int, json_object, error_brief
 from .jma_rain import rain_images
 from .name_common import ResolverUnavailable
 
@@ -349,10 +349,10 @@ def astronomy_weather(latitude: Optional[float] = None, longitude: Optional[floa
     try:
         r = requests.get(API, params=params, headers=UA, timeout=(30, 30))
         r.raise_for_status()
-        d = r.json()
+        d = json_object(r)
     except requests.RequestException as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"Open-Meteo への接続に失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"Open-Meteo への接続に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": "api.open-meteo.com"},
         )
 
@@ -604,7 +604,7 @@ def _geocode_nominatim(place: str) -> Optional[dict]:
                                  "addressdetails": 1},
                          headers=ua, timeout=(20, 20))
         r.raise_for_status()
-        res = r.json()
+        res = json_object(r)
         if res:
             it = res[0]
             disp = it.get("display_name", it.get("name", q))

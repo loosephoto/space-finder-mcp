@@ -22,7 +22,7 @@ from mcp.types import CallToolResult, TextContent
 
 from . import nasa_budget
 from .cache import TTL_SHORT, ttl_cache, is_error_result
-from .input_utils import as_int
+from .input_utils import as_int, error_brief
 
 # 2026-09-30 の移転後のベース（末尾は `/get`。呼び出し側が `/{endpoint}` を足す）
 DONKI = "https://ccmc.gsfc.nasa.gov/DONKI-API/get"
@@ -168,7 +168,7 @@ def space_weather(kind: str = "all", start_date: Optional[str] = None,
         except Exception as e:                  # 例外をツール外へ漏らさない
             return CallToolResult(
                 content=[TextContent(type="text",
-                                     text="宇宙天気の予報を取得できませんでした: {}".format(str(e)[:150]))],
+                                     text="宇宙天気の予報を取得できませんでした: {}".format(error_brief(e)))],
                 structuredContent={"error": "forecast failed", "kind": kind,
                                    "detail": str(e)[:200]},
             )

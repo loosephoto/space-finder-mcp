@@ -33,7 +33,7 @@ from .img_common import (as_image, body_rgb, figure_notes, figure_payload,
                          figure_text_block, load_font, media_link_line,
                          save_output, scale_spec, view_spec)
 from .ephemeris import EphemerisUnavailable, error_result
-from .input_utils import as_int
+from .input_utils import as_int, error_brief
 # 観測地の解決とタイムゾーン・暦のロードは日食ツールと同じ実装を共有する
 # （同じ処理を書き写すと、片方だけ直して食い違う）。
 from .solar_eclipse import _load, _local_tz, _resolve_place, _tz_label
@@ -88,12 +88,24 @@ def _parse_date(value: str):
         return None
     if d is not None and not (1 <= d <= 31):
         return None
+    # 範囲だけでなく**実在する日付か**を確かめる。旧実装は 2026-02-31 を
+    # 受け付け、朔望月パネルでは `min(d, 28)` で黙って 28 日に置き換えていた。
+    if d is not None:
+        try:
+            datetime.date(y, mo if mo is not None else 1, d)
+        except ValueError:
+            return None
     return y, mo, d
 
 
 def _phase_names(age: float):
-    """月齢から (短縮名, 正式名) を返す。"""
-    idx = int(round(float(age))) % 30
+    """月齢から (短縮名, 正式名) を返す。
+
+    `round()` は Python 3 では銀行家丸めなので、月齢 14.5 が 14（小望月）に、
+    15.5 が 16（十六夜）に落ちて 15（満月）を飛ばす段ができていた。
+    月齢の日用の丸めは四捨五入（floor(x+0.5)）で行う。
+    """
+    idx = int(math.floor(float(age) + 0.5)) % len(_AGE_NAMES)
     return _AGE_NAMES[idx]
 
 
@@ -455,7 +467,7 @@ def moon_phase_map(date: Optional[str] = None, place: Optional[str] = None,
     except Exception as e:                     # 例外をツール外へ漏らさない
         return CallToolResult(
             content=[TextContent(type="text",
-                                 text="月齢マップの生成に失敗しました: {}".format(str(e)[:150]))],
+                                 text="月齢マップの生成に失敗しました: {}".format(error_brief(e)))],
             structuredContent={"error": "moon phase map failed", "detail": str(e)[:200]},
         )
 
@@ -522,7 +534,9 @@ def _moon_phase_map_impl(date, place, lat, lon, layout, days):
 
     if lay == "lunation":
         # 指定日（なければ今日）を含む朔望月: 直前の朔から次の朔までを等間隔に分ける
-        ref_utc = datetime.datetime(y, mo, min(d, 28), 12, 0) - datetime.timedelta(hours=float(tz or 0.0))
+        # d は _parse_date で実在を検証済みなので丸めない（旧実装の min(d, 28) は
+        # 29〜31 日を指定すると黙って 28 日の朔望月を返していた）。
+        ref_utc = datetime.datetime(y, mo, d, 12, 0) - datetime.timedelta(hours=float(tz or 0.0))
         ref_jd = _iso_to_jd(ts, ref_utc)
         by_date, events = _events_by_local_date(ts, eph, ref_jd - 45.0, ref_jd + 75.0, tz)
         news = [ev for ev in events if ev["phase"] == "新月" and ev["jd"] <= ref_jd]

@@ -419,6 +419,20 @@ class CloseApproachTests(unittest.TestCase):
         self.assertLessEqual(self.ssd.TIMEOUT[0], 15)
 
 
+
+    def test_content_is_a_markdown_table(self):
+        """一覧はマークダウン表（天体名を太字・月距離と直径の注記はセルの中）。"""
+        res = self._run(CAD_PAYLOAD)
+        text = res.content[0].text
+        self.assertIn("| 天体 | 接近時刻（TDB） | 地心距離 | 相対速度 | 直径 |", text)
+        self.assertIn("|---|---|---|---|---|", text)
+        self.assertIn("| **", text)
+
+    def test_zero_hits_have_no_empty_table(self):
+        """0 件のとき表のヘッダだけ出さない（空の表は読み手を混乱させる）。"""
+        res = self._run(CAD_EMPTY)
+        self.assertNotIn("|---", res.content[0].text)
+        self.assertIn("ありませんでした", res.content[0].text)
 class ImpactRiskTests(unittest.TestCase):
     def setUp(self):
         from space_finder_mcp import ssd
@@ -447,6 +461,20 @@ class ImpactRiskTests(unittest.TestCase):
         self.assertNotIn("error", res.structuredContent)
         self.assertIn("見つかっていません", res.content[0].text)
 
+
+    def test_content_is_a_markdown_table(self):
+        """一覧はマークダウン表（確率の高い順の列構成）。"""
+        res = self._run(SENTRY_SUMMARY, limit=1)
+        text = res.content[0].text
+        self.assertIn("| 天体 | 累積衝突確率 | 推定直径 | 想定時期 | 想定衝突数 | PS(累積) |", text)
+        self.assertIn("|---|---|---|---|---|---|", text)
+        self.assertIn("| **", text)
+
+    def test_zero_hits_have_no_empty_table(self):
+        """0 件のとき表のヘッダだけ出さない。"""
+        res = self._run({"count": 0, "data": []})
+        self.assertNotIn("|---", res.content[0].text)
+        self.assertIn("見つかっていません", res.content[0].text)
     def test_designation_400_tells_user_to_use_designation(self):
         """和名（アポフィス等）は JPL が受け付けない → 推測せず指定方法を案内する。"""
         def boom(endpoint, params=None):

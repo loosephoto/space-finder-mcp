@@ -91,3 +91,87 @@ def as_list(value):
     ツール外へ漏れた）。応答形状の変化で落とさないために入口で正規化する。
     """
     return value if isinstance(value, list) else []
+
+def json_object(resp, default=None):
+    """HTTP 応答の JSON を dict として取り出す（dict でなければ default）。
+
+    200 でも中身が dict でないことがある（`null` / `[]` / HTML のエラーページ /
+    レート制限のメッセージ）。そのまま `.get()` を呼ぶと AttributeError が
+    ツール外へ漏れる（実測: Open-Meteo が `null` を返したときに
+    `'NoneType' object has no attribute 'get'`）。
+    """
+    try:
+        data = resp.json()
+    except Exception:                 # JSON でない本文（HTML 等）
+        return {} if default is None else default
+    if isinstance(data, dict):
+        return data
+    return {} if default is None else default
+
+
+def error_brief(exc) -> str:
+    """例外（または既に文字列化されたエラー文）を人間向けの短い説明に変える。
+
+    `content` は人間が読むチャネル。requests の例外は urllib3 の長い repr
+    （``HTTPSConnectionPool(host='…', port=443): Max retries exceeded …``）
+    を抱えているため、そのまま本文へ埋めると表示が機械のログになる
+    （実測: DLR の読み込みタイムアウトで 200 字超、SIMBAD の 404 で HTML の断片）。
+    `content` にはこの関数の戻り値を入れ、元の文字列は
+    ``structuredContent.error``（機械向けチャネル）に残すこと。
+
+    文字列を渡したときは「1 行目・空白の圧縮・120 字で打ち切り」だけ行う
+    （`_do_query` のように呼び出し側で文字列化済みのエラーにも使える）。
+    """
+    import re as _re
+
+    if isinstance(exc, str):
+        return _brief_text(exc)
+    if exc is None:
+        return "原因不明のエラー"
+
+    try:                                    # requests は遅延 import（規約: 起動を速く保つ）
+        import requests
+    except Exception:                       # pragma: no cover - 依存は必ず入っている
+        requests = None
+    if requests is not None and isinstance(exc, requests.RequestException):
+        raw = str(exc)
+        m = _re.search(r"host='([^']+)'", raw)
+        host = m.group(1) if m else None
+        if host is None:
+            url = getattr(getattr(exc, "response", None), "url", None) \
+                or getattr(getattr(exc, "request", None), "url", None)
+            if isinstance(url, str) and "://" in url:
+                host = url.split("://", 1)[1].split("/", 1)[0]
+        mt = _re.search(r"(?:connect|read) timeout=([\d.]+)", raw)
+        secs = f"（タイムアウト {mt.group(1)} 秒）" if mt else ""
+        where = f"（{host}）" if host else ""
+        # 継承順に注意: ConnectTimeout は ConnectionError と Timeout の両方を継承する。
+        if isinstance(exc, requests.HTTPError):
+            code = getattr(getattr(exc, "response", None), "status_code", None)
+            if code:
+                return f"サーバーが HTTP {code} を返しました{where}"
+            return f"HTTP エラー{where}"
+        if isinstance(exc, requests.ConnectTimeout):
+            return f"{host or 'サーバー'} への接続がタイムアウトしました{secs}"
+        if isinstance(exc, requests.ReadTimeout):
+            return f"{host or 'サーバー'} からの応答がタイムアウトしました{secs}"
+        if isinstance(exc, requests.ConnectionError):
+            return f"{host or 'サーバー'} に接続できませんでした"
+        if isinstance(exc, requests.Timeout):
+            return f"{host or 'サーバー'} との通信がタイムアウトしました{secs}"
+        return f"通信エラー（{type(exc).__name__}）{where}"
+    return _brief_text(str(exc) or type(exc).__name__)
+
+
+def _brief_text(text: str, limit: int = 120) -> str:
+    """エラー文の表示用整形（1 行目・空白圧縮・HTML の断片化・打ち切り）。"""
+    import re as _re
+
+    s = " ".join(str(text).split())
+    if not s:
+        return "詳細なし"
+    if s[:1] == "<" or s[:9].lower() == "<!doctype":
+        return "HTML の応答が返りました（サーバー側のエラーページの可能性）"
+    if len(s) > limit:
+        s = s[:limit - 1] + "…"
+    return s

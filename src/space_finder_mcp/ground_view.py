@@ -36,7 +36,7 @@ from .cache import TTL_DAILY, disk_get, local_appdata, ttl_cache
 from .img_common import (figure_notes, figure_payload, figure_text_block, load_font,
                          media_link_line, pixel_near, primary_spec, save_output,
                          scale_spec, symbol_rgb, view_spec)
-from .input_utils import as_float
+from .input_utils import as_float, error_brief
 
 _LOCAL = local_appdata()
 CACHE_DIR = os.path.join(_LOCAL, "Temp", "space_finder_mcp")
@@ -1430,7 +1430,7 @@ def sky_ground(place=None, lat=None, lon=None, when=None, span=360.0, az0=0.0,
         star_alt, star_az = star_alt.degrees, star_az.degrees
     except Exception as e:
         return CallToolResult(
-            content=[TextContent(type="text", text="恒星位置の計算に失敗しました: " + str(e)[:150])],
+            content=[TextContent(type="text", text="恒星位置の計算に失敗しました: " + error_brief(e))],
             structuredContent={"error": str(e)[:200]})
 
     pl = {}
@@ -1458,7 +1458,7 @@ def sky_ground(place=None, lat=None, lon=None, when=None, span=360.0, az0=0.0,
                                  lp=lpinfo)
     except Exception as e:
         return CallToolResult(
-            content=[TextContent(type="text", text="画像生成に失敗しました: {}".format(str(e)[:150]))],
+            content=[TextContent(type="text", text="画像生成に失敗しました: {}".format(error_brief(e)))],
             structuredContent={"error": str(e)[:200]})
 
     out_path = save_output(img_bytes, "sky_map_with_satellites", "jpg")

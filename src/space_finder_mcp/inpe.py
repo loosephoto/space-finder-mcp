@@ -12,7 +12,7 @@ from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, TTL_SHORT, ttl_cache, is_empty_result, is_error_result
 from .stac_common import parse_bbox, parse_cloud_cover
-from .input_utils import as_int, as_list
+from .input_utils import as_int, as_list, json_object, error_brief
 
 STAC = "https://data.inpe.br/bdc/stac/v1"
 UA = {"User-Agent": "space-finder-mcp/0.3 (MCP; INPE BDC STAC)"}
@@ -48,7 +48,7 @@ def inpe_collections(limit: int = 30) -> CallToolResult:
         cols = r.json().get("collections", [])
     except requests.RequestException as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"INPE BDC STAC への接続に失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"INPE BDC STAC への接続に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": "data.inpe.br/bdc/stac/v1"},
         )
     total = len(cols)
@@ -109,10 +109,10 @@ def inpe_search(collection: str = "CB4-WFI-L4-SR-1", bbox: Optional[str] = None,
     try:
         r = requests.post(f"{STAC}/search", headers=UA, json=body, timeout=(35, 35))
         r.raise_for_status()
-        d = r.json()
+        d = json_object(r)
     except requests.RequestException as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"INPE STAC 検索に失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"INPE STAC 検索に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": "data.inpe.br/bdc/stac/v1"},
         )
     feats = as_list(d.get("features"))

@@ -30,7 +30,7 @@ from .img_common import (encode_jpeg, figure_notes, figure_payload,
                          primary_spec, save_output, scale_spec,
                          split_at_antimeridian, view_spec)
 from .surface_map import panel_placement, marker_scan_radius
-from .input_utils import as_float, as_int
+from .input_utils import as_float, as_int, error_brief
 
 # ---- NASA Blue Marble 用 UA（TLE 取得は celestrak.fetch_tle に共通化）----
 UA = {"User-Agent": "space-finder-mcp/0.23 (MCP; satellite ground track)"}
@@ -156,7 +156,7 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
             found, tle_source = fetch_tle_ex(name=name)
         except requests.RequestException as e:
             return CallToolResult(
-                content=[TextContent(type="text", text=f"衛星の軌道要素(TLE)取得に失敗しました: {e}")],
+                content=[TextContent(type="text", text=f"衛星の軌道要素(TLE)取得に失敗しました: {error_brief(e)}")],
                 structuredContent={"error": str(e), "sources_tried": list(TLE_SOURCE_ORDER)},
             )
         if found is None:
@@ -177,7 +177,7 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
             sat_name, tle1, tle2, tle_source = _fetch_tle2(nid)
         except (requests.RequestException, ValueError) as e:
             return CallToolResult(
-                content=[TextContent(type="text", text=f"衛星の軌道要素(TLE)取得に失敗しました: {e}")],
+                content=[TextContent(type="text", text=f"衛星の軌道要素(TLE)取得に失敗しました: {error_brief(e)}")],
                 structuredContent={"error": str(e), "sources_tried": list(TLE_SOURCE_ORDER)},
             )
 
@@ -238,7 +238,7 @@ def sat_ground_track(norad_id: Optional[int] = None, name: Optional[str] = None,
         img = img.point(lambda p: int(p * 0.72))  # 暗くしてマーカーを強調
     except (requests.RequestException, OSError) as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"地球地図の取得に失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"地球地図の取得に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": "eoimages.gsfc.nasa.gov"},
         )
     d = ImageDraw.Draw(img)

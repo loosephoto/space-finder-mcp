@@ -54,7 +54,7 @@ uv run python scripts/check-tools.py                  # 全67ツール実呼び�
 ## 守るべき規約
 
 1. **全ツールは `CallToolResult` を返す**。例外をツール外へ漏らさない（外部API障害時も `structuredContent.error` を返す）。
-2. `content` = 人間向け表示（画像は `ImageContent`）、`structuredContent` = LLM向け純粋JSON。両方返すのが基本。
+2. `content` = 人間向け表示（画像は `ImageContent`）、`structuredContent` = LLM向け純粋JSON。両方返すのが基本。**エラー文は人間向けに短く**: requests 例外の生の repr（urllib3 の `HTTPSConnectionPool(…)` 等）は `input_utils.error_brief(e)` で短い文にし、元の文字列は `structuredContent.error` に残す（生 repr・HTML 断片の本文混入は `check-tools.py` の CONTENT_NOISE で落とす）。**多数行×多列の一覧はマークダウン表**（`| 列 | … |` ＋ `|---|`。セル内の `|` は `\|` にエスケープ。0 件のとき表のヘッダだけ出さない）。
 3. 数値変換は防御的に。ツール入口の数値引数は必ず `input_utils.as_int` / `as_float` を通す（`float("?")` 等で例外を外へ漏らさない）。`d[key]` ではなく `.get()`。
 4. キャッシュは `cache.py` の `ttl_cache` / `disk_get` を使う。**エラー応答はキャッシュしない**。キャッシュ値を書き換えるなら `deepcopy`。
 - **描画パラメータ（カメラ角度など）を引数化したら、図・題名・`figure.view.description`・`structuredContent` は同じ関数から取る**（`solar_system.oblique_camera(scene)`。定数直書き禁止）。利用者向け数値引数は範囲外を黙ってクランプせずエラー結果を返す（`elevation=120` → 「0〜90 の範囲で指定してください」）。

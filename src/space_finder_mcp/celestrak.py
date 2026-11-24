@@ -23,7 +23,7 @@ import requests
 from functools import lru_cache
 from mcp.types import CallToolResult, TextContent
 from .cache import CACHE_ROOT
-from .input_utils import as_int
+from .input_utils import as_int, json_object
 from .name_common import expand_terms
 
 BASE = "https://celestrak.org/NORAD/elements/gp.php"
@@ -429,7 +429,7 @@ def _fetch_tle_cached(params_tuple: tuple) -> tuple:
     """
     p = dict(params_tuple)
     p["FORMAT"] = "JSON"
-    data = _get(p).json()
+    data = json_object(_get(p))
     if isinstance(data, dict) and (data.get("Error") or data.get("error")):
         raise requests.RequestException(
             "CelesTrak がエラー応答を返しました: {}".format(data))

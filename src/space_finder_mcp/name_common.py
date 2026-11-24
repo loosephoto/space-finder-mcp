@@ -24,6 +24,7 @@ from typing import Optional
 
 import requests
 
+from .input_utils import error_brief
 from .cache import TTL_DAILY, ttl_cache
 
 UA = {"User-Agent": "space-finder-mcp/0.27 (MCP; name resolver)"}
@@ -201,7 +202,7 @@ def _sesame_lookup(name: str, timeout: int = 30) -> Optional[dict]:
     try:
         r = requests.get(SESAME.format(requests.utils.quote(o)), headers=UA, timeout=timeout)
     except requests.RequestException as e:
-        raise ResolverUnavailable(str(e)[:140]) from e
+        raise ResolverUnavailable(error_brief(e)) from e
     if r.status_code >= 500:
         # 5xx は「名前が無い」ではなく「サービスが応答できない」。呼び出し側が
         # 「表記を変えて」と誤案内しないよう、失敗の種類を分けて伝える。

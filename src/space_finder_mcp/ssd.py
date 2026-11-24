@@ -36,7 +36,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_HOURLY, ttl_cache, is_error_result
-from .input_utils import as_float, as_int
+from .input_utils import as_float, as_int, json_object
 
 BASE = "https://ssd-api.jpl.nasa.gov"
 UA = {"User-Agent": "space-finder-mcp/0.33 (MCP; JPL SSD/CNEOS)"}
@@ -118,7 +118,7 @@ def _http_detail(e: Exception) -> str:
     if resp is None:
         return ""
     try:
-        body = resp.json()
+        body = json_object(resp)
     except ValueError:
         return ""
     if isinstance(body, dict):
@@ -632,15 +632,20 @@ def _cad_result_row(rec: dict, object_type: str, *, hazardous_only: bool,
             if dia_m is not None else "直径 不明")
     is_comet = object_type == "comet"
     label = ("（彗星）" if is_comet else "（小惑星）") if show_type else ""
-    line = ("- {mark}**{des}**{label} ／ {cd} TDB ／ 地心距離 {dist} au"
-            "（{km:,.0f} km・{lunar:.2f} 月距離）／ 相対速度 {vel} ／ {dia}").format(
-        mark="☄️ " if is_comet else "", des=des, label=label,
-        cd=str(rec.get("cd") or "").strip(), dist=_fmt_num(rec.get("dist"), digits=5),
-        km=km or 0.0, lunar=lunar or 0.0, vel=_fmt_num(rec.get("v_rel"), " km/s"),
-        dia=dia_text)
+    name_cell = "{mark}**{des}**{label}".format(
+        mark="☄️ " if is_comet else "", des=des, label=label)
     if hazardous_only and not is_comet:
-        line += "／ ⚠️ 潜在的に危険な小惑星(PHA)"
-    line += "／ 接近時刻の不確かさ {}".format(_uncertainty_text(rec.get("t_sigma_f")))
+        name_cell += " ⚠️ 潜在的に危険な小惑星(PHA)"
+    # 本文はマークダウン表の 1 行として返す（ヘッダは呼び出し側が出す）。
+    # 天体名・距離・速度は本文と structuredContent で同じ値を使い、食い違わせない。
+    line = "| {} | {} | {} | {} | {} |".format(
+        name_cell,
+        "{} TDB（不確かさ {}）".format(str(rec.get("cd") or "").strip(),
+                                     _uncertainty_text(rec.get("t_sigma_f"))),
+        "{} au（{:,.0f} km・{:.2f} 月距離）".format(
+            _fmt_num(rec.get("dist"), digits=5), km or 0.0, lunar or 0.0),
+        _fmt_num(rec.get("v_rel"), " km/s"),
+        dia_text)
     row = {
         "designation": des,
         "object_type": object_type,
@@ -743,10 +748,13 @@ def neo_close_approach(days: int = 7, max_distance_au: float = 0.05, limit: int 
             merged.append((float("inf") if jd is None else jd, line, row))
     merged.sort(key=lambda item: item[0])
 
-    results, lines = [], []
+    results, rows_md = [], []
     for _jd, line, row in merged[:limit]:
-        lines.append(line)
+        rows_md.append(line)
         results.append(row)
+    # 1 行 = 1 天体のマークダウン表。0 件のときは空の表を出さず本文だけにする。
+    lines = (["", "| 天体 | 接近時刻（TDB） | 地心距離 | 相対速度 | 直径 |",
+              "|---|---|---|---|---|"] + rows_md) if rows_md else []
 
     total = sum(totals.values())
     shown = len(results)
@@ -896,15 +904,16 @@ def impact_risk(designation: Optional[str] = None, min_probability: float = 1e-3
     rows = sorted(_records(payload),
                   key=lambda r: _num(r.get("ip")) or 0.0, reverse=True)
     shown_rows = rows[:limit]
-    results, lines = [], []
+    results = []
+    lines = (["", "| 天体 | 累積衝突確率 | 推定直径 | 想定時期 | 想定衝突数 | PS(累積) |",
+              "|---|---|---|---|---|---|"] if shown_rows else [])
     for rec in shown_rows:
         ip = _num(rec.get("ip"))
         dia_km = _num(rec.get("diameter"))
-        lines.append("- **{}** ／ 累積衝突確率 {} ／ 推定直径 {} ／ 想定時期 {} ／ "
-                     "想定衝突数 {} ／ PS(累積) {}".format(
-                         str(rec.get("des") or "?").strip(), _fmt_prob(ip),
-                         _diameter_text(dia_km), rec.get("range") or "不明",
-                         _fmt_num(rec.get("n_imp"), digits=0), rec.get("ps_cum") or "不明"))
+        lines.append("| **{}** | {} | {} | {} | {} | {} |".format(
+            str(rec.get("des") or "?").strip(), _fmt_prob(ip),
+            _diameter_text(dia_km), rec.get("range") or "不明",
+            _fmt_num(rec.get("n_imp"), digits=0), rec.get("ps_cum") or "不明"))
         results.append({
             "designation": rec.get("des"), "fullname": rec.get("fullname"),
             "impact_probability": ip,

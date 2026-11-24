@@ -21,7 +21,7 @@ import requests
 from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import TTL_DAILY, TTL_HOURLY, disk_cache_path, ttl_cache, is_error_result
-from .input_utils import as_int
+from .input_utils import as_int, json_object
 from .img_common import media_link_line
 
 # コレクション定義JSON（GitHub raw）
@@ -128,7 +128,7 @@ def _fetch_meta(cid: str) -> Optional[dict]:
         r = requests.get(f"{RAW}/{cid}.json", headers=UA, timeout=(20, 20))
         if r.status_code != 200:
             return None
-        d = r.json()
+        d = json_object(r)
         return {
             "id": d.get("EodashIdentifier") or cid,
             "name": d.get("Name") or cid,

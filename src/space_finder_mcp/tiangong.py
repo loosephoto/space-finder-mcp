@@ -14,6 +14,7 @@ from functools import lru_cache
 from mcp.types import CallToolResult, TextContent
 from sgp4.api import Satrec, jday
 
+from .input_utils import error_brief
 from .celestrak import (TLE_SOURCE_ORDER, fallback_status, fetch_tle_ex,
                         source_label, tle_epoch_iso)
 
@@ -73,7 +74,7 @@ def tiangong_now() -> CallToolResult:
         _name, tle1, tle2, tle_source = _fetch_tiangong_tle()
     except requests.RequestException as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"TLE取得に失敗しました（CelesTrak／公開代替源）: {e}")],
+            content=[TextContent(type="text", text=f"TLE取得に失敗しました（CelesTrak／公開代替源）: {error_brief(e)}")],
             structuredContent={"error": str(e), "sources_tried": list(TLE_SOURCE_ORDER),
                                "fallback": fallback_status()},
         )

@@ -485,6 +485,30 @@ FIGURES_EXTRA_CALLS = (
 )
 
 
+def content_noise_issues(result) -> list:
+    """content 本文（人間向けチャネル）に機械向けのノイズが載っていないか検査する。
+
+    生の例外 repr（urllib3 の接続プール表現など）や HTML の断片が本文に埋まると、
+    表示がログになる（実測: DLR の読み込みタイムアウトで 200 字超、SIMBAD の 404 で
+    HTML の head がそのまま返った）。元の文字列は structuredContent.error（機械向け
+    チャネル）に残し、content には input_utils.error_brief の短い文を使う。
+    エラー結果の本文こそ人間が読むので、ERROR_RESULT より優先して失敗と数える。
+    """
+    issues = []
+    pats = (
+        ("ConnectionPool(", "生の例外 repr（urllib3）"),
+        ("Max retries exceeded", "生の例外 repr（urllib3）"),
+        ("Traceback (most recent", "トレースバック"),
+        ("<!doctype", "HTML の断片"),
+    )
+    for c in getattr(result, "content", []) or []:
+        text = getattr(c, "text", "") or ""
+        for pat, label in pats:
+            if pat in text:
+                issues.append("本文に{}が含まれる: {!r}".format(label, pat))
+    return issues
+
+
 def figure_extra_rows(timeout=180.0) -> list:
     """figure/1 の追加経路（view="comet_orbit"）を実行して検証する。
 
@@ -659,20 +683,23 @@ def run_all(only=None, timeout=180, offline=False) -> list:
             fig = sc.get("figure") if isinstance(sc, dict) else None
             fissues = figure_issues(name, r) if "image" in kinds else []
             missues = media_issues(name, r)
+            nissues = content_noise_issues(r)
             # 「未対応（figure なし）」は移行中のため警告どまり、内容が不正なら FAIL。
             invalid = [i for i in fissues if not i.startswith("figure/1 未対応")]
             fsum = ({"kind": fig.get("kind"), "notes": len(fig.get("notes") or []),
                      "verify_ok": (fig.get("verify") or {}).get("ok")}
                     if isinstance(fig, dict) else None)
             rows.append({"tool": name,
-                         "status": "ERROR_RESULT" if _is_error(r)
-                                   else ("MEDIA_INVALID" if missues
-                                         else ("FIGURE_INVALID" if invalid else "OK")),
+                         "status": ("CONTENT_NOISE" if nissues
+                                    else ("ERROR_RESULT" if _is_error(r)
+                                          else ("MEDIA_INVALID" if missues
+                                                else ("FIGURE_INVALID" if invalid else "OK")))),
                          "seconds": round(dt, 2), "blocks": kinds,
                          "has_structured_content": isinstance(sc, dict),
                          "figure": fsum, "figure_issues": fissues,
                          "media_links": count_media_links(r),
                          "media_issues": missues,
+                         "noise_issues": nissues,
                          "detail": (sc.get("error") if _is_error(r) else None)})
     finally:
         calendar_store.STORE_PATH = orig_store_path
@@ -1172,7 +1199,7 @@ def main() -> int:
     rows = run_all(only=only, timeout=args.timeout, offline=args.offline)
 
     bad = [r for r in rows if r["status"] in ("TIMEOUT", "LEAKED_EXCEPTION", "FIGURE_INVALID",
-                                              "MEDIA_INVALID")
+                                              "MEDIA_INVALID", "CONTENT_NOISE")
            or (not r.get("has_structured_content") and r["status"] != "TIMEOUT")]
     if args.json:
         print(json.dumps({"mode": "offline" if args.offline else "live", "rows": rows,
@@ -1184,7 +1211,7 @@ def main() -> int:
         for r in rows:
             mark = {"OK": "ok ", "ERROR_RESULT": "err", "TIMEOUT": "T/O",
                     "LEAKED_EXCEPTION": "EXC", "FIGURE_INVALID": "FIG",
-                    "MEDIA_INVALID": "MED"}[r["status"]]
+                    "MEDIA_INVALID": "MED", "CONTENT_NOISE": "NOZ"}[r["status"]]
             extra = "  " + str(r.get("detail"))[:60] if r.get("detail") else ""
             blocks = r.get("blocks", "")
             print("  {mark} {tool:30s} {sec:6.2f}s {blocks}{extra}".format(
@@ -1192,6 +1219,9 @@ def main() -> int:
                 blocks=blocks, extra=extra))
         for r in rows:
             for i in r.get("media_issues") or []:
+                print("      ! {}: {}".format(r["tool"], i))
+        for r in rows:
+            for i in r.get("noise_issues") or []:
                 print("      ! {}: {}".format(r["tool"], i))
         print("  内訳:", dict(counter))
         if bad:

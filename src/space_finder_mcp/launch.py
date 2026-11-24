@@ -9,7 +9,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_SHORT, ttl_cache, is_error_result
-from .input_utils import as_int
+from .input_utils import as_int, error_brief
 
 LL2 = "https://ll.thespacedevs.com/2.3.0"
 
@@ -81,7 +81,7 @@ def upcoming_launches(limit: int = 5) -> CallToolResult:
         d = r.json()
     except requests.RequestException as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"Launch Library 2 への接続に失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"Launch Library 2 への接続に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": "ll.thespacedevs.com"},
         )
     rows = d.get("results", [])
@@ -92,7 +92,10 @@ def upcoming_launches(limit: int = 5) -> CallToolResult:
         )
     rows = rows[:limit]
     records = []
-    lines = ["今後のロケット打ち上げ:"]
+    lines = ["今後のロケット打ち上げ:", "",
+             "| # | 打ち上げ | 日時（UTC） | 状態 | ロケット | 射場 |",
+             "|---|---|---|---|---|---|"]
+    missions = []
     for i, l in enumerate(rows, 1):
         name = l.get("name", "?")
         window = (l.get("window_start") or "")[:16].replace("T", " ")
@@ -104,10 +107,14 @@ def upcoming_launches(limit: int = 5) -> CallToolResult:
         rec = {"name": name, "window_start_utc": window, "status": status,
                "launch_site": site, "rocket": launcher}
         records.append(rec)
-        lines.append(f"{i}. **{name}**  {window} UTC  [{status}]")
-        lines.append(f"   ロケット: {launcher} ／ 射場: {site}")
+        # 表のセル内の | はエスケープする（GFM の表区切りと衝突するため）
+        lines.append("| {} | **{}** | {} | {} | {} | {} |".format(
+            i, str(name).replace("|", "\\|"), window, status,
+            str(launcher).replace("|", "\\|"), str(site).replace("|", "\\|")))
         if mission:
-            lines.append(f"   ミッション: {mission[:90]}")
+            missions.append("- **{}**: {}".format(name, " ".join(mission.split())[:90]))
+    if missions:
+        lines += ["", "ミッション概要:"] + missions
     lines.append("出典: Launch Library 2 (ll.thespacedevs.com)")
     return CallToolResult(
         content=[TextContent(type="text", text="\n".join(lines))],
@@ -145,7 +152,7 @@ def china_launches(limit: int = 8, status: Optional[str] = None) -> CallToolResu
         d = r.json()
     except requests.RequestException as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"Launch Library 2 への接続に失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"Launch Library 2 への接続に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": "ll.thespacedevs.com"},
         )
     rows = d.get("results", [])
@@ -159,7 +166,10 @@ def china_launches(limit: int = 8, status: Optional[str] = None) -> CallToolResu
         )
     rows = rows[:limit]
     records = []
-    lines = [f"中国のロケット打ち上げ予定（{len(rows)} 件）:"]
+    lines = [f"中国のロケット打ち上げ予定（{len(rows)} 件）:", "",
+             "| # | 打ち上げ | 日時（UTC） | 状態 | ロケット | 射場 |",
+             "|---|---|---|---|---|---|"]
+    missions = []
     for i, l in enumerate(rows, 1):
         name = l.get("name", "?")
         window = (l.get("window_start") or "")[:16].replace("T", " ")
@@ -172,10 +182,14 @@ def china_launches(limit: int = 8, status: Optional[str] = None) -> CallToolResu
         rec = {"name": name, "window_start_utc": window, "status": st,
                "launch_site": site, "rocket": launcher}
         records.append(rec)
-        lines.append(f"{i}. **{name}**  {window} UTC  [{st}]")
-        lines.append(f"   ロケット: {launcher} ／ 射場: {site}")
+        # 表のセル内の | はエスケープする（GFM の表区切りと衝突するため）
+        lines.append("| {} | **{}** | {} | {} | {} | {} |".format(
+            i, str(name).replace("|", "\\|"), window, st,
+            str(launcher).replace("|", "\\|"), str(site).replace("|", "\\|")))
         if mission:
-            lines.append(f"   ミッション: {mission[:90]}")
+            missions.append("- **{}**: {}".format(name, " ".join(mission.split())[:90]))
+    if missions:
+        lines += ["", "ミッション概要:"] + missions
     lines.append("出典: Launch Library 2 (ll.thespacedevs.com) ／ 射場は酒泉・西昌・太原・文昌・海上等。")
     return CallToolResult(
         content=[TextContent(type="text", text="\n".join(lines))],
@@ -214,7 +228,7 @@ def russia_launches(limit: int = 8, status: Optional[str] = None) -> CallToolRes
         d = r.json()
     except requests.RequestException as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"Launch Library 2 への接続に失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"Launch Library 2 への接続に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": "ll.thespacedevs.com"},
         )
     rows = d.get("results", [])
@@ -228,7 +242,10 @@ def russia_launches(limit: int = 8, status: Optional[str] = None) -> CallToolRes
         )
     rows = rows[:limit]
     records = []
-    lines = [f"🇷🇺 ロシア（Roscosmos）のロケット打ち上げ予定（{len(rows)} 件）:"]
+    lines = [f"🇷🇺 ロシア（Roscosmos）のロケット打ち上げ予定（{len(rows)} 件）:", "",
+             "| # | 打ち上げ | 日時（UTC） | 状態 | ロケット | 射場 |",
+             "|---|---|---|---|---|---|"]
+    missions = []
     for i, l in enumerate(rows, 1):
         name = l.get("name", "?")
         window = (l.get("window_start") or "")[:16].replace("T", " ")
@@ -241,10 +258,14 @@ def russia_launches(limit: int = 8, status: Optional[str] = None) -> CallToolRes
         rec = {"name": name, "window_start_utc": window, "status": st,
                "launch_site": site, "rocket": launcher}
         records.append(rec)
-        lines.append(f"{i}. **{name}**  {window} UTC  [{st}]")
-        lines.append(f"   ロケット: {launcher} ／ 射場: {site}")
+        # 表のセル内の | はエスケープする（GFM の表区切りと衝突するため）
+        lines.append("| {} | **{}** | {} | {} | {} | {} |".format(
+            i, str(name).replace("|", "\\|"), window, st,
+            str(launcher).replace("|", "\\|"), str(site).replace("|", "\\|")))
         if mission:
-            lines.append(f"   ミッション: {mission[:90]}")
+            missions.append("- **{}**: {}".format(name, " ".join(mission.split())[:90]))
+    if missions:
+        lines += ["", "ミッション概要:"] + missions
     lines.append("出典: Launch Library 2 (ll.thespacedevs.com) ／ 射場はバイコヌール・ボストチヌイ・プレセツク等。")
     lines.append("🤖 【AIからのインテリジェントアドバイス】ロシア直のオープンAPIは公開されていないため、グローバル集約API（Launch Library 2）経由で取得しています。")
     return CallToolResult(

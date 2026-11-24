@@ -32,7 +32,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, disk_cache_path, is_empty_result, is_error_result, ttl_cache
-from .input_utils import as_int
+from .input_utils import as_int, error_brief
 from .name_common import expand_terms
 
 OSCAR = "https://space.oscar.wmo.int/api/v1"
@@ -218,7 +218,7 @@ def satellite_status(query: Optional[str] = None, agency: Optional[str] = None,
         cat = _catalogue()
     except requests.RequestException as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"WMO OSCAR への接続に失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"WMO OSCAR への接続に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": "space.oscar.wmo.int"},
         )
 

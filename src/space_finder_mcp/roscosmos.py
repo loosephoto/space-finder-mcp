@@ -23,7 +23,7 @@ from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, TTL_HOURLY, ttl_cache, is_empty_result, is_error_result
 from .img_common import media_link_line
-from .input_utils import as_int
+from .input_utils import as_int, error_brief
 
 BASES = ("https://s3.gptl.ru/stac-web-free", "https://s3ext.gptl.ru/stac-web-free")
 SOURCE = "s3.gptl.ru/stac-web-free（Roscosmos オープンデータ STAC）"
@@ -187,7 +187,7 @@ def roscosmos_collections(level: int = 2) -> CallToolResult:
             frontier = nxt
     except (_Unavailable, ValueError) as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"Roscosmos オープンデータ STAC への接続に失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"Roscosmos オープンデータ STAC への接続に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": SOURCE},
         )
     if not records:
@@ -330,7 +330,7 @@ def roscosmos_search(collection: str = "Electro-L/MSU-GS/L2_RGB_VIS_IR",
             })
     except (_Unavailable, ValueError) as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"Roscosmos オープンデータ STAC の取得に失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"Roscosmos オープンデータ STAC の取得に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": SOURCE},
         )
     total_items = len(_item_links(day_doc))

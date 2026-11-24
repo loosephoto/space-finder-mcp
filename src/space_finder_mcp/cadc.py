@@ -15,7 +15,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_FORECAST, ttl_cache, is_empty_result, is_error_result
-from .input_utils import as_int
+from .input_utils import as_int, error_brief
 from .name_common import ResolverUnavailable, resolve_object
 
 TAP = "https://ws.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/argus/sync"
@@ -35,7 +35,7 @@ def _do_query(query: str, limit: int = 10) -> tuple[Optional[list[list]], Option
         }, headers=UA, timeout=(40, 40))
         r.raise_for_status()
     except requests.RequestException as e:
-        return None, f"CADC TAP 接続失敗: {str(e)[:120]}"
+        return None, f"CADC TAP 接続失敗: {error_brief(e)}"
     if "VOTABLE" in r.text[:200] or r.text.strip().startswith("<"):
         # エラー VOTable
         if "ERROR" in r.text[:300]:
@@ -144,11 +144,11 @@ def cadc_observations(object_name: Optional[str] = None,
     rows, err = _do_query(query, limit)
     if err:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"CADC 検索に失敗しました: {err}")],
+            content=[TextContent(type="text", text=f"CADC 検索に失敗しました: {error_brief(err)}")],
             structuredContent={"error": err, "source": "cadc TAP"},
         )
     if rows is None:
-        return CallToolResult(content=[TextContent(type="text", text=f"CADC 検索エラー: {err}")], structuredContent={"error": err})
+        return CallToolResult(content=[TextContent(type="text", text=f"CADC 検索エラー: {error_brief(err)}")], structuredContent={"error": err})
     if not rows:
         target = object_name or f"RA {ra}° Dec {dec}° (r={radius}°)"
         return CallToolResult(

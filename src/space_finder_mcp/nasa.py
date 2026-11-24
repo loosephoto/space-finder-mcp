@@ -7,6 +7,7 @@ from typing import Optional
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .input_utils import error_brief
 from . import nasa_budget
 from .cache import TTL_HOURLY, ttl_cache, is_error_result
 from .img_common import media_link_line
@@ -99,7 +100,7 @@ def apod(key: str, date: Optional[str] = None) -> CallToolResult:
             text = ("APOD はまだ公開されていません（試行日: " + ", ".join(candidates) +
                     "）。NASA 側の当日分公開は米国東部時間の夜になることがあります。")
         else:
-            text = _rate_limit_text(last_err) or "NASA APOD の取得に失敗しました: " + nasa_budget.redact(last_err)
+            text = _rate_limit_text(last_err) or "NASA APOD の取得に失敗しました: " + error_brief(nasa_budget.redact(last_err))
         return CallToolResult(
             content=[TextContent(type="text", text=text)],
             structuredContent={"error": nasa_budget.redact(last_err), "status": status,
@@ -110,7 +111,7 @@ def apod(key: str, date: Optional[str] = None) -> CallToolResult:
     is_video = str(d.get("media_type", "image")).lower() == "video"
     link = media_link_line(str(d.get("title", "APOD")),
                            url=img_url, kind=("video" if is_video else "image"))
-    text = (f"APOD {d.get('date','')} - {d.get('title','')}\n"
+    text = (f"**APOD {d.get('date','')} - {d.get('title','')}**\n"
             + (link + "\n" if link else "")
             + f"{d.get('explanation','')}\n"
             + f"出典URL: {img_url} (Copyright: {d.get('copyright','不明')})")

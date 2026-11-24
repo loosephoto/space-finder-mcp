@@ -36,7 +36,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, TTL_FORECAST, is_error_result, ttl_cache
-from .input_utils import as_float, as_int
+from .input_utils import as_float, as_int, json_object, error_brief
 from .name_common import ResolverUnavailable, expand_terms, resolve_object
 
 SIMBAD_TAP = "https://simbad.cds.unistra.fr/simbad/sim-tap/sync"
@@ -108,17 +108,17 @@ def _sim_query(adql: str) -> tuple:
                                              "format": "json", "query": adql},
                          headers=UA, timeout=TIMEOUT)
     except requests.RequestException as e:
-        return None, None, "SIMBAD TAP に接続できません: {}".format(str(e)[:120])
+        return None, None, "SIMBAD TAP に接続できません: {}".format(error_brief(e))
     if r.status_code != 200:
         body = r.text or ""
         if "<?xml" in body[:80].upper() or "VOTABLE" in body[:400].upper():
             detail = "SIMBAD が ADQL を受け付けませんでした（列名・書式をご確認ください）"
         else:
-            detail = " ".join(body.split())[:120] or "詳細なし"
+            detail = error_brief(body)
         return None, None, "SIMBAD TAP が status={} を返しました（{}）".format(
             r.status_code, detail)
     try:
-        payload = r.json()
+        payload = json_object(r)
     except ValueError:
         return None, None, "SIMBAD TAP の応答が JSON ではありません"
     cols = [c.get("name") for c in (payload.get("metadata") or [])]
@@ -161,7 +161,7 @@ def _vizier_cone(catalog: str, ra: float, dec: float, radius_arcmin: float,
     try:
         r = requests.get(VIZIER_ASU, params=params, headers=UA, timeout=TIMEOUT)
     except requests.RequestException as e:
-        return None, None, None, {}, "VizieR に接続できません: {}".format(str(e)[:120])
+        return None, None, None, {}, "VizieR に接続できません: {}".format(error_brief(e))
     if r.status_code != 200:
         return None, None, None, {}, "VizieR が status={} を返しました".format(r.status_code)
     if "<VOTABLE" in r.text[:400].upper():

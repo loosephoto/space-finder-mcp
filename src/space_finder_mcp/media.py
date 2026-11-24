@@ -16,7 +16,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .cache import TTL_DAILY, TTL_FORECAST, disk_get, ttl_cache
 from .img_common import media_link_line
-from .input_utils import as_int, as_list
+from .input_utils import as_int, as_list, error_brief
 
 # NASA Sounds from Beyond / 各ミッションの「宇宙の音」短尺キュレーション
 # (NASA公式が配布する効果音。ストリーミング/ダウンロード用の直接URL)。
@@ -110,7 +110,7 @@ def _search_or_error(q: str, media_type: str, limit: int):
     except (requests.RequestException, ValueError) as e:
         return CallToolResult(
             content=[TextContent(type="text",
-                                 text=f"NASA Image & Video Library の検索に失敗しました: {e}")],
+                                 text=f"NASA Image & Video Library の検索に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": "images-api.nasa.gov"},
         ), None
 

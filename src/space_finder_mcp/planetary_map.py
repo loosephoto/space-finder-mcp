@@ -20,7 +20,7 @@ from .img_common import (encode_jpeg, figure_notes, figure_payload,
                          figure_text_block, load_font, media_link_line,
                          primary_spec, save_output, scale_spec,
                          split_at_antimeridian, view_spec)
-from .input_utils import as_float, as_int
+from .input_utils import as_float, as_int, error_brief
 
 UA = {"User-Agent": "space-finder-mcp/0.25 (MCP; planetary orbiter track)"}
 # 全球画像の取得用 UA（Wikimedia は連絡先つきの識別可能な UA を求める。無いと 429/403 になる）
@@ -1173,7 +1173,7 @@ def _sites_result(body: str, key, out_px: int = 1000):
     except Exception as e:
         if mode == "image":
             # 画像が取れないときは座標グリッドへ落として描く（図を返さずに終わらせない）
-            basemap_fallback = "{}: {}".format(type(e).__name__, str(e)[:120])
+            basemap_fallback = "{}: {}".format(type(e).__name__, error_brief(e))
             try:
                 sv = graticule_view(_site_lon, float(site["lat"]), span_deg, out_px,
                                     body_ja=body_ja)
@@ -1184,7 +1184,7 @@ def _sites_result(body: str, key, out_px: int = 1000):
                     structuredContent={"error": str(e2), "source": attrib})
         else:
             return CallToolResult(
-                content=[TextContent(type="text", text=f"{body_ja}の地図の生成に失敗しました: {e}")],
+                content=[TextContent(type="text", text=f"{body_ja}の地図の生成に失敗しました: {error_brief(e)}")],
                 structuredContent={"error": str(e), "source": attrib})
     img = sv["img"]
     g2px = sv["g2px"]
@@ -1943,12 +1943,12 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
             cur = _state(body_cfg, cmd, jd_now)
     except requests.RequestException as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"JPL Horizons からの状態ベクトル取得に失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"JPL Horizons からの状態ベクトル取得に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": "ssd.jpl.nasa.gov"},
         )
     except ValueError as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"状態ベクトルの解析に失敗: {e}")],
+            content=[TextContent(type="text", text=f"状態ベクトルの解析に失敗: {error_brief(e)}")],
             structuredContent={"error": str(e)},
         )
     lat0, lon0, alt0 = cur["lat"], cur["lon"], cur["alt_km"]
@@ -2016,7 +2016,7 @@ def planetary_orbiter_track(body: str = "moon", orbiter: str = "lro",
         sv = _basemap_view(body_cfg, b, lon0, lat0, span_deg, zoom, out_px)
     except Exception as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"{body_cfg['ja']}の地図の取得に失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"{body_cfg['ja']}の地図の取得に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": body_cfg["attrib"]},
         )
     img = sv["img"]

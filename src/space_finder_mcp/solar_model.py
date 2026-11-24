@@ -15,6 +15,7 @@ import math
 import requests
 
 from .cache import TTL_DAILY, ttl_cache
+from .input_utils import json_object
 from .img_common import body_rgb, symbol_rgb
 
 # JPL SBDB への問い合わせに使う UA（データ源ごとに名乗りを分ける）
@@ -67,7 +68,7 @@ def _sbdb_elements(sstr):
                      params={"sstr": sstr, "full-prec": "true", "phys-par": "true"},
                      headers=UA, timeout=(25, 25))
     r.raise_for_status()
-    d = r.json()
+    d = json_object(r)
     if "orbit" not in d or "elements" not in d["orbit"]:
         raise ValueError("軌道要素が見つかりません")
     elems = {el["name"]: el["value"] for el in d["orbit"]["elements"]}

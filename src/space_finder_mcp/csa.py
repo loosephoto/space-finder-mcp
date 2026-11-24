@@ -19,7 +19,7 @@ from requests.adapters import HTTPAdapter
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, ttl_cache, is_error_result
-from .input_utils import as_int, as_list
+from .input_utils import as_int, as_list, error_brief
 
 CKAN = "https://donnees-data.asc-csa.gc.ca/api/3/action"
 UA = {"User-Agent": "space-finder-mcp/0.2 (MCP; CSA Open Data)"}
@@ -79,7 +79,7 @@ def csa_dataset_search(query: str = "", limit: int = 10) -> CallToolResult:
         d = _ckan("package_search", params)
     except requests.RequestException as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"CSA ポータルへの接続に失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"CSA ポータルへの接続に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": "donnees-data.asc-csa.gc.ca"},
         )
     if not d.get("success"):

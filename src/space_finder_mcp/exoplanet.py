@@ -25,7 +25,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, is_error_result, ttl_cache
-from .input_utils import as_float, as_int
+from .input_utils import as_float, as_int, error_brief
 from .name_common import JA_ALIASES, expand_terms
 
 TAP = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
@@ -60,7 +60,7 @@ def _tap(adql: str) -> tuple:
         r = requests.get(TAP, params={"query": adql, "format": "json"},
                          headers=UA, timeout=TIMEOUT)
     except requests.RequestException as e:
-        return None, "Exoplanet Archive に接続できません: {}".format(str(e)[:120])
+        return None, "Exoplanet Archive に接続できません: {}".format(error_brief(e))
     if r.status_code != 200:
         detail = " ".join((r.text or "").split())[:160]
         return None, "Exoplanet Archive が status={} を返しました（{}）".format(

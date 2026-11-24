@@ -44,7 +44,7 @@ from .surface_map import (draw_marker, fit_font_for_width, marker_scan_radius,
 from .img_common import (figure_notes, figure_payload, figure_text_block,
                          load_font, media_link_line, primary_spec,
                          save_output, scale_spec, view_spec)
-from .input_utils import as_float, as_int
+from .input_utils import as_float, as_int, error_brief
 
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
 # 画像・配布物ホスト（Wikimedia）は短時間の連続取得を制限するので識別可能な UA を付ける
@@ -262,7 +262,7 @@ def _fmt_lon(lon_e: float) -> str:
 
 def _lunar_rover_result(site: dict, rv: str, rover_ja: str, body_cfg: dict,
                         *, zoom: Optional[int] = None, span_deg: float = 1.0,
-                        out_px: int = 1200) -> CallToolResult:
+                        out_px: int = 1200, show_sites: bool = True) -> CallToolResult:
     """月面ローバーの 2 段構え図（位置図 + 局地サイトプラン）を返す。
 
     位置図 = 天体面地図（等角図法、着陸地点と近隣の着陸地点）
@@ -280,22 +280,25 @@ def _lunar_rover_result(site: dict, rv: str, rover_ja: str, body_cfg: dict,
     lat0, lon0 = _sp.site_center(site)
     lon0 = ((float(lon0) + 180.0) % 360.0) - 180.0
 
-    # 近隣の着陸地点（同じ天体の別ミッション。planetary_map の SITES = 一次情報）
+    # 近隣の着陸地点（同じ天体の別ミッション。planetary_map の SITES = 一次情報）。
+    # show_sites=False は「ほかの着陸地点を描かない」指定なので、位置図に重ねない
+    # （旧実装は月面経路で show_sites を受け取らず、常に描いていた）。
     nearby = []
-    try:
-        from .planetary_map import SITES as _SITES
-        for key, st in (_SITES.get("moon") or {}).items():
-            if key in ("mcgetchin", "falcon9"):
-                continue
-            nearby.append({"ja": st.get("ja", key), "lat": st["lat"], "lon": st["lon"],
-                           "key": key})
-    except Exception:
-        pass
+    if show_sites:
+        try:
+            from .planetary_map import SITES as _SITES
+            for key, st in (_SITES.get("moon") or {}).items():
+                if key in ("mcgetchin", "falcon9"):
+                    continue
+                nearby.append({"ja": st.get("ja", key), "lat": st["lat"], "lon": st["lon"],
+                               "key": key})
+        except Exception:
+            pass
 
     # 位置図の画角: 近隣の着陸地点が収まるように決める。
     # 例: アポロ12号の LM とサーベイヤー3号は約 0.4 km 離れている（同一クレーター内）。
     # 近傍の着陸地点があればそれを、なければ既定値（1°）を使う。
-    sp = max(0.05, float(span_deg))
+    sp = as_float(span_deg, 1.0, 0.05, 30.0) or 1.0
     _near = []
     for nb in nearby:
         _dlon = abs(((float(nb["lon"]) - lon0 + 180.0) % 360.0) - 180.0)
@@ -317,7 +320,7 @@ def _lunar_rover_result(site: dict, rv: str, rover_ja: str, body_cfg: dict,
     # 画角 / 0.703125 がその画角を満たす最小タイル段になる。
     z = as_int(zoom, None, 4, body_tiles["maxzoom"])
     if z is None:
-        _sp0 = max(0.05, float(span_deg))
+        _sp0 = as_float(span_deg, 1.0, 0.05, 30.0) or 1.0
         z = 0
         while z < body_tiles["maxzoom"] and (360.0 / (2 ** (z + 1))) > _sp0:
             z += 1
@@ -329,7 +332,7 @@ def _lunar_rover_result(site: dict, rv: str, rover_ja: str, body_cfg: dict,
             radius_m=_sp.MOON_RADIUS_M, nearby=nearby)
     except Exception as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"月面遺跡の図の生成に失敗: {e}")],
+            content=[TextContent(type="text", text=f"月面遺跡の図の生成に失敗: {error_brief(e)}")],
             structuredContent={"error": str(e), "rover": rv})
 
     img = comp["img"]
@@ -543,9 +546,15 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
     # 月面の各機材は 8〜165 m の範囲に収まるが、等角図法の天体面地図は
     # 1px あたり数百 m〜20 km なので**どのズームでも 1 画素に収まらない**。
     # そのため (1) 位置図 と (2) メートル単位の局地サイトプラン の 2 枚を合成して 1 枚にする。
+    # `span_deg` / `out_px` は**ここで**検証する。旧実装は月面分岐の return が
+    # 検証行より前だったため、`span_deg="abc"` で ValueError、`span_deg=None` で
+    # TypeError がツール外へ漏れていた（実測）。
+    span_deg = as_float(span_deg, 0.5, 0.05, 30.0)
+    out_px = as_int(out_px, 1000, 300, 2000)
     if lunar_site is not None:
         return _lunar_rover_result(lunar_site, rv, rover_ja, body_cfg,
-                                   zoom=zoom, span_deg=span_deg, out_px=out_px)
+                                   zoom=zoom, span_deg=span_deg, out_px=out_px,
+                                   show_sites=show_sites)
 
     # 座標指定の相互排他チェック（東向き正と西向き正を同時に受けない）
     site_lon = as_float(site_lon, None, -360.0, 360.0)
@@ -556,6 +565,11 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
             content=[TextContent(type="text", text="site_lon（東向き正）と site_lon_w（西向き正）は同時に指定できません。どちらか一方を指定してください。")],
             structuredContent={"error": "conflicting longitude", "rover": rv},
         )
+    if site_lat is None and (site_lon is not None or site_lon_w is not None):
+        return CallToolResult(
+            content=[TextContent(type="text", text="site_lon / site_lon_w を指定したら site_lat も指定してください。")],
+            structuredContent={"error": "incomplete site coordinates", "rover": rv},
+        )
     if site_lat is not None and (site_lon is None and site_lon_w is None):
         return CallToolResult(
             content=[TextContent(type="text", text="site_lat を指定したら site_lon（東向き正）または site_lon_w（西向き正）も指定してください。")],
@@ -564,8 +578,6 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
     # 内部値は東向き正に揃える
     if site_lon_w is not None:
         site_lon = (360.0 - site_lon_w) % 360.0
-    span_deg = as_float(span_deg, 0.5, 0.05, 30.0)
-    out_px = as_int(out_px, 1000, 300, 2000)
 
     # ---- 位置データ（データ源ごと）----
     ptype = rcfg["pos"]["type"]
@@ -638,7 +650,7 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
                               regional_dim=None)      # ローバー図は減光しない（従来の見た目を維持）
         except Exception as e:
             return CallToolResult(
-                content=[TextContent(type="text", text=f"{body_cfg['ja']}地図タイル取得に失敗: {e}")],
+                content=[TextContent(type="text", text=f"{body_cfg['ja']}地図タイル取得に失敗: {error_brief(e)}")],
                 structuredContent={"error": str(e)},
             )
         attrib = body_tiles["attrib"]
@@ -654,7 +666,7 @@ def planetary_rover_location_map(body: str = "mars", rover: str = "perseverance"
                             crop=img_cfg.get("crop"))
         except Exception as e:
             return CallToolResult(
-                content=[TextContent(type="text", text=f"{body_cfg['ja']}の全球地図の取得に失敗: {e}")],
+                content=[TextContent(type="text", text=f"{body_cfg['ja']}の全球地図の取得に失敗: {error_brief(e)}")],
                 structuredContent={"error": str(e), "source": img_cfg.get("credit", "")},
             )
         zoom = None

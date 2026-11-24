@@ -11,6 +11,8 @@ from __future__ import annotations
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .input_utils import json_object, error_brief
+
 # Mars Weather (認証不要)
 MARS_WEATHER = "https://mars.nasa.gov/rss/api/"
 
@@ -43,7 +45,7 @@ def _get_mars_weather(rover: str) -> dict:
         "feed": "weather", "category": cat, "feedtype": "json", "ver": "1.0",
     }, headers=UA, timeout=(25, 25))
     r.raise_for_status()
-    d = r.json()
+    d = json_object(r)
     soles = d.get("soles", [])
     return soles[0] if soles else {}
 
@@ -65,7 +67,7 @@ def mars_rover_status(rover: str = "curiosity", show_photos: bool = True) -> Cal
         weather = _get_mars_weather(rover)
     except requests.RequestException as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"Mars Weather API への接続に失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"Mars Weather API への接続に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": "mars.nasa.gov/rss/api"},
         )
 

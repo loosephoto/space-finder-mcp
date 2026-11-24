@@ -80,6 +80,28 @@ class InputUtilsShapeTests(unittest.TestCase):
         self.assertEqual(input_utils.as_int(5, 7, minimum=float("inf")), 5)
         self.assertEqual(input_utils.as_int(5, 7, maximum=float("nan")), 5)
 
+    def test_json_object_falls_back_on_non_dict(self):
+        """HTTP 200 でも dict でない JSON（null / list / HTML）を {} に落とす。
+
+        実測: Open-Meteo が `null` を返したとき `d = r.json(); d.get("hourly")` が
+        `'NoneType' object has no attribute 'get'` でツール外へ漏れていた。
+        """
+        class R:
+            def __init__(self, value=None, raw=None):
+                self._v, self._raw = value, raw
+
+            def json(self):
+                if self._raw is not None:
+                    raise ValueError(self._raw)
+                return self._v
+
+        self.assertEqual(input_utils.json_object(R({"a": 1})), {"a": 1})
+        self.assertEqual(input_utils.json_object(R(None)), {})
+        self.assertEqual(input_utils.json_object(R([1, 2])), {})
+        self.assertEqual(input_utils.json_object(R("x")), {})
+        self.assertEqual(input_utils.json_object(R(raw="Expecting value")), {})
+        self.assertEqual(input_utils.json_object(R(None), {"d": 1}), {"d": 1})
+
 
 class NameResolverContractTests(unittest.TestCase):
     """通信断を「名前が解決できない」と誤案内しない。"""
@@ -1508,5 +1530,91 @@ class LabelBoxGeometryTests(unittest.TestCase):
         self.assertGreater(box["y1"], box["y0"])
 
 
+
+
+class ErrorBriefTests(unittest.TestCase):
+    """content 本文のエラー文は人間向けに短く（生の例外 repr は structuredContent 側へ）。"""
+
+    def test_requests_exceptions_become_short_human_text(self):
+        import requests
+        from space_finder_mcp import input_utils
+        raw = ("HTTPSConnectionPool(host='api.open-notify.org', port=80): Max retries exceeded "
+                "with url: /iss-now.json (Caused by ConnectTimeoutError(<HTTPConnection...>, "
+                "'Connection to api.open-notify.org timed out. (connect timeout=20)'))")
+        brief = input_utils.error_brief(requests.exceptions.ConnectTimeout(raw))
+        self.assertEqual(brief, "api.open-notify.org への接続がタイムアウトしました（タイムアウト 20 秒）")
+        brief = input_utils.error_brief(requests.exceptions.ReadTimeout(
+            "HTTPSConnectionPool(host='geoservice.dlr.de', port=443): Read timed out. (read timeout=30)"))
+        self.assertEqual(brief, "geoservice.dlr.de からの応答がタイムアウトしました（タイムアウト 30 秒）")
+        resp = requests.models.Response()
+        resp.status_code = 404
+        resp.url = "https://simbad.cds.unistra.fr/simbad/sim-tap/sync"
+        brief = input_utils.error_brief(requests.exceptions.HTTPError("404", response=resp))
+        self.assertEqual(brief, "サーバーが HTTP 404 を返しました（simbad.cds.unistra.fr）")
+        brief = input_utils.error_brief(requests.exceptions.ConnectionError(
+            "HTTPSConnectionPool(host='ws.cadc.example', port=443): Max retries exceeded with url: /x"))
+        self.assertEqual(brief, "ws.cadc.example に接続できませんでした")
+
+    def test_html_and_long_strings_are_tidied(self):
+        from space_finder_mcp import input_utils
+        self.assertIn("HTML", input_utils.error_brief("<!doctype html><html><head>"))
+        brief = input_utils.error_brief("x" * 300)
+        self.assertEqual(len(brief), 120)
+        self.assertTrue(brief.endswith("…"))
+        self.assertEqual(input_utils.error_brief(ValueError("存在しない暦日です: 2026-02-31")),
+                         "存在しない暦日です: 2026-02-31")
+
+    def test_error_result_keeps_raw_detail_in_structured_content_only(self):
+        """ネットワーク断のエラー結果でも content は人間向け（repr は structuredContent.error へ）。"""
+        import requests
+        from space_finder_mcp import iss as iss_mod
+        raw = ("HTTPSConnectionPool(host='api.open-notify.org', port=80): Max retries exceeded "
+               "with url: /iss-now.json")
+        def boom(*a, **k):
+            raise requests.exceptions.ConnectTimeout(raw)
+        orig = requests.get
+        requests.get = boom
+        try:
+            res = iss_mod.iss_now()
+        finally:
+            requests.get = orig
+        text = res.content[0].text
+        self.assertNotIn("ConnectionPool", text)
+        self.assertNotIn("Max retries", text)
+        self.assertIn("api.open-notify.org", text)
+        self.assertIn("Max retries", res.structuredContent["error"])
+
+
+class LaunchMarkdownTests(unittest.TestCase):
+    """打ち上げ一覧はマークダウン表（セル内の | はエスケープ・説明文の生 CR は正規化）。"""
+
+    class _Resp:
+        status_code = 200
+        headers = {}
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return {"results": [{
+                "name": "Soyuz 2.1b | Progress MS-36 (97P)",
+                "window_start": "2026-11-24T10:17:00Z",
+                "status": {"name": "Go for Launch"},
+                "pad": {"location": {"name": "Baikonur Cosmodrome"},
+                        "launcher": {"name": "Soyuz 2.1b"}},
+                "mission": {"description": "Resupply.\r\r\n\r\r\nSecond paragraph."},
+            }]}
+
+    def test_upcoming_launches_renders_a_table(self):
+        import requests
+        from space_finder_mcp import launch as L
+        with mock.patch.object(requests, "get", lambda *a, **k: self._Resp()):
+            res = L.upcoming_launches.__wrapped__()
+        text = res.content[0].text
+        self.assertIn("| # | 打ち上げ | 日時（UTC） | 状態 | ロケット | 射場 |", text)
+        self.assertIn("|---|---|---|---|---|---|", text)
+        # セル内の | はエスケープされる（GFM の表区切りと衝突するため）
+        self.assertIn("Soyuz 2.1b \\| Progress MS-36 (97P)", text)
+        self.assertNotIn("\r", text)
+        self.assertIn("ミッション概要:", text)
+        self.assertIn("Resupply. Second paragraph.", text)
 if __name__ == "__main__":
     unittest.main()

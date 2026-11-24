@@ -42,7 +42,7 @@ from . import http_retry
 from .ephemeris import EphemerisUnavailable, error_result
 from .img_common import (figure_notes, figure_payload, figure_text_block, load_font,
                          media_link_line, save_output)
-from .input_utils import as_int
+from .input_utils import as_int, json_object
 from .launch import blocked_left, blocked_message, note_429, reset_blocked
 from .solar_eclipse import _load, _local_tz, _resolve_place, _tz_label
 
@@ -133,7 +133,7 @@ def _ll2_fetch(first: dt.date, nxt: dt.date):
         if r.status_code != 200:
             return [], "Launch Library 2 が HTTP {} を返しました".format(r.status_code)
         try:
-            body = r.json()
+            body = json_object(r)
         except ValueError as ex:
             return [], "Launch Library 2 の応答を解釈できません: {}".format(ex)
         reset_blocked()                          # 成功したら遮断の記憶を解除する

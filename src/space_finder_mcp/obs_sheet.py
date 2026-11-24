@@ -20,7 +20,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .img_common import (encode_jpeg, figure_notes, figure_payload, figure_text_block,
                          load_font, media_link_line, save_output, scale_spec, view_spec)
-from .input_utils import as_float
+from .input_utils import as_float, error_brief
 
 BG, PANEL, LINE = (12, 14, 22), (18, 20, 30), (58, 64, 82)
 FG, DIM, ACC = (236, 240, 250), (150, 158, 176), (255, 214, 120)
@@ -303,7 +303,7 @@ def observing_sheet(place=None, lat=None, lon=None, band="infrared"):
         from PIL import Image
         sat_img, sat_obs = Image.open(io.BytesIO(raw)).convert("RGB"), obs
     except Exception as e:
-        sat_note = "衛星: 取得できませんでした（{}）".format(str(e)[:80])
+        sat_note = "衛星: 取得できませんでした（{}）".format(error_brief(e))
 
     panels, rain_note = None, ""
     try:
@@ -312,7 +312,7 @@ def observing_sheet(place=None, lat=None, lon=None, band="infrared"):
             src = Image.open(io.BytesIO(ri["images"][1]["bytes"])).convert("RGB")
             panels = [src.crop(b) for b in ((26, 144, 686, 804), (712, 144, 1372, 804))]
     except Exception as e:
-        rain_note = "雨雲: 取得できませんでした（{}）".format(str(e)[:80])
+        rain_note = "雨雲: 取得できませんでした（{}）".format(error_brief(e))
 
     # hours は「暗い時間帯の全時刻」（night_hours）。`hourly` は観測好機の時間だけなので、
     # それを渡すと曇りの棒が描けない（旧実装）。古いサーバとの互換で hourly に落とす。

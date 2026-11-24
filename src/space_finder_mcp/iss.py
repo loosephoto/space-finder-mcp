@@ -12,6 +12,8 @@ from __future__ import annotations
 import requests
 from mcp.types import CallToolResult, TextContent
 
+from .input_utils import json_object, error_brief
+
 BASE = "http://api.open-notify.org"
 UA = {"User-Agent": "space-finder-mcp/0.8 (MCP; Open Notify ISS)"}
 
@@ -28,10 +30,10 @@ def iss_now() -> CallToolResult:
     try:
         r = requests.get(f"{BASE}/iss-now.json", headers=UA, timeout=(20, 20))
         r.raise_for_status()
-        d = r.json()
+        d = json_object(r)
     except requests.RequestException as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"ISS 位置の取得に失敗しました（Open Notify は HTTP のみ対応）: {e}")],
+            content=[TextContent(type="text", text=f"ISS 位置の取得に失敗しました（Open Notify は HTTP のみ対応）: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": "api.open-notify.org"},
         )
     pos = d.get("iss_position", {})

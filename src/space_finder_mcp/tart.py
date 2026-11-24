@@ -16,7 +16,7 @@ from typing import Optional
 
 import requests
 from mcp.types import CallToolResult, TextContent
-from .input_utils import as_float, as_int
+from .input_utils import as_float, as_int, error_brief
 
 CATALOG = "https://tart.elec.ac.nz/catalog/catalog"
 UA = {"User-Agent": "space-finder-mcp/0.18 (MCP; TART source catalog)"}
@@ -71,7 +71,7 @@ def radio_sources_now(lat: Optional[float] = None,
     except requests.RequestException as e:
         return CallToolResult(
             content=[TextContent(type="text",
-                                 text=f"TART 電波源カタログ取得に失敗しました。{str(e)[:100]}")],
+                                 text=f"TART 電波源カタログ取得に失敗しました。{error_brief(e)}")],
             structuredContent={"error": str(e)[:200], "source": "tart.elec.ac.nz/catalog"},
         )
     except ValueError:

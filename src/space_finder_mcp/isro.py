@@ -12,7 +12,7 @@ import requests
 from mcp.types import CallToolResult, TextContent
 
 from .cache import TTL_DAILY, ttl_cache, is_error_result
-from .input_utils import as_int, as_list
+from .input_utils import as_int, as_list, json_object, error_brief
 
 BASE = "https://isro.vercel.app/api"
 UA = {"User-Agent": "space-finder-mcp/0.2 (MCP; ISRO data)"}
@@ -30,7 +30,7 @@ def _fetch(kind: str) -> list[dict]:
     ep, key, _ = _ENDPOINTS[kind]
     r = requests.get(f"{BASE}/{ep}", headers=UA, timeout=(25, 25))
     r.raise_for_status()
-    d = r.json()
+    d = json_object(r)
     return as_list(d.get(key))
 
 
@@ -70,7 +70,7 @@ def isro_data(kind: str = "spacecrafts", query: Optional[str] = None,
         rows = _fetch(kind)
     except requests.RequestException as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"ISRO API への接続に失敗しました: {e}")],
+            content=[TextContent(type="text", text=f"ISRO API への接続に失敗しました: {error_brief(e)}")],
             structuredContent={"error": str(e), "source": "isro.vercel.app"},
         )
 

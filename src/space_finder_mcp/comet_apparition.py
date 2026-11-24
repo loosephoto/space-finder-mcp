@@ -28,7 +28,7 @@ from .img_common import (conic_from_elements, figure_notes, figure_payload,
                          figure_text_block, load_font, media_link_line, save_output,
                          scale_spec, view_spec)
 from .ephemeris import EphemerisUnavailable
-from .input_utils import as_int
+from .input_utils import as_int, error_brief
 from .solar_system import (_comet_elements, _comet_unknown_hint, _horizons_cmd_for,
                            _horizons_vectors_range, _load, _resolve_when, _sbdb_elements,
                            comet_xyz_from_elements, norm_orbit_el, peri_times)
@@ -611,7 +611,7 @@ def _apparition_data(name: str, when_iso, days, before, samples) -> dict:
         cid, el = _comet_elements(name)
     except Exception as e:
         return {"error": "彗星 {} の軌道要素を取得できませんでした（{}）".format(
-            name, str(e)[:150]), "hint": _comet_unknown_hint(name)}
+            name, error_brief(e)), "hint": _comet_unknown_hint(name)}
     nel = _norm_elements(cid, el)
     if not nel.get("q") or nel.get("tp") is None:
         return {"error": "{} は近日点通過時刻(tp)・近点距離(q)が取得できないため、"
@@ -956,6 +956,6 @@ def comet_apparition_result(name: str, when_iso=None, days=180, before=30,
                                   altText="{} の見え方チャート".format(nel["fullname"]))],
             structuredContent=sc)
     except Exception as e:                     # 例外をツール外へ出さない（規約1）
-        msg = "彗星の見え方チャートの作成に失敗しました: {}: {}".format(type(e).__name__, str(e)[:180])
+        msg = "彗星の見え方チャートの作成に失敗しました: {}: {}".format(type(e).__name__, error_brief(e))
         return CallToolResult(content=[TextContent(type="text", text=msg)],
                               structuredContent={"error": msg, "query": str(name)})
